@@ -22,7 +22,7 @@ Current profile maturity:
 | I2C, SPI | Architecturally placed (`CORE §1.7`); no transaction format |
 | Shared memory, FPGA FIFO | Simplest case; minimal profile needed |
 
-No profile here is frozen, and none should be treated as an interoperability contract (`CORE §27`).
+No profile here is frozen, and none should be treated as an interoperability contract (`CONFORM §4`).
 
 ---
 
@@ -140,7 +140,29 @@ routing                 representable by CAN ID
 
 CAN DLC gives the actual payload length; the Service payload length is `DLC - 1`. There is no aggregate CRC in this form — native CAN frame integrity is sufficient.
 
-An **N=1-only node is a valid and useful WireSpaces device**. It can still support selected Common Services, up to 96 compact user EIDs in the current NS0 allocation (`CORE §8.3`), commands/status, identity, health, small telemetry, and simple device control. It does not need General PDUA to be considered a real WS node.
+An **N=1-only node is a valid and useful WireSpaces device**. It can still support selected Common Services, up to 96 compact user EIDs in the current NS0 allocation (§2.4), commands/status, identity, health, small telemetry, and simple device control. It does not need General PDUA to be considered a real WS node.
+
+### Namespace 0 compact EID allocation
+
+The optimized Classical-CAN N=1 form can directly represent `Namespace 0, EndpointId 1..127`. The current preferred split of that scarce space is:
+
+```text
+EID 0         invalid/reserved
+
+EID 1..31     Core/Common FOSS services
+              scarce optimized allocations
+
+EID 32..127   user/deployment services
+              96 optimized N=1 IDs
+
+EID 128..65535
+              normal Namespace-0 user space
+              not representable by optimized N=1 CAN
+```
+
+The `1..31` Common region should be allocated **slowly and cautiously**. It is a reserved ceiling, not a quota to fill. If the ecosystem eventually needs fewer optimized Common IDs and users need more compact IDs, the boundary may move downward while unallocated IDs remain available.
+
+Broader ecosystem allocation hierarchy for Namespace 3 and compact Common Services is in `FUTURE §8.1`.
 
 ## 2.5 General PDUA frame layout
 
@@ -163,15 +185,17 @@ bytes 1..7  next 0..7 PDU bytes
 `PduControl`:
 
 ```text
-Namespace               2
-TransportType           3
-HasHeaderExtensions     1
-EndpointId[9:8]         2
+EndpointId[9:8]         2   // bits 7..6
+Namespace               2   // bits 5..4
+HasHeaderExtensions     1   // bit  3
+TransportType           3   // bits 2..0
 --------------------------
                         8
 ```
 
 `EndpointId[9:8]` and byte 2 form one direct 10-bit value.
+
+The field order is not arbitrary. `PduControl` carries the same three fields as the canonical `Control` byte plus `EndpointId[9:8]` where `Control` carries QoS — QoS itself travels in the CAN identifier (§2.2) and is never duplicated here. Placing each byte's distinct 2-bit field at bits 7..6 makes the remaining **six bits identical in both**, so conversion is one mask and one OR in each direction rather than three shifts (`BITS §4`). Because the two bytes never appear together in one frame, they cannot disagree and no cross-check is required.
 
 Encoding selection on TX is mandatory rather than free:
 
@@ -203,7 +227,7 @@ Anything routinely needing more than eight Classical CAN frames should be segmen
 
 This is a Wiring and tooling policy, not a protocol maximum — the encoding permits `N = 8` at any QoS. Configuring a larger value requires explicit justification against bus load, worst-case latency for lower classes, starvation, and reassembly-context cost. The interaction with local scheduling is `CORE §14.2`: a local scheduler cannot fix this, because the frames it is emitting are the ones causing it.
 
-A second reason to keep `N` small on CAN is that fragmentation multiplies loss — see `CORE §27.2`.
+A second reason to keep `N` small on CAN is that fragmentation multiplies loss — see `CONFORM §3`.
 
 ## 2.7 FrameControl byte
 

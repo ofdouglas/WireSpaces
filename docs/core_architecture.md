@@ -2,7 +2,7 @@
 
 **Status:** Private first draft; working architecture; provisional but intended to be buildable  
 **Scope:** The protocol model and node runtime. Everything here is meant to be implementable now  
-**Excluded:** Per-carrier encodings (`LINK`), configuration and tooling (`DEPLOY`), undesigned material (`FUTURE`)
+**Excluded:** Per-carrier encodings (`LINK`), configuration and tooling (`DEPLOY`), test vectors (`CONFORM`), implementation notes (`IMPL`), undesigned material (`FUTURE`)
 
 This is the main WireSpaces document. It is **not a normative protocol specification**: byte-exact Link encodings, CRC parameters, API signatures, timing requirements, and registry allocations belong to `LINK` or to narrower profile specifications. Where this document gives a concrete field width or behavior, it means "current agreed direction" unless the text says it is frozen.
 
@@ -126,31 +126,64 @@ An Endpoint Domain is **logical**. It is not necessarily a device, a CPU, an MCU
 
 The Dispatcher need not be one task or one object. It may be a generated table, a `switch`, a distributed implementation, or a hardware block. What matters is that the Domain has **one coherent dispatch and authority decision** — two mechanisms independently deciding what a Domain accepts is two Domains.
 
+An Endpoint Domain is also a **concurrency scope**. Where its Endpoints permit several writers (§9.6), the Domain must provide a mechanism that serializes them:
+
+> **An Endpoint Domain provides whatever mechanism serializes concurrent writers to its Endpoints. The mechanism is implementation-defined; WireSpaces specifies the required property, never the primitive.**
+
+On a single-core or AMP MCU a short interrupt-masked critical section is usually sufficient, because another core is not a concurrent writer into this Domain's storage — it arrives through an inter-core Link whose local receive driver is an ordinary producer here (§13.2). On SMP hardware, masking interrupts on one core excludes nothing on another, so a genuinely inter-core primitive is required; a bounded operation under a short platform-appropriate lock is a perfectly good implementation and no lock-free structure is implied. In RTL there is no lock at all — a single write port or an arbiter satisfies the requirement directly, which is why it is stated as serialization rather than mutual exclusion.
+
+What the serialized region may contain is constrained, and this is what keeps it analyzable: obtain exclusion, check storage state, copy one bounded item, publish, release. No blocking wait, no allocation, no arbitrary application code, statically bounded copy and bookkeeping, explicit failure when capacity is unavailable. WireSpaces sets no universal time limit such as "under a microsecond"; each platform establishes its own worst-case bound against its interrupt-latency requirements.
+
 Two cautions about the word "Domain":
 
 - **A Domain is not a security boundary by itself.** Typed APIs and static configuration reduce accidental misuse, but enforcement against compromised or untrusted code needs a real protection boundary: MPU/MMU isolation, process isolation, hardware partitioning, or separation into independently protected Domains. See §22.
 - **A Domain is not a Node.** In WireSpaces, `Node` is a *role on a Wire* carrying a NodeId (§3.1). One device may host several Endpoint Domains and be a Node on several Wires, and neither term is a synonym for a device. Older documents used "Node" to mean roughly what this document calls an Endpoint Domain; that usage is superseded.
 
-## 1.6 Port, Endpoint, and Service
+## 1.6 Endpoint and Service
 
 An **Endpoint** is a network/message-visible termination identified by `Namespace + EndpointId`. It may belong to an MCU Service, a host application, a hardware/RTL block, a diagnostic utility, or a gateway-local observer.
 
 Endpoint identity identifies the protocol or recipient semantics. It does **not** by itself determine the Wire on which an autonomous transmission should occur (see §10).
 
-A **Port** is the *local* typed, directional interface at a Service boundary — the thing the Service implementation actually holds and calls. It is software- or RTL-facing and has no network representation of its own.
+An Endpoint is also the local object a Service touches. It owns exactly one bounded storage element with declared semantics (§9.4), so the thing the network addresses and the thing the application code holds are the same object rather than two connected by a registration.
+
+A **Service** is reusable functionality exposed through one or more Endpoints. A Service may run inline in bare metal, in its own RTOS task, with several Services in one task, on another core, on another ECU, in a softcore, or in pure RTL. WireSpaces should not require a specific task model.
+
+### WireSpaces does not define the Service-to-application interface
+
+WireSpaces deliberately says nothing about how a Service exposes itself to the code that uses it. There is no architectural vocabulary for handler registration, publisher objects, accessor APIs, or generated wrappers, and there is no requirement that two implementations offer the same one. Endpoint storage semantics and producer concurrency are expressive enough to build the Services these systems need; everything above that is the Service author's design problem, and the range from a bare-metal `switch` to an RTL register block to a host binding is too wide for one vocabulary to fit.
+
+Two consequences make that silence safe rather than merely convenient.
+
+> **Nothing about a Service's local interface is visible on the wire.** No canonical field encodes it, and restructuring or renaming it is never a protocol change.
+
+> **The silence begins at the storage boundary, not before it.** WireSpaces owns the receive path up to and including acceptance into Endpoint storage, and the transmit path from acceptance into a transmit Endpoint onward. What a Service does on its own side of that boundary — when it drains, how it dispatches internally, what it hands to user code — is entirely its business, and is not permitted to inject work back into the acceptance path (§9.4).
+
+The second is load-bearing. Without it, a Service author can supply a user callback fired from inside acceptance and reintroduce exactly the execution-context coupling that bounded delivery exists to remove.
+
+### The Endpoint API is the portability surface
+
+The silence above the Service must not be mistaken for silence below it. The Endpoint API is where a Service meets WireSpaces, and that surface is intended to be **portable**:
+
+> **A Service's WireSpaces-facing code should compile and behave identically across implementations on comparable technology stacks.** Bounded delivery, Queue and Snapshot semantics, declared writer concurrency, and transmit Endpoints are a contract to Service authors, not merely a description of what an implementation happens to provide.
+
+Three layers, with different rules, and it is worth being explicit about which is which:
 
 ```text
-Port        local typed interface; not visible on any Link
-Endpoint    Namespace + EndpointId; visible in every PDU
+application code        WireSpaces defines nothing here
+    |
+Service                 portable within a declared resource and timing envelope
+    |
+Endpoint API            the portability contract
+    |
+Router / LLL / drivers  freely different per implementation and target
 ```
 
-The distinction matters because the two are not one-to-one. A Port may bind directly to a single Endpoint, or a Service may implement one Port using several Endpoints. `TxBinding` (§10.3) is exactly an output Port: the Service says "send on my telemetry output" and the deployment decides which Wire and Endpoint that becomes. The receive side is the same idea in the other direction — a bound handler or RTL sink is an input Port, and the Dispatcher (§1.5) is what connects an arriving Endpoint identity to it.
+A low-end and a high-end 32-bit MCU can run **identical** Service source over completely different network stacks, task models, and drivers. That is the point: without it there is no Service ecosystem, because every shared Service would need reimplementing per stack, and `SVC-7`'s schema-over-bytes contract would guarantee only that two incompatible implementations agreed on the bytes.
 
-Nothing in the canonical PDU carries Port identity. A Port is a local binding artifact only, and renaming or restructuring Ports is not a protocol change.
+Portability is bounded rather than absolute, in exactly the way link independence is (`SVC-2`). A Service remains portable within its declared **resource and timing envelope**: Endpoint storage that does not fit the target's RAM, or a consumer cadence the target's scheduler cannot meet, makes a Service unplaceable there no matter how unchanged its source is. And a Service reaching outside WireSpaces — for timers, storage, GPIO, an RTOS API — is portable only as far as those dependencies are, which is the Service author's problem and is why composed or injected dependencies matter more here than they would in application code.
 
-A **Service** is reusable functionality exposed through one or more Endpoints, with Ports as its local interface. A Service may run inline in bare metal, in its own RTOS task, with several Services in one task, on another core, on another ECU, in a softcore, or in pure RTL. WireSpaces should not require a specific task model.
-
-Whether Ports become a generated API concept, or remain purely an architectural term describing what `TxBinding` and handler registration already do, is open (`REG §6`).
+This raises the stakes on the Endpoint API's shape. Names, capacity declaration, and the way the decoded representation is expressed stop being cosmetic once they are the surface Services are written against, which is why they are tracked as open questions rather than left to the first implementation (`REG §6.12`).
 
 ## 1.7 Master-initiated and polled Links
 
@@ -168,7 +201,7 @@ None of that makes the LLL a producer:
 
 The practical consequences are worth stating, because they are easy to get wrong:
 
-- A polled Node's publication is stale by up to one polling interval. That latency is a Link capability fact (§17), not a Service behavior, and it is exactly the kind of thing freshness handling (§21.6) exists to expose.
+- A polled Node's publication is stale by up to one polling interval. That latency is a Link capability fact (§17), not a Service behavior, and it is exactly the kind of thing freshness handling (§21.4) exists to expose.
 - The master's polling cadence bounds the Node's effective TX rate, so static capacity checking (`DEPLOY §2.2`) has to account for it.
 - A poll that returns nothing is not an error. An empty response is the normal case on a mostly idle Link and must not be counted as a Link fault (§18.1).
 - QoS on a polled Link is limited by cadence, not arbitration. A Critical publication cannot beat the next poll, so such Links are usually QoS-Minimal (§14.1).
@@ -193,6 +226,8 @@ The old term **Link Engine** should not be used as a catch-all for routing. Link
 
 A generalized **Router Port** abstraction is not currently needed. Inter-core and internal communication channels are ordinary Link Interfaces.
 
+**Port** as an architectural term is also retired. It named the local typed interface at a Service boundary, as distinct from the network-visible Endpoint, and it was needed while delivery meant invoking a handler — the function a Service wrote was genuinely a different object from the identity the Dispatcher resolved. Bounded storage delivery collapses those into one object (§1.6), so the term now classifies without constraining. The property it carried survives without it: a Service's local interface never appears in a PDU. `TxBinding` becomes a transmit Endpoint (§10.3).
+
 Three further terms from the earliest generation have no current equivalent:
 
 ```text
@@ -211,29 +246,29 @@ The current canonical base descriptor is **40 bits / 5 bytes**.
 
 ```text
 Control: 8 bits
+    QoS                   2  // MSB of Qos is MSB of Control
     Namespace             2
-    TransportType         3
-    QoS                   2
     HasHeaderExtensions   1
+    TransportType         3  // LSB of TransportType is LSB of Control
 
 RoutingWord: 16 bits
-    WireNumber           10
     Direction             1
     NodeId                5
+    WireNumber           10
 
 EndpointId: 16 bits
 --------------------------------
 Base descriptor:         40 bits
 ```
 
-Exact physical bit ordering is a wire-format/profile concern. The architectural significance is the field width and meaning.
+The architectural significance here is field width and meaning. Exact bit placement within the descriptor is fixed in `BITS §2`–`§3`, and profile identifier layouts remain a `LINK` concern.
 
-**Byte order is settled even though bit packing is not.** Wherever any representation serializes a literal multi-byte numeric value, WireSpaces uses **little-endian** order. So once a profile has fixed field significance, a literal five-byte descriptor serializes as `Control`, then the low and high bytes of the Wire/routing word, then the low and high bytes of `EndpointId`.
+**Byte order is settled.** Wherever any representation serializes a literal multi-byte numeric value, WireSpaces uses **little-endian** order, so a literal five-byte descriptor serializes as `Control`, then the low and high bytes of the routing word, then the low and high bytes of `EndpointId`.
 
 Settling this early costs nothing and removes a whole class of divergence between the project's C++, Python, and RTL implementations. Two boundaries keep it honest:
 
-- It applies to **literal multi-byte numeric values only.** Arbitrary-width bit fields packed inside a byte still need profile-exact significance, and nothing here assigns those positions.
-- **Native object layout is never a wire representation.** A C++ `struct`, its padding, its enum widths, and the host's endianness define nothing. Encode and decode explicitly, and test on a big-endian model as well as a little-endian one (§27.1).
+- It applies to **literal multi-byte numeric values only.** Bit placement inside a byte is a separate decision, settled for `Control` and `RoutingWord` in `BITS` and still open for the CAN identifier (`REG §6.8`).
+- **Native object layout is never a wire representation.** A C++ `struct`, its padding, its enum widths, its bitfield allocation order, and the host's endianness define nothing. Encode and decode explicitly, and test on a big-endian model as well as a little-endian one (`CONFORM §2`).
 
 **Reserved fields are rejected, not ignored.** A reserved field is zero on transmit, and a receiver that sees a nonzero reserved field **drops the PDU and counts it** (§18.1) rather than masking the field and proceeding. This is the choice that keeps future field assignment safe: a receiver that ignores reserved bits today cannot be given new meaning for them tomorrow without silently misreading traffic from every older device. Rejecting costs nothing while the fields are unused and preserves the ability to use them.
 
@@ -569,7 +604,7 @@ A peripheral on the same PCB, reached over SPI or I2C, is normally a **separate 
 ```text
 kLocalDomain
 a device-private WireNumber
-Inline delivery
+skipping the Endpoint storage boundary
 skipping Endpoint dispatch
 skipping structural validity checks
 ```
@@ -952,60 +987,11 @@ The NodeId uniqueness requirement has a consequence worth stating explicitly: if
 
 # 7. Default Internal Debug Wire
 
-One particularly useful application of device-private Wires and splicing is a **default debug/maintenance path**.
+A conventional use of device-private Wires and splicing is a **default debug/maintenance path**: Services publish to a device-private `InternalDebugWire`; an explicitly configured splice before egress makes selected traffic visible on a host-facing Wire. Without a splice, device-private traffic stays on the device by construction (`SCOPE-1`).
 
-## 7.1 Motivation
+The splice is the trust boundary where private traffic becomes externally visible. A remote maintenance link should not blindly splice every internal Wire (§22). Host tooling conventions, default `debug_tx` bindings, and the telemetry path are in `DEPLOY §3.4`–`§3.5`.
 
-Before static system allocation, multiple devices cannot safely assume that the same *external* WireNumber refers to their own private debug traffic. Instead, every device may use the same **device-private debug Wire identity** without collision, because that identity never leaves the device unspliced.
-
-```text
-Device
-
- Service A ----\
- Service B -----+---- InternalDebugWire ---- splice ---- host-facing Wire
- Service C ----/                               |
-                                               v
-                                               PC
-```
-
-The Services are Nodes on the internal debug Wire. The effective debug Origin — normally the host — is reachable on the external segment through the splice.
-
-`InternalDebugWire` is a conventional device-private Wire used for internal diagnostics. It is not a new protocol layer.
-
-## 7.2 Host path
-
-Once the device is commissioned:
-
-```text
-InternalDebugWire (e.g. 1020)
-    <splice>
-Wire 101
-    |
-USB / Ethernet / CAN
-    |
-PC
-```
-
-This is also how the Domain Local Link Telemetry Service (§18.4) reaches a host. Telemetry is published to `InternalDebugWire`; the splice is what makes it externally visible. Without a splice, telemetry published to a device-private Wire stays on the device by construction.
-
-## 7.3 Benefits
-
-A reusable Service can have a default injected `debug_tx` binding (§10) without knowing:
-
-- which physical Link reaches the developer;
-- whether the host is USB, UART, CAN, Ethernet, or radio;
-- which external WireNumber has been assigned;
-- whether the device is still in anonymous bring-up mode.
-
-All Services become visible once the splice exists, without each Service being individually reconfigured. Selected Services can later be moved to different application/diagnostic Wires if desired.
-
-This gives WS a useful zero-configuration bring-up path while avoiding accidental external WireNumber collision.
-
-## 7.4 Security boundary
-
-The splice is also where private traffic becomes externally visible, which makes the trust boundary explicit and inspectable. A remote maintenance link should not blindly splice every internal Wire (§22).
-
-**Open:** whether `InternalDebugWire` receives a standard reserved device-private WireNumber, or remains a per-deployment convention.
+**Open:** whether `InternalDebugWire` receives a standard reserved device-private WireNumber, or remains a per-deployment convention (`REG §6.2`).
 
 ---
 
@@ -1041,40 +1027,7 @@ Namespace 3
 
 Namespaces 0-2 provide deployments with large independent user spaces and room for staged upgrades, migrations, or coexistence between generations. Namespace 3 treats the open-source ecosystem as a first-class audience rather than an afterthought. Its registry *process* is `FUTURE §7`; the allocation above is the working plan.
 
-## 8.3 Namespace 0 compact CAN region
-
-The optimized Classical-CAN N=1 form can directly represent `Namespace 0, EndpointId 1..127`. The current preferred split of that scarce space is:
-
-```text
-EID 0         invalid/reserved
-
-EID 1..31     Core/Common FOSS services
-              scarce optimized allocations
-
-EID 32..127   user/deployment services
-              96 optimized N=1 IDs
-
-EID 128..65535
-              normal Namespace-0 user space
-              not representable by optimized N=1 CAN
-```
-
-The `1..31` Common region should be allocated **slowly and cautiously**. It is a reserved ceiling, not a quota to fill. If the ecosystem eventually needs fewer optimized Common IDs and users need more compact IDs, the boundary may move downward while unallocated IDs remain available.
-
-## 8.4 Service allocation hierarchy
-
-```text
-NS0 EID 1..31
-    exceptionally valuable compact Common Services
-
-NS3 EID 1..1023
-    broad FOSS ecosystem Services that must work on General Classical CAN
-
-NS3 EID 1024..65535
-    richer-link ecosystem Services
-```
-
-Not every Service needs to be in the compact Namespace-0 Common region. This avoids wasting the scarce N=1 encoding while leaving the future community ample permanent address space.
+Optimized Classical-CAN encoding limits and Namespace 0 compact Endpoint allocation are profile and ecosystem policy (`LINK §2.4`, `FUTURE §7`, `FUTURE §8`). `CORE` owns only the canonical widths in §8.1–8.2.
 
 ---
 
@@ -1099,7 +1052,7 @@ Endpoint
 The Dispatcher should:
 
 - resolve `(Namespace, EndpointId)` to a registered Endpoint;
-- deliver the complete PDU/message to that Endpoint;
+- offer the complete PDU/message to that Endpoint for acceptance;
 - reject or count unknown EIDs;
 - reject malformed/unsupported local delivery;
 - provide diagnostics/status for delivery errors;
@@ -1107,17 +1060,15 @@ The Dispatcher should:
 
 A richer implementation may also validate expected TransportType, allowed message sizes, direction, and local Service state.
 
-The Dispatcher does **not** decide cross-Link routing.
+The Dispatcher does **not** decide cross-Link routing, and it does **not** execute Service code (§9.4). Note that `kLocalDomain` delivery being "fast" now means it traverses no Link and no framing, not that it skips the storage boundary.
 
 ## 9.2 Endpoint registration
 
 The exact API remains implementation-specific. Expected implementations include static generated tables, fixed arrays, compile-time registration, and host dictionaries/maps on larger systems. The embedded baseline should avoid dynamic allocation requirements.
 
-## 9.3 Endpoint source identity
+## 9.3 Delivered metadata
 
-A received message should have enough context to identify its source unambiguously within the Wire model.
-
-For a named Wire, logical source identity includes at least:
+A received message should have enough context to identify its source unambiguously within the Wire model. For a named Wire, logical source identity includes at least:
 
 ```text
 WireNumber
@@ -1128,86 +1079,172 @@ EndpointId
 
 For an anonymous LocalBus, source identity is scoped by the ingress Link Interface until the Wire is named.
 
-## 9.4 Delivery policies: `Inline` and `Serialized`
-
-Delivery to a local Endpoint has two high-level policies:
+An Endpoint therefore holds **more than a payload.** The consumer can read, where the Endpoint declares it:
 
 ```text
-Inline
-    invoke the target immediately in the producer's context
-
-Serialized
-    queue/copy for later execution in the Service's own context
+source        WireNumber, Direction, NodeId
+              or the ingress Link Interface for an unnamed LocalBus
+class         QoS, TransportType
+extensions    presence, and access to recognized extension content
+arrival       the acceptance timestamp or tick (§9.4)
 ```
 
-`Inline` supports the high-performance receive path:
+`Namespace` and `EndpointId` are the Endpoint's own identity and need no per-message storage.
+
+### Metadata is copied at acceptance, never viewed
+
+It is tempting to hand the consumer a read-only view into the ingress PDU rather than copying anything. Under bounded delivery that cannot work, and the reason is worth being precise about:
+
+> **A view into ingress storage cannot survive the storage boundary.** The consumer reads later, in its own context, by which time the LLL's receive buffer has been reclaimed or reused. Metadata is copied into the Endpoint at acceptance.
+
+This is `§16.1`'s borrowed-view rule meeting deferred consumption: a borrowed view is valid for one documented call or lease scope, and asynchronous delivery has neither. A view was viable under `Inline` precisely because the consumer ran before the buffer was released; withdrawing `Inline` withdraws the view with it. The *API* may still be an opaque read-only accessor — that is good encapsulation and keeps the wire encoding out of Service code — but it is backed by copied fields, not by a pointer into a PDU.
+
+### Metadata is declared, because it is not free
+
+The per-message cost is small but not nothing. Everything varying in the base descriptor packs into **3 bytes**, since the Endpoint's own 18 bits of identity are constant, and an acceptance timestamp adds typically four more. Around 8 bytes per slot with alignment is a fair estimate.
+
+That is negligible on a 512-byte bootloader segment and roughly a doubling on a queue of 8-byte commands, which is exactly the profile where storage was already the constraint (§9.5). So metadata follows the same rule as everything else here — **declared per Endpoint as an immutable property of the Service definition**, not carried unconditionally:
 
 ```text
-Link driver task
-    |
-LLL completes PDU
-    |
-Router lookup
-    |
-Dispatcher lookup
-    |
-Endpoint callback
+payload only      no per-message metadata storage
+with source       source identity, enough to distinguish and answer peers
+full              source, class, extensions, arrival
 ```
 
-No network-stack task is required.
+A statically wired single-peer state consumer needs none of it. A Service that validates by source, answers requests, or reasons about staleness declares what it uses and pays for that. Names here are not frozen (`REG §6.12`).
 
-`Serialized` is the normal RTOS shape. The Endpoint callback should usually do little more than copy/enqueue into the Service's own inbox and return:
+One asymmetry is deliberate: **a Snapshot Endpoint always carries arrival time**, because latest-value semantics without a time basis cannot support freshness at all (§21.4), and a Snapshot is the storage class whose whole purpose is holding state that can go stale. On a Queue, arrival time is declared like the rest.
+
+### Reading a source is not permission to answer it
+
+Source metadata is informational. It is not a transmit capability, and conflating the two would quietly reintroduce the hole `DISP-7` closes:
+
+> **Reading source metadata confers no transmit authority.** A reply is authorized by the receiving Endpoint's registration, never by the fact that a message arrived carrying a Wire and NodeId the Service can read.
+
+The distinction is between two different objects. Metadata is readable and inert. A reply context is opaque, bounded, single-use, and revalidated at transmit (§10.6). A Service that remembers a peer in order to answer it later (§10.2) retains a reply context, not a copy of the source fields it read — and where both exist, the source fields may only *select* among peers the registration already permits, never widen that set.
+
+## 9.4 Delivery crosses a bounded storage boundary
+
+Delivery to a local Endpoint is a storage operation, not a call into the destination:
+
+> **Endpoint delivery never synchronously executes Service application code.** The Dispatcher resolves the destination and asks that Endpoint to accept the message; the Endpoint performs only bounded framework-controlled work. A Service consumes what was accepted later, in a context it owns.
 
 ```text
-CAN task -> Dispatcher -> Service inbox -> Service task
+canonical PDU
+    |
+Router                          caller's context
+    |
+Endpoint Domain Dispatcher      caller's context
+    |
+Endpoint storage                acceptance ends WireSpaces' reach
+    |
+    |   later, in the consumer's own context
+    v
+Service
 ```
 
-A Service may have several Endpoints but one serialized inbox.
+Routing itself stays synchronous and cheap. A Link RX path still calls the Router and the Dispatcher directly against read-mostly tables (§11.2), and no central networking task is introduced. The line is narrower than "no synchronous work":
 
-This distinction matters for **location independence** (§13.4). A Service configured for serialized delivery must remain serialized when its peer moves onto the same MCU, rather than silently becoming an arbitrary cross-thread direct call. WireSpaces cannot eliminate concurrency bugs, but it can preserve explicit delivery semantics across placement changes.
+> **Caller-context routing is permitted. Caller-context execution of destination Service code is not.**
 
-The exact API is not frozen. One constraint on it is worth stating early, though, because it is easy to foreclose by accident:
+### Why the boundary is mandatory rather than optional
 
-> **A callback ABI must not be the only way to receive.** What the architecture requires is a bounded receive-delivery port; a callback is one implementation of it.
+An earlier version of this architecture offered `Inline` and `Serialized` as declared per-Endpoint policies. `Inline` is withdrawn, and the reason is not tidiness:
 
-Equally valid shapes include a consumer-owned `try_receive` or drain interface, a bounded ownership-transfer queue, direct publication into a configured Endpoint storage object, or a thin callback adapter layered over any of those. This matters for RTL and for polled or interrupt-driven bare-metal code, where "call this function pointer from our context" is either awkward or impossible — and more generally because **no Service or Link profile should require arbitrary application code to run inside the LLL's execution context** (§13.3).
+**Inline delivery makes a Link's worst-case execution time depend on every Service that might be delivered to.** A CAN receive task that can synchronously enter application code cannot be analyzed in isolation, and its worst case changes when a deployment adds a Service its author never saw. Everything else follows from that. Message topology stops becoming call topology, so stack depth no longer depends on wiring. A Service can no longer reenter itself because it transmitted while handling a receive. The questions every Service otherwise has to answer — which context invokes me, may I block, am I reentrant, which primitives are safe here — stop having deployment-dependent answers.
 
-Where callbacks *are* offered, four properties are part of the contract rather than implementation detail: the **execution context** they run in, the **work bound** they must respect, the **reentrancy rule**, and the **ownership result** — whether the callee may retain what it was handed (§16.1).
+It also makes the model coherent with its own targets. An RTL Endpoint *is* a FIFO or a register block; there is no callback available, so `Inline` never existed there. Bounded storage is the only delivery model that spans firmware, host software, and RTL without a special case.
 
-## 9.5 Dispatch table synchronization and Endpoint lifetime
+The honest cost is latency. `Inline` was the lowest-latency path, and a storage boundary puts the consumer's scheduling delay into the loop. The trade is deliberate: `Inline` bought lower *typical* latency at the price of an unbounded worst case in the other direction, and for a control system an analyzable bound on both sides is worth more. One practical consequence deserves stating, because it is the difference between microseconds and a full period: a consumer that services its Links and then drains its Endpoints in the same loop iteration pays roughly one copy, while one that drains before servicing pays a whole cycle. Loop ordering is now an application concern worth checking (`CONFORM §3`).
+
+### What acceptance includes
+
+Acceptance is framework work, and two parts of it are required rather than optional.
+
+**Arrival time is captured at acceptance** wherever it is carried at all. With consumer latency now inside the delivery path, a Service can no longer distinguish "produced late" from "consumed late" by observing when it dequeued something, so recording it later is worthless. Freshness handling (§21.4) depends on it — a timestamp or a monotonic tick, per the platform's available time base. Snapshot Endpoints always carry it; a Queue declares it with the rest of its metadata (§9.3).
+
+**Nothing else runs.** Acceptance validates, stores, updates counters, and returns. It does not call application code, allocate, block, or invoke another Endpoint. Whether a narrowly scoped synchronous hook is ever permitted for instrumentation is an open question (`REG §6.12`); no such hook exists today, and application-supplied ones are not in prospect, because an unrestricted user callback recreates precisely the problem this rule removes.
+
+## 9.5 Endpoint storage semantics
+
+Every Endpoint owns **exactly one** storage element, and its semantics are an immutable property of the Service definition rather than a deployment choice. Two models are defined.
+
+A storage element holds **declared metadata plus payload**, not a bare payload (§9.3). Where working names below write a payload type, that type is the payload representation only; it is not the whole slot, and it is not the wire contract (`SVC-7`).
+
+### Queue
+
+History-preserving delivery. Accepted messages are retained in order in statically bounded storage, capacity is known before runtime, and acceptance is non-blocking from the caller's perspective. When no storage is available the message is rejected, and **`Full` is an ordinary bounded-resource outcome, not a fault** (§14.4). Logical capacity means usable slots; no implementation is required to sacrifice one to distinguish full from empty, and the internal representation — a count, monotonic counters, anything bounded — is not part of the contract.
+
+Queues carry events, non-idempotent commands, requests, relative motion, log records, and anything where intermediate values matter. `MoveRelative(+10)` three times is not `MoveRelative(+10)` once.
+
+### Snapshot
+
+Latest-value delivery. The Endpoint holds one coherent complete value, a newly accepted value replaces the previous one, and intermediate values are intentionally coalesced. A **generation counter is required, not optional** — it is the only mechanism by which a reader can distinguish "no new value" from "I missed values," and a Snapshot with no generation is indistinguishable from one whose producer died. A seqlock-style optimistic read is the expected implementation where the value is too large to read under exclusion.
+
+Snapshots carry sensor values, estimated pose, desired actuator state, operating mode, configuration, and setpoints. `SetSpeed(1000, 1100, 1200)` may legitimately be observed only as `SetSpeed(1200)`.
+
+### Choosing between them
+
+The test is semantic, and message naming does not decide it:
+
+> **Snapshot is valid only when processing the newest complete value, without processing every intermediate value, preserves the intended application semantics.**
+
+`SetValvePosition(37%)` is a command that represents state and may use a Snapshot. `AdvanceValve(+1 step)` is a command that represents an event and requires a Queue. This is `OWN-5` at the Endpoint: the two are not interchangeable, and substituting one loses a property the Service was relying on with no counter and no error.
+
+### Capacity is per Endpoint
+
+Depth is declared per Endpoint, never globally, because storage multiplies across Services: ten 48-byte queues of depth three already commits about 1.4 KiB to payload slots before transmit storage. A bootloader is the case that makes this concrete — a segment Endpoint of depth 1 holding one large block alongside a command Endpoint of depth 4 holding small packets is exactly the allocation wanted, and a single global depth gets it wrong in both directions.
+
+Two consequences of a shallow queue are worth naming. **Depth is a statement about the application protocol:** a depth-1 Endpoint asserts that the protocol is lock-step, since a peer that sends block `N+1` before block `N` is consumed will have every other block rejected. That is what bootloaders do anyway, and a rejected block must not advance transfer state (`QOS-9`). And the segment case is where the copy-based baseline costs most — a fragmented block is reassembled in an LLL context and then copied into the Endpoint slot, so the precious buffer exists twice on the target least able to afford it. That is the strongest concrete motivation for the eventual ownership-transfer path (`FUTURE §2.1`).
+
+Whether a small documented default capacity is offered for convenience, or every Queue must spell out its depth, is open (`REG §6.12`).
+
+### Overload behavior
+
+```text
+Queue      try_deliver -> Accepted | Full
+           diagnostics: accepted, rejected_full, high_water_mark
+
+Snapshot   try_deliver -> Accepted (replacing)
+           diagnostics: updates, replacements, generation
+```
+
+A Snapshot has no full condition; successful replacement is successful delivery under its declared semantics. It does have a silent-loss mode, which is what the generation counter and the replacement counter exist to expose.
+
+## 9.6 Producer and consumer multiplicity
+
+Storage semantics and concurrency are separate dimensions, and both are immutable properties of the Service definition. Because they are fixed at definition time rather than configured per deployment, there is nothing for tooling to preserve across a placement change — the guarantee is structural rather than checked.
+
+| | Writers | Readers |
+|---|---|---|
+| **Receive Endpoint** | framework only: one or several Link drivers and local producers | one Service (Queue) or any number (Snapshot) |
+| **Transmit Endpoint** | exactly one Service, optionally several contexts within it | framework only: the one bound Link |
+
+Stated as invariants:
+
+> **Exactly one Service may write a transmit Endpoint, and exactly one Service may read a Queue Endpoint. Any number of Services may read a Snapshot Endpoint.**
+
+> **For every externally producing `(Endpoint Domain, Namespace, EndpointId)` there is exactly one externally visible producer Endpoint identity.** Configuration must reject two Endpoint implementations in one Domain claiming the same producing identity.
+
+The first rule makes the second enforceable by ownership at configuration time instead of resting on trust in synchronized writers. `WIRE-1` says a bus has one authoritative source; this says an Endpoint address is not a shared mailbox any local component may publish under. Without it, two Services in one Domain can both emit as EndpointId 42 and a receiver cannot tell which produced a value.
+
+Note that framework producers are not Services. Several Link drivers delivering into one receive Endpoint is normal and is exactly what the multi-writer case exists for — the AMP arrangement in §13.2 relies on it. Similarly, several execution contexts *within* one Service may write a transmit Endpoint under the Domain's serialization (§1.5); they remain one Service and one external producer.
+
+Two rules were deliberately dropped. **Multi-reader Queues are not supported:** draining is destructive, so two consumers silently split the stream, which works in test and loses messages in production. It is a worker-pool construct with no meaning in RTL. And **transmit fan-out does not happen at the Endpoint** — publishing the same state onto two Wires is Wire splicing (§6) or gateway forwarding (§12), both of which already preserve source lineage and neither of which needs per-reader state inside the Endpoint.
+
+The reason multi-reader Snapshots are safe where Queues are not is that reading is non-destructive and each reader tracks its own progress. That implies an implementation rule worth stating, because the obvious first attempt gets it wrong:
+
+> **The "have I seen this" watermark lives in each reader, never in the Endpoint.** A `new_data` flag that the Endpoint clears on read works perfectly with one consumer and silently starves the second.
+
+Finally, dispatch changes nothing about any of this. **The Dispatcher does not silently make an Endpoint safe for arbitrary concurrent access;** wiring and generated code preserve the declared semantics and neither add nor remove them.
+
+## 9.7 Dispatch table synchronization and Endpoint lifetime
 
 The Dispatcher can use the same read-mostly design philosophy as the Router (§11.2). A capable multicore system may use seqlocks or snapshots; a small static MCU may use a small `const` array with linear search and no lock.
 
 A subtle lifetime issue exists if a runtime update can remove or destroy an Endpoint while another thread has just read its callback pointer. Early implementations should prefer stable Endpoint registrations, or adopt a safe publication/lifetime mechanism before introducing runtime Service replacement.
 
-## 9.6 Producer ownership and Endpoint concurrency
-
-`WIRE-1` constrains a Wire to one Origin. A separate and equally important rule constrains an Endpoint:
-
-> For every externally producing `(Endpoint Domain, Namespace, EndpointId)`, there is **exactly one externally visible producer Endpoint identity.** Configuration must reject two Endpoint implementations in one Domain claiming the same producing identity.
-
-These are different axes and both are needed. The first says a bus has one authoritative source. The second says an Endpoint address is not a shared mailbox that any local component may publish under. Without it, two Services in one Domain can both emit as EndpointId 42 and a receiver has no way to tell which produced a given value.
-
-The rule does **not** require one local caller or one execution context. Several synchronized local writers may sit behind one Endpoint implementation if that implementation's declared concurrency model permits it. They remain one externally visible producer and do not become separately addressable sources.
-
-What matters is that each Endpoint **declares** its concurrency and local delivery semantics, and that the declaration survives. Common models:
-
-```text
-snapshot publication      one producer, many readers, coherent latest value
-strict single writer      exactly one caller, checked or by construction
-bounded event queue       declared producer/consumer rules and depth
-synchronized multi-writer several callers behind explicit synchronization,
-                          still one external producer identity
-handler with serialization a request handler with declared reentrancy rules
-```
-
-> **The Dispatcher does not silently make every Endpoint safe for arbitrary concurrent access.** Wiring and generated APIs preserve each Endpoint's declared ownership, synchronization, queueing, and reentrancy constraints; they do not add or remove them.
-
-This is the same commitment as delivery policy preservation (`DISP-2`) applied to the producing side. A Service written against a single-writer Endpoint must not silently acquire a second writer because a deployment placed another Service in its Domain.
-
-One Endpoint implementation may source several Wires, and several local consumers may read one Endpoint where its contract permits. Neither weakens either invariant above.
-
-## 9.7 Endpoint naming is not authority
+## 9.8 Endpoint naming is not authority
 
 Endpoint identity and communication authority are separate, and conflating them is the single easiest way to build an accidentally open system.
 
@@ -1223,7 +1260,7 @@ Second, ordinary application components should hold **typed handles for only the
 
 ```cpp
 // what a Service should hold
-TxBinding telemetry_tx_;
+TransmitEndpoint telemetry_tx_;
 
 // what it should not hold
 router.send(arbitrary_endpoint_id, arbitrary_payload);
@@ -1233,9 +1270,16 @@ This is worth doing and worth being honest about: typed handles are capability-*
 
 ---
 
-# 10. Service Transmit Bindings
+# 10. Transmit Endpoints
 
-Receiving naturally tells a Service where a packet came from. Autonomous transmission does not. WireSpaces therefore needs explicit **Service TX bindings**, preferably injected into the Service.
+Receiving naturally tells a Service where a packet came from. Autonomous transmission does not. WireSpaces therefore needs explicit **transmit Endpoints**, preferably injected into the Service.
+
+A transmit Endpoint is the same object as a receive Endpoint with the roles reversed. The two axes of §9.5 and §9.6 apply unchanged; only the identity of the writer and the reader swaps. That symmetry is the reason no separate local-interface concept is needed on either side (§1.6):
+
+```text
+receive Endpoint    framework writes, Service reads
+transmit Endpoint   Service writes, the bound Link reads
+```
 
 ## 10.1 Reply-only Service
 
@@ -1266,7 +1310,9 @@ Service stores destination context
 later publishes progress/status to that peer
 ```
 
-This is Service policy, not an implicit WS global behavior. Because it is the one mode where transmit context comes from *traffic* rather than from configuration, it carries obligations the other modes do not; they are in §10.5.
+This is Service policy, not an implicit WS global behavior. Because it is the one mode where transmit context comes from *traffic* rather than from configuration, it carries obligations the other modes do not; they are in §10.6.
+
+What the Service retains is a reply context, not the source fields it read from delivered metadata. Those fields are readable and inert, and reading them authorizes nothing (§9.3).
 
 ## 10.3 Autonomous transmission
 
@@ -1275,12 +1321,12 @@ A Service that transmits on its own initiative needs a configured destination Wi
 ```cpp
 class TemperatureService {
 public:
-    explicit TemperatureService(TxBinding telemetry_tx);
+    explicit TemperatureService(TransmitEndpoint telemetry_tx);
 
     void tick();
 
 private:
-    TxBinding telemetry_tx_;
+    TransmitEndpoint telemetry_tx_;
 };
 ```
 
@@ -1304,9 +1350,48 @@ fault_tx
 debug_tx
 ```
 
-Each of these is an output **Port** (§1.6): a local typed interface whose network meaning is supplied by the deployment rather than by the Service. The Service's source code names the Port; the Wiring names the Wire and Endpoint.
+The Service's source code names its outputs; the Wiring names the Wire and Endpoint each one becomes.
 
-## 10.4 Defaults and safety
+## 10.4 Transmit Endpoint storage semantics
+
+A transmit Endpoint declares Queue or Snapshot storage exactly as a receive Endpoint does, and the choice determines what a send means.
+
+**Queue transmit** is the explicit-acceptance path for events, commands, and requests. The Service submits, the Endpoint accepts or rejects against bounded capacity, and the bound Link drains it later. Acceptance means the transmit path took ownership, never that anything reached the medium (§16.1), and a rejected submission must not advance protocol state (`QOS-9`).
+
+**Snapshot transmit** is the publication path for periodic state. The Service writes current state whenever convenient and the LLL samples it on its own schedule (§1.7). There is no queue, no per-send copy, and no accept/reject — coalescing is the declared semantics rather than a loss, and this is what periodic telemetry on a rate-limited Link actually wants.
+
+Snapshot transmit changes what the ownership rules are about, which is worth stating precisely: the Service's write is a publication, not a submission, so `OWN-1` and `OWN-4` govern the PDUs the LLL *generates from samples*, not the writes that were designed to be overwritten. Nothing about a publication reaches a terminal outcome, because a publication is not a PDU.
+
+### Confirmation and staleness on Snapshot transmit
+
+A Snapshot transmit Endpoint has no natural failure signal, and that is a genuine hazard rather than a theoretical one. A Queue transmit Endpoint that is unbound, unscheduled, or attached to a dead driver fills and starts rejecting, so the Service finds out. A Snapshot transmit Endpoint that was never bound to a Wire behaves *identically to a working one*: the Service publishes, publishing succeeds, and nothing ever leaves the device.
+
+The Endpoint therefore publishes back what the framework has done with it:
+
+```text
+last_sampled_generation   the generation most recently read by the LLL
+last_sent_generation      the generation most recently confirmed transmitted,
+                          where the Link can report TX completion (§17)
+```
+
+These reuse the Snapshot generation counter rather than adding a mechanism, so a Service compares them against its own last write with no correlation state: the delta is directly how far behind the wire is, and a counter that never advances is an unbound or dead path. Where a Link cannot report completion, `last_sent_generation` is simply unavailable rather than faked.
+
+Both are **16 bits and wrapping** by default, narrowable by profile on constrained targets. Two rules come with that and must be honored or the mechanism silently misleads:
+
+- **comparison is modular, never ordered** — the usual signed-difference idiom, not `>`;
+- **the delta is meaningful only if read more often than the counter wraps.** At 16 bits and a 1 kHz publisher that is roughly a minute; at 8 bits it would be a quarter of a second.
+
+Name these for what they measure. `sampled` and `sent` are honest; anything called "confirmation" would contradict `OWN-1`, since a sample can be built into a PDU and then lose its CAN mailbox without ever reaching the medium.
+
+Queue transmit Endpoints deliberately get no equivalent mechanism, because accept/reject already carries the same information.
+
+### One Wire per transmit Endpoint
+
+> **Every transmit Endpoint has exactly one consuming Wire binding.**
+
+For Snapshot this keeps the sampled and sent generations single scalar fields instead of per-reader state. For Queue it follows more strongly, since two readers draining one queue is the same destructive-split problem that rules out multi-reader receive Queues (§9.6). Publishing identical state onto two Wires is done by splicing (§6) or gateway forwarding (§12).
+
+## 10.5 Defaults and safety
 
 Useful defaults reduce configuration during bring-up:
 
@@ -1315,7 +1400,7 @@ Useful defaults reduce configuration during bring-up:
 
 Safety- or control-critical application outputs should generally require explicit bindings rather than silently falling back to a development/debug route.
 
-## 10.5 Binding modes
+## 10.6 Binding modes
 
 The preceding subsections describe three ways a Service obtains transmit context. Naming the full set as **binding modes** turns that into something checkable, because the mode determines what a registration is allowed to do and what it must bound:
 
@@ -1763,7 +1848,7 @@ The Router reads shared state concurrently (§11.2), but an LLL is the opposite 
 
 > **Each LLL instance has exactly one logical execution context that mutates its parser state, reassembly state, transmit scheduling state, timers, and owned queues and pools.**
 
-It may be a bare-metal loop, a dedicated task, or any explicitly serialized executor — but there is one of it. Other tasks and cores reach that instance only through bounded submission ports, value queues, ownership-transfer queues, immutable snapshots, or explicitly synchronized control requests. They do not call state-mutating LLL operations concurrently.
+It may be a bare-metal loop, a dedicated task, or any explicitly serialized executor — but there is one of it. Other tasks and cores reach that instance only through bounded queues, immutable snapshots, or explicitly synchronized control requests. They do not call state-mutating LLL operations concurrently.
 
 The reason is that reassembly is inherently stateful: a fragment only means anything relative to the context it belongs to, and two contexts advancing the same reassembly is not a race that produces a slightly wrong answer, it is a race that produces a plausible-looking PDU assembled from two different ones. Read-mostly routing tables tolerate concurrency because nobody is writing them; an LLL is being written constantly.
 
@@ -1838,12 +1923,14 @@ Core 0 -> shared memory -> Core 1
 to:
 
 ```text
-Service A -> local callback -> Service B
+Service A -> local Wire -> Service B
 ```
 
 without changing the application-level message schema or Endpoint identity. The deployment/Wiring changes; the Service protocol need not.
 
-Delivery policy must be preserved across such a move (§9.4). More precisely, what has to survive the move is the *externally visible* behavior: the same canonical PDU and Endpoint identity, the same Wire and binding, the same Transport interpretation, the same validation, explicit bounded acceptance and backpressure, and the same four-way distinction between **accepted, rejected, delivered, and consumed**. The mechanism underneath is free to change completely.
+Note what the last step is *not*. Collapsing two Services onto one MCU does not turn asynchronous message delivery into a function call; the destination Endpoint's storage semantics are part of its contract at every placement (§9.4). That is now structural rather than a policy tooling has to preserve, because there is only one delivery model and its semantics are fixed by the Service definition rather than the deployment.
+
+What has to survive the move is the *externally visible* behavior: the same canonical PDU and Endpoint identity, the same Wire and binding, the same Transport interpretation, the same validation, explicit bounded acceptance and backpressure, and the same four-way distinction between **accepted, rejected, delivered, and consumed**. The mechanism underneath is free to change completely.
 
 That last distinction is worth keeping sharp, because collapsing any two of the four states produces a Service that misreports its own progress:
 
@@ -1854,7 +1941,7 @@ delivered  it reached the destination Endpoint
 consumed   the destination Service actually processed it
 ```
 
-There is one optimization to refuse explicitly: **making same-core delivery reentrant when the equivalent cross-core path would be deferred.** It is tempting, since a direct call is obviously cheaper than a queue, but it changes when a Service's handler runs relative to its own state — and a Service tested on one core and deployed across two then meets an execution model it was never tested against. Inline delivery is a legitimate choice (§9.4); it just has to be the *declared* choice rather than a side effect of placement.
+There is one optimization to refuse explicitly: **making same-core delivery reentrant when the equivalent cross-core path would be deferred.** It is tempting, since a direct call is obviously cheaper than a queue, but it changes when a Service's code runs relative to its own state — and a Service tested on one core and deployed across two then meets an execution model it was never tested against. The bounded storage boundary (§9.4) exists precisely so that this optimization has no legitimate form to take.
 
 ### Independence is bounded, not absolute
 
@@ -1969,7 +2056,7 @@ A current default direction:
 
 A richer implementation that knows which Services/streams are producing traffic on a Link may also shed Normal/Background packets in a deterministic round-robin or otherwise fair pattern across producers. This is implementation policy, not a protocol requirement.
 
-Latest-value replacement is the reason receivers need freshness handling (§21.6): a Link may legitimately discard a pending update in favor of a newer one.
+Latest-value replacement is the reason receivers need freshness handling (§21.4): a Link may legitimately discard a pending update in favor of a newer one.
 
 ### Replacement is only valid for traffic whose latest value is the whole message
 
@@ -2172,7 +2259,7 @@ The bound must exist for all of them, including the ones that are easy to forget
 
 ```text
 Link TX and RX queues
-Endpoint inboxes and Serialized-delivery queues (§9.4)
+Endpoint Queue and Snapshot storage (§9.5)
 fragment reassembly contexts (LINK §2)
 Transport retry windows and reassembly state (§20)
 gateway forwarding buffers (§12)
@@ -2193,7 +2280,7 @@ Static configuration should validate that configured bounds are sufficient for d
 
 Copy-based operation is the preferred initial implementation strategy, and the architecture should make copying efficient rather than treating it as an inferior temporary mode.
 
-This is especially appropriate for Classical CAN, CAN FD, small MCU datagrams, Service inboxes, early multicore implementations, and most control/status traffic.
+This is especially appropriate for Classical CAN, CAN FD, small MCU datagrams, Endpoint storage, early multicore implementations, and most control/status traffic.
 
 Zero-copy is deliberately not an initial focus; the eventual destination-owned direction is `FUTURE §2`.
 
@@ -2210,6 +2297,8 @@ For a copy-based profile, a successful return means the caller may immediately r
 The underlying implementation may copy directly into hardware/controller memory, into a bounded queue, or into driver-owned storage.
 
 This is the same call whose result taxonomy is described in §14.4: success means "admitted and your buffer is free," not "delivered."
+
+This contract governs submissions. A Snapshot transmit Endpoint has no submission — the Service publishes and the LLL samples — so the ownership and terminal-outcome rules below apply to the PDUs the LLL generates from those samples, not to the publications themselves (§10.4).
 
 ### A view is not ownership
 
@@ -2279,24 +2368,29 @@ An implementation that wants to avoid the copies has exactly three safe options:
 
 > **Copying is the required-safe fallback whenever a target cannot prove bounded sharing.**
 
-## 16.4 Storage classes are distinct contracts
+## 16.4 Storage semantics and ownership are separate axes
 
-Above the Link, a PDU or decoded value lands in one of four kinds of storage. They are frequently implemented with similar-looking code and they have genuinely different contracts:
+Above the Link, a PDU or decoded value lands in storage described by **three independent choices**, not one enumerated storage class:
 
-| Storage | Contract |
-|---|---|
-| **Snapshot** | retains the latest complete value; a newer publication may replace an unread one. Readers see a coherent value, never every value |
-| **Value queue** | copies or moves each accepted value into queue-owned slots; explicit full/empty and overflow behavior |
-| **Ownership-transfer queue** | publishes owning handles or leases; a failed push leaves ownership with the producer, a successful pop transfers it to the consumer |
-| **Event queue** | retains discrete accepted events in order up to a bounded capacity, with an explicit overflow policy |
+```text
+semantics      Queue (history-preserving) or Snapshot (latest-value)   (9.5)
+ownership      value copy, or ownership transfer of a handle or lease
+concurrency    single writer, or serialized concurrent writers        (9.6)
+```
 
-> **None of them may masquerade as another.** A snapshot replacement is not a queue delivery. Value copying is not ownership transfer. A handle queue is not a borrow. And queue exhaustion is not latest-value replacement (§14.3).
+Keeping them separate is what makes the copyless roadmap tractable. An earlier version of this section listed four storage classes — snapshot, value queue, ownership-transfer queue, event queue — which conflated the first two axes and left "event queue" as a semantic duplicate of "value queue." Factored properly, moving from copies to handles is a change on the ownership axis alone:
 
-The reason to be strict is that each substitution silently removes a property a Service is relying on. Event, command, and protocol state normally require **non-replacing** storage, so implementing an event endpoint over a snapshot loses occurrences with no counter and no error; describing a value copy as ownership transfer leaves both sides thinking the other will release the storage.
+> **Copyless delivery changes storage ownership, not Endpoint semantics.** A Queue stays history-preserving and bounded, a Snapshot stays latest-value, concurrency rules are unchanged, and full and replacement behavior are unchanged. Only what occupies the slot changes.
 
-A snapshot also needs enough metadata for a consumer to judge what it is looking at: a sequence or time basis, a producer restart epoch where restart matters, and decode or integrity status where available. Without it, a reader cannot distinguish fresh data from a value that stopped updating an hour ago (§21.6). Replacing an unread value is normal and worth counting when diagnostically useful.
+The strictness rule survives the refactoring and applies on every axis:
 
-One last clarification, because it recurs: **a callback is a notification mechanism and defines nothing about storage or ownership.** "Delivered by callback" answers neither who owns the buffer nor how long it is valid.
+> **No position on any axis may masquerade as another.** A Snapshot replacement is not a Queue delivery. A value copy is not ownership transfer. A handle queue is not a borrow. And Queue exhaustion is never latest-value replacement (§14.3).
+
+Each substitution silently removes a property a Service is relying on. Events, commands, and protocol state require non-replacing storage, so implementing an event stream over a Snapshot loses occurrences with no counter and no error; describing a value copy as ownership transfer leaves both sides expecting the other to release the buffer.
+
+A Snapshot needs enough metadata for a consumer to judge what it is looking at: the required generation counter (§9.5), a producer restart epoch where restart matters, arrival time captured at acceptance (§9.4), and decode or integrity status where available. Without those, a reader cannot distinguish fresh data from a value that stopped updating an hour ago (§21.4). Replacing an unread value is normal and worth counting.
+
+One last clarification, because it recurs: **a notification mechanism defines nothing about storage or ownership.** Being told that something arrived answers neither who owns the buffer nor how long it is valid.
 
 ## 16.5 V1 synchronization philosophy
 
@@ -2406,7 +2500,7 @@ Link stopped/reset/restarted, state discarded as uncertain
 
 The exact enumeration can be refined, but **congestion must be distinguishable from actual Link malfunction**. WS should not disguise local rejection as a generic transport timeout.
 
-Several categories exist because this architecture deliberately permits loss, latest-value replacement (§14.3), and non-transactional multi-egress (§12.2). A system that allows those outcomes must be able to *report* the receive-side consequences rather than leaving them invisible; see §21.6. The last group covers the cases where a device knows it has lost information but cannot say what was lost — a reset Link with a half-assembled PDU must count a discard rather than deliver a guess.
+Several categories exist because this architecture deliberately permits loss, latest-value replacement (§14.3), and non-transactional multi-egress (§12.2). A system that allows those outcomes must be able to *report* the receive-side consequences rather than leaving them invisible; see §21.4. The last group covers the cases where a device knows it has lost information but cannot say what was lost — a reset Link with a half-assembled PDU must count a discard rather than deliver a guess.
 
 An empty response from a polled Link is not an error (§1.7).
 
@@ -2420,7 +2514,7 @@ A WS node does not reply to traffic it refuses, and it does not emit anything re
 
 - **Authority.** Replying to unauthorized traffic requires a Wire and Endpoint that the sender, by definition, is not authorized for. There is no legitimate reverse path to use.
 - **Amplification.** A device stuck emitting a bad PDU would induce a matching flood of complaints, turning a single fault into bus-wide load exactly when the bus is already unhealthy.
-- **Diagnosis is a Service, not a reflex.** The information belongs in the local counters and in the telemetry Service (§18.4), where a host can poll it deliberately at a rate it controls.
+- **Diagnosis is a Service, not a reflex.** The information belongs in the local counters and in the telemetry Service (`DEPLOY §3.5`), where a host can poll it deliberately at a rate it controls.
 
 Errors are therefore reported *upward and locally*, never *backward and automatically*. This applies to receive rejection; a local send failure is still reported synchronously to the calling Service (§14.4), which is a return value and not wire traffic.
 
@@ -2507,35 +2601,7 @@ Which QoS class dominated the burst?
 When did the congestion begin and end?
 ```
 
-## 18.4 Domain-local Link Telemetry Service
-
-A proposed default-enabled **Domain Local Link Telemetry Service** collects periodic snapshots from all Link Interfaces in one Endpoint Domain.
-
-```text
-Endpoint Domain
-    +-- CAN_A
-    +-- CAN_B
-    +-- shared-memory Link
-    +-- Ethernet
-    |
-    `-- Link Telemetry Service
-            |
-            | ~1 Hz snapshots
-            v
-       InternalDebugWire
-            |
-            | splice (§7.2)
-            v
-       host-facing Wire -> PC
-```
-
-The telemetry Service can remain small on embedded targets while host/Linux implementations expose much richer detail.
-
-## 18.5 Optional per-Wire "top talker" reporting
-
-Larger gateways may report Wires using the most bandwidth, Wires producing the most congestion drops, and per-QoS pressure. This is useful for human diagnosis even if no automatic congestion manager is ever implemented.
-
-A future optional Link Manager Service could consume this telemetry and change admission/shedding policy, but that is **not base protocol behavior**.
+Host-facing telemetry Service conventions and optional per-Wire top-talker reporting are in `DEPLOY §3.5`.
 
 ---
 
@@ -2627,9 +2693,7 @@ The baseline Transport is an **Unreliable Datagram** style:
 - delivery failure is possible;
 - application/Service chooses semantics.
 
-Other Transports may provide reliable segmented transfer, receiver windows/credits, request/response retry behavior, sequence/E2E integrity, or specialized command-source selection. None is designed yet; see `FUTURE §3`.
-
-The most likely *second* Transport is worth naming, because it is much smaller than reliability and answers a question that comes up immediately: a **Sequenced / End-to-End-Protected Datagram**, carrying a sequence or liveness counter and an end-to-end check value alongside an otherwise unreliable datagram. It adds no retransmission, no acknowledgment, and no connection state — it just lets a receiver detect gaps, duplicates, restarts, and corruption. Since §20.2 argues that most traffic wants freshness detection rather than reliability, this is the Transport most Services would actually benefit from, and it should be designed before anything reliable is attempted (`FUTURE §3.1`).
+Other Transports may provide reliable segmented transfer, receiver windows/credits, request/response retry behavior, sequence/E2E integrity, or specialized command-source selection. None is designed yet; see `FUTURE §3`. The most likely second Transport is the sequenced / end-to-end-protected datagram in `FUTURE §3.1`, which should be designed before anything reliable.
 
 One boundary is firm regardless: firmware images, files, logs, and similar bulk data belong to a segmenting Transport, **not** to a constrained LLL. Growing Classical CAN PDUA into a large transport protocol is the wrong direction (`LINK §2.6`).
 
@@ -2684,7 +2748,7 @@ reliable                  a missing command is retransmitted and
 
 A setpoint that arrives 200 ms after it was produced, having been faithfully retransmitted, can be more dangerous than one that never arrived at all — because the receiver noticed the second case. Retransmission also consumes the bandwidth and queue depth that the *next* update needed, so a congested reliable stream degrades in the direction of stale data rather than absent data.
 
-This is why the base Transport is an Unreliable Datagram and why congestion is a normal send outcome (§21.1) rather than something the stack hides. For periodic state, control commands, and telemetry, the usual right answer is an unreliable Transport, latest-value replacement (§14.3), and receiver-side freshness handling (§21.6).
+This is why the base Transport is an Unreliable Datagram and why congestion is a normal send outcome (§21.1) rather than something the stack hides. For periodic state, control commands, and telemetry, the usual right answer is an unreliable Transport, latest-value replacement (§14.3), and receiver-side freshness handling (§21.4).
 
 Reliability earns its place where the data is not periodic and every byte matters:
 
@@ -2702,7 +2766,7 @@ Two related cautions. Choosing a reliable Transport does not remove the need for
 
 # 21. Services and Application Expectations
 
-A **Service** is reusable functionality exposed through one or more network-visible Endpoints, with Ports as its local interface (§1.6). The Service model should be agnostic to whether the implementation is C++ firmware, host software, softcore software, or RTL.
+A **Service** is reusable functionality exposed through one or more network-visible Endpoints (§1.6). How it presents itself to the application code that uses it is deliberately outside the architecture. The Service model should be agnostic to whether the implementation is C++ firmware, host software, softcore software, or RTL.
 
 ## 21.1 Send failure handling
 
@@ -2712,9 +2776,7 @@ The Service/Transport chooses whether to retry later, drop a latest-only update,
 
 ## 21.2 Service traffic declarations
 
-For future static capacity checking, Services should ideally expose conservative traffic claims: maximum TX rate, maximum PDU size, QoS, and an optional burst bound. The exact schema belongs to future tooling work (`FUTURE §4`).
-
-Size accounting includes the canonical header and, where a profile permits extensions, their budgeted maximum (§2.3). A Service that declares a 40-byte message and then does not fit is usually a Service that budgeted its payload and forgot the envelope.
+For future static capacity checking, Services should ideally expose conservative traffic claims: maximum TX rate, maximum PDU size, QoS, and an optional burst bound. The exact schema is `FUTURE §4`.
 
 ## 21.3 A Service contract is a schema over bytes
 
@@ -2734,7 +2796,7 @@ engineering units, scale, offset, clock domain, validity metadata
 what a transmitter writes and a receiver does for padding and reserved fields
 which message types are required, optional, and safely ignorable
 behavior on malformed input, unknown version, unknown type, unsupported feature
-freshness, sequence, correlation, duplicate, and restart semantics (§21.6)
+freshness, sequence, correlation, duplicate, and restart semantics (§21.4)
 ```
 
 Sub-byte integers, explicitly sized enums, fixed-point values, and reserved fields are first-class schema features rather than optimizations — on a Classical CAN Link, the difference between a packed and a naturally-aligned layout is the difference between one frame and three. Bounded arrays, strings, and opaque byte sequences are fine; unbounded allocation on an MCU is not. Decoders handle unaligned data safely and **validate lengths before accessing fields**, in that order.
@@ -2768,42 +2830,9 @@ So an internal hotfix moves build identity alone. A build option that changes an
 
 The fingerprint is the one that should be generated rather than maintained by hand, and it is what `DEPLOY §2.4` compares.
 
-## 21.4 Service archetypes
+Level-0 Service expectations, archetypes, and the broader ecosystem catalog are in `FUTURE §8`.
 
-Most Services fall into a small number of shapes. These are **policy starting points, not transport types** — every one of them is ordinary Endpoints and Wires underneath — but naming them saves rediscovering the same set of decisions each time:
-
-| Archetype | Defining policy | Typical QoS |
-|---|---|---|
-| **State / snapshot** | latest coherent value; replacement acceptable; freshness and validity explicit | Normal |
-| **Command / control** | bounded state change; explicit authority, acceptance, and commitment point; idempotency or duplicate rules | Normal, or High where analysis justifies it |
-| **RPC / query** | correlation where needed, bounded responder work, explicit timeout and Service-error behavior | Normal |
-| **Event stream** | discrete occurrences retained in a bounded queue; ordering, gap detection, and overflow defined | Normal |
-| **Health / heartbeat** | bounded liveness, readiness, degraded state, fault summary | Normal |
-| **Logging / diagnostics** | bounded, rate-limited, aggregatable; never blocks control work | Background |
-| **Bulk transfer** | small control and status messages around a separately bounded segmented mechanism | Background |
-
-Three notes on the QoS column. `Normal` is the default and most traffic should stay there — a system where everything is High has no priorities. `Critical` is absent deliberately: it belongs only to traffic that has been through explicit admission, resource, and starvation analysis, since its whole purpose is to displace other traffic. And a higher QoS is scheduling intent only; it guarantees no latency, bandwidth, delivery, or freshness (§14).
-
-**RPC does not imply a reliable Transport.** A request/response exchange over an unreliable datagram with a timeout is a perfectly ordinary RPC, and often the right one (§20.2).
-
-Request/response, command/status, and pub/sub are compositions of these over directed traffic on Wires — not special routing modes (§23).
-
-## 21.5 Standard one-device Services
-
-A compelling base ecosystem should make one PC-connected device useful immediately. Likely standard/common Services:
-
-- stable device identity;
-- software/build/version information;
-- heartbeat / uptime / reset reason;
-- text logs;
-- structured events;
-- Link health/telemetry;
-- firmware update / object transfer;
-- application-specific telemetry and control.
-
-A device should not need complicated network configuration merely to expose these over one Link. A broader catalog of candidates is `FUTURE §8`.
-
-## 21.6 Freshness, staleness, and duplicates
+## 21.4 Freshness, staleness, and duplicates
 
 A Service definition should cover more than message layout. Alongside meaning and encoding, it should state:
 
@@ -2944,45 +2973,7 @@ A pure RTL Endpoint can consume WS PDUs, produce telemetry/events, implement con
 
 The host should not need to know whether an Endpoint is implemented in C++ or SystemVerilog.
 
-# 25. Implementation Language and API Direction
-
-The first implementation should favor **C++** to obtain working results quickly. There is no current need to maintain parallel C and C++ cores from day one.
-
-A good hedge is to keep important core data shapes and functions reasonably C-compatible where practical:
-
-```cpp
-struct WsPdu;
-struct WsRouter;
-enum class WsSendResult : uint8_t;
-
-WsSendResult wsRoute(...);
-```
-
-while still using C++ internally for RAII, templates where they materially help static sizing, `constexpr` configuration, stronger types, compile-time validation, and host-side convenience.
-
-A separate C implementation or C ABI can be added later when an actual target requires it.
-
-The embedded baseline should continue to avoid mandatory RTTI, exceptions, and heap allocation, consistent with the project's general C++ rules.
-
----
-
-# 26. Implementation Scaling Profiles
-
-The same conceptual architecture should scale through substantially different implementations.
-
-| Target | Likely implementation |
-|---|---|
-| Tiny bare-metal MCU | copies, one Link, switch/linear EID dispatch, LocalBusOnly, no locks |
-| Normal single-core MCU | fixed tables, copy queues, mutex/critical sections, several Services |
-| Multicore MCU | internal shared-memory Links, Service inboxes, concurrent routing/dispatch |
-| Embedded gateway | many Link tasks, read-mostly tables, direct forwarding, optional seqlocks |
-| Host PC | conventional threads/queues/maps; optimize only if needed |
-| FPGA softcore | generated tables, DMA/FIFOs, potentially zero-copy |
-| Pure RTL | BRAM routing tables, RTL LLLs, RTL Endpoints, streaming datapath |
-
-The protocol does not require every row to implement the mechanisms used by every other row. This is a ladder of target hardware, orthogonal to the ladder of user commitment in `INTRO §6`.
-
-## 26.1 Small MCU profile
+# 25. Small MCU Profile
 
 A tiny implementation may have:
 
@@ -2997,8 +2988,12 @@ no network task
 no locks
 ```
 
-Receive: frame RX -> decode PDU -> switch/linear lookup on EID -> callback.  
-Transmit: Service -> construct small packet -> `driver.send()`.
+Receive: frame RX -> decode PDU -> switch/linear lookup on EID -> copy into that Endpoint's storage.  
+Transmit: Service -> write its transmit Endpoint -> LLL drains or samples it.
+
+The storage boundary is not a luxury a tiny node opts out of (§9.4). It is also cheaper than it sounds: a node with one receive Endpoint needs one message-sized buffer at depth 1, and a Snapshot needs exactly one value. What the boundary costs on this class of target is a copy and a main-loop iteration; what it buys is that the CAN receive path's execution time no longer depends on what the application does with the message.
+
+Two shapes suit this profile particularly well. A Snapshot transmit Endpoint lets a periodic publisher write current state whenever it likes and lets the LLL sample it on its own cadence, with no queue at all (§10.4). And a bare-metal main loop can drain several Endpoints in sequence — service Links first, then drain, or pay a full period (§9.4).
 
 A constrained CAN node may support only `WireAlias = kLocalBus`, optimized N=1, Namespace 0, and EID < 128, and still interoperate meaningfully with richer WS hosts and gateways.
 
@@ -3006,107 +3001,12 @@ The implementation should not be forced to instantiate abstract runtime objects 
 
 There is one thing collapsing does not license. A tiny target may fold Service, dispatch, and Link handling into a single `switch` and a few constants, but the **semantic and authority distinctions must survive the fold**. The compiled-out Router still had exactly one Origin; the inlined dispatch still accepted only configured Endpoint identities; the constant-folded binding still granted only the transmit rights it was given. What disappears is the runtime object, not the rule — otherwise the small node becomes the hole in every property the larger system relies on, and it is usually the node with the least review.
 
-## 26.2 "Microkernel-like" execution shape
-
-WireSpaces is not an operating system, but a capable implementation has a similar execution shape:
-
-```text
-Active entities:      Service tasks, Link-driver tasks
-Passive infrastructure: routing tables, dispatch tables, static bindings, bounded queues
-```
-
-Data moves directly from producer context toward its configured destination. This makes the cost of communication visible: queues exist where a scheduling or ownership boundary actually requires them, not because the framework mandates a central broker.
+Scaling profiles for other targets, language choices, and execution shape are in `IMPL`.
 
 ---
 
-# 27. Conformance and Test Strategy
+# 26. Conformance
 
-WS is intended to span C++ firmware, host software, Python tooling, and RTL. Those are separate implementations *within one project*, and they will diverge from each other without shared reference cases, so **conformance vectors should be created early** even though no external implementer exists.
+WireSpaces spans C++ firmware, host software, Python tooling, and RTL within one project. Shared reference cases are required so those implementations do not quietly diverge.
 
-Useful vectors:
-
-- canonical PDU descriptor encode/decode examples;
-- WireAlias canonicalization examples;
-- splice application on ingress and egress, including rejection of anonymous LocalBus splices and device-private egress without a splice;
-- Router table examples with expected egress masks;
-- LocalBus configured/unconfigured behavior;
-- Classical CAN PDUA fragmentation/reassembly sequences;
-- generation-wrap/stale-fragment tests;
-- CRC golden vectors for both CRC-8 and CRC-16 cases;
-- per-N capacity boundaries from `LINK §2.10`, including oversize rejection before TX;
-- Endpoint dispatch examples;
-- congestion/send-result behavior;
-- Link telemetry snapshot examples.
-
-This helps prevent software and RTL implementations from quietly becoming different dialects.
-
-## 27.1 Test at the boundaries, not in the middle
-
-Vectors that use comfortable middle values prove very little. Every field with an allocation fence or a width limit should be exercised at the value on each side of the fence, and the expected result stated — exact reconstruction, or fail-closed rejection, never a silent remap.
-
-| Field | Values worth pinning |
-|---|---|
-| `EndpointId` (Namespace 0) | `0, 1, 31, 32, 127, 128, 1023, 1024, 65535` |
-| `WireNumber` | `0, 1`, last shared, first device-private, last device-private |
-| `WireAlias` | `0` (`kLocalBus`), `1`, maximum for the profile |
-| `NodeId` | `0` (broadcast), `1`, maximum, one past maximum |
-| `QoS` | all four values, plus the ordering they imply on a contended Link |
-| `Namespace` | all four values, including ones with no allocation policy yet |
-| PDUA frame count | `N = 1, 2, 4`, maximum, one past maximum |
-| Payload length | `0`, maximum for each `N`, one past maximum |
-| Generation counter | wrap boundary, and a stale fragment from the previous generation |
-
-The fenced Endpoint values matter most. `127/128` crosses the optimized-encoding boundary, and `1023/1024` crosses representability on 11-bit CAN — both must reject before a frame is emitted (`LINK §2.3`), not truncate.
-
-Negative cases deserve equal weight: missing, duplicated, swapped, skipped, delayed, replayed, malformed, short, and overlong fragments; unexpected START; reassembly timeout; context-pool exhaustion; unknown Wire; unknown Endpoint; wrong Direction; wrong ingress; unsupported TransportType; oversize PDU. The required outcome for all of them is identical and is the property most worth protecting: **counted, dropped, no partial delivery, no error response** (§18.1).
-
-Interleaving and isolation cases are worth their own group, because they are where implementations quietly cheat: concurrent reassembly on distinct identifiers, attempted interleaving on one identifier, a full context pool, and no cross-Link or cross-context assembly.
-
-Several behaviors are not about encoding at all and need their own cases, because each one is a place where an implementation can be locally correct and still wrong:
-
-```text
-serialization        little-endian literal values verified on a big-endian
-                     implementation model as well as a little-endian one
-parser progress      a byte-stream parser fed the same PDU under arbitrary
-                     chunk boundaries, including one byte at a time
-ownership            ownership retained by the caller on every rejection
-                     reason, and released after every acceptance
-terminal outcome     every accepted PDU reaching exactly one of complete,
-                     cancelled, or faulted
-restart              restart with transmit and reassembly work in flight,
-                     and application-owned receive buffers surviving it
-storage classes      snapshot replacement distinguished from queue overflow;
-                     value-copy distinguished from ownership transfer
-exhaustion           queue and pool exhaustion producing bounded work and no
-                     corruption, not just a counter increment
-projections          generated software and RTL/static projections producing
-                     identical canonical values, and failing closed when they
-                     disagree
-binding modes        every enabled mode, including reply contexts that are
-                     rejected after expiry or reuse
-```
-
-The parser-chunking case earns its place: a framing bug that only appears when a PDU straddles two reads is invisible to any test that hands the parser whole messages, and it is the default behavior of a real UART.
-
-## 27.2 What a vector suite cannot tell you
-
-Golden vectors prove encoding agreement. They say nothing about whether an implementation fits its target, so system-level measurement is a separate obligation: worst-case RAM and execution time, queue occupancy, end-to-end latency, medium load, scheduler response, and counter behavior under a sustained fault storm.
-
-One effect is specific enough to name. **Fragmentation amplifies loss.** An `N`-fragment PDU is lost if any one of its fragments is lost, so at a per-frame loss rate `p` the PDU loss rate is roughly `1 - (1-p)^N` — about `N * p` for small `p`. A 1% frame loss rate becomes an 8% PDU loss rate at `N = 8`. This is a strong argument for keeping `N` small on lossy media and for measuring PDU-level rather than frame-level loss, and it is a reason a Service should not treat a large fragmented PDU as being as dependable as a small one on the same Link.
-
-## 27.3 Exit criteria for provisional status
-
-This architecture and its Link profiles are provisional. Recording what "no longer provisional" requires is useful now, because it keeps the label from becoming permanent by default. A Link profile may drop the provisional label when:
-
-1. a named, versioned profile fixes every identifier, byte, bit, length, padding, generation, timeout, reset, malformed-input, and state-transition rule;
-2. the integrity contract is byte-exact and its choice is justified, not merely stated;
-3. generated tooling proves representability, transmit ownership in every configured state, authority correctness, resource bounds, and profile compatibility;
-4. positive, boundary, and negative vectors cover every encoding, all canonical reconstruction, capacity limits, faults, and lifecycle behavior;
-5. bounded RAM, CPU, queues, timers, and diagnostics are demonstrated on a genuinely constrained target rather than a development board;
-6. QoS mapping, scheduling, and deployment timing analysis are validated on real hardware;
-7. authority and observation boundaries behave as specified — configured recipients, passive observation, whole-PDU forwarding, re-origination, and commissioning phases;
-8. two independent implementations produce byte-identical output and matching accept/reject decisions.
-
-Until then, no wire interoperability is claimed, and independently developed implementations must not be presumed compatible: byte-exact encodings, CRC parameters, CAN identifier ordering, and the TransportType registry are all still open.
-
-Host simulation should be a first-class development path. Local UDP, virtual CAN, PTYs, shared-memory channels, and simulated Links can exercise most of the architecture before hardware is available.
+Vector catalogs, boundary-test policy, loss-amplification notes, and exit criteria for dropping the provisional label are in `CONFORM`. The simulator should implement an MVP subset; see `code/sim_rfp.md`.

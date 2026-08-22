@@ -51,6 +51,18 @@ This becomes attractive for Ethernet-sized messages, CAN XL, high-throughput FPG
 
 That complexity should not be imposed on MCU users unless measurements show it is valuable. The trigger for revisiting this is profiling data from a real high-throughput gateway, not the availability of a larger carrier.
 
+## 2.1 What copyless must preserve
+
+Whenever this is designed, it changes one axis and no others (`OWN-5`):
+
+> **Copyless delivery changes storage ownership, not Endpoint semantics.** A Queue stays history-preserving and bounded, a Snapshot stays latest-value, writer concurrency rules are unchanged, and full and replacement behavior are unchanged. A queue slot holds a handle instead of a copied message; a Snapshot publishes managed storage instead of copying into place.
+
+The point of stating this in advance is that it forbids the tempting shortcut of introducing a *second* delivery model for the copyless path. One execution model with two ownership representations is tractable; two execution models is how a framework acquires a permanent fork.
+
+There is also a concrete case that already argues for it, which is unusual for this document. A bootloader segment arriving fragmented over CAN is reassembled in an LLL context and then **copied** into the segment Endpoint's queue slot, so the largest buffer in the system exists twice on the target least able to afford it (`CORE §9.5`). Handing reassembly buffer ownership to the Endpoint removes the duplicate outright. That makes ownership transfer valuable on small constrained targets and not only on high-throughput gateways, which is the opposite of the usual assumption about zero-copy.
+
+Before it can be baseline, the copyless design still has to solve lifetime, fan-out, reclamation, DMA ownership, cache coherency, reset behavior, and stale-handle/ABA issues (`REG §6.6`).
+
 ---
 
 # 3. Additional Transports
@@ -68,7 +80,7 @@ an end-to-end check value         detect corruption the source did not cause
 
 and nothing else — no retransmission, no acknowledgment, no connection state, no window. A receiver gains the ability to say "I missed something," "I have seen this already," and "this was damaged in transit," which is precisely what `CORE §20.2` argues most Services actually need. It also closes the gateway gap in hop-by-hop integrity (`CORE §20`), since the check is computed by the producing Endpoint and verified by the consuming one rather than being recomputed at every hop.
 
-Open: the exact fields and their widths, what the check value covers, whether the counter is per-Endpoint or per-Wire, restart and epoch behavior, the acceptance window, whether a gap is reported to the Service or only counted, and how it interacts with the freshness question in `CORE §21.6`. It also needs a decision about whether it lives in a header extension (`CORE §2.3`) or in Transport metadata, which is the first real test of the extension mechanism.
+Open: the exact fields and their widths, what the check value covers, whether the counter is per-Endpoint or per-Wire, restart and epoch behavior, the acceptance window, whether a gap is reported to the Service or only counted, and how it interacts with the freshness question in `CORE §21.4`. It also needs a decision about whether it lives in a header extension (`CORE §2.3`) or in Transport metadata, which is the first real test of the extension mechanism.
 
 Note what this does *not* provide: an end-to-end check detects accidental corruption and nothing else. It is not authentication, and anyone modifying a PDU deliberately recomputes it (`CORE §22`).
 
@@ -165,7 +177,37 @@ Open: the registry *process* — who allocates, how experimental ranges are recl
 
 # 8. Broader Ecosystem Service Catalog
 
-`CORE §21.5` lists the Services that make one PC-connected device immediately useful. A wider catalog has been sketched but not designed:
+## 8.1 Level-0 Services and allocation hierarchy
+
+A compelling base ecosystem should make one PC-connected device useful immediately. Likely standard/common Services:
+
+- stable device identity;
+- software/build/version information;
+- heartbeat / uptime / reset reason;
+- text logs;
+- structured events;
+- Link health/telemetry;
+- firmware update / object transfer;
+- application-specific telemetry and control.
+
+A device should not need complicated network configuration merely to expose these over one Link.
+
+Service allocation hierarchy across Namespaces:
+
+```text
+NS0 EID 1..31
+    exceptionally valuable compact Common Services
+
+NS3 EID 1..1023
+    broad FOSS ecosystem Services that must work on General Classical CAN
+
+NS3 EID 1024..65535
+    richer-link ecosystem Services
+```
+
+Not every Service needs to be in the compact Namespace-0 Common region. This avoids wasting the scarce N=1 encoding while leaving the future community ample permanent address space. The Classical-CAN optimized region split is in `LINK §2.4`.
+
+A wider catalog of candidates has been sketched but not designed:
 
 ```text
 Identity / device information
@@ -187,9 +229,29 @@ RPC-style utilities
 
 Service schemas should eventually have portable, deterministic definitions and useful code generation, but the schema language and toolchain are not chosen. The contract they must express is `CORE §21.3`: a schema over bytes, from which language types are generated as views.
 
-Time synchronization is worth flagging as coupled to an open question elsewhere: freshness representation (`CORE §21.6`) may or may not need a canonical timestamp, and that decision should be made with time sync in view rather than separately.
+Time synchronization is worth flagging as coupled to an open question elsewhere: freshness representation (`CORE §21.4`) may or may not need a canonical timestamp, and that decision should be made with time sync in view rather than separately.
 
-## 8.1 Promotion criteria and the privileged tail
+## 8.2 Service archetypes
+
+Most Services fall into a small number of shapes. These are **policy starting points, not transport types** — every one of them is ordinary Endpoints and Wires underneath — but naming them saves rediscovering the same set of decisions each time:
+
+| Archetype | Defining policy | Typical QoS |
+|---|---|---|
+| **State / snapshot** | latest coherent value; replacement acceptable; freshness and validity explicit | Normal |
+| **Command / control** | bounded state change; explicit authority, acceptance, and commitment point; idempotency or duplicate rules | Normal, or High where analysis justifies it |
+| **RPC / query** | correlation where needed, bounded responder work, explicit timeout and Service-error behavior | Normal |
+| **Event stream** | discrete occurrences retained in a bounded queue; ordering, gap detection, and overflow defined | Normal |
+| **Health / heartbeat** | bounded liveness, readiness, degraded state, fault summary | Normal |
+| **Logging / diagnostics** | bounded, rate-limited, aggregatable; never blocks control work | Background |
+| **Bulk transfer** | small control and status messages around a separately bounded segmented mechanism | Background |
+
+Three notes on the QoS column. `Normal` is the default and most traffic should stay there — a system where everything is High has no priorities. `Critical` is absent deliberately: it belongs only to traffic that has been through explicit admission, resource, and starvation analysis, since its whole purpose is to displace other traffic. And a higher QoS is scheduling intent only; it guarantees no latency, bandwidth, delivery, or freshness (`CORE §14`).
+
+**RPC does not imply a reliable Transport.** A request/response exchange over an unreliable datagram with a timeout is a perfectly ordinary RPC, and often the right one (`CORE §20.2`).
+
+Request/response, command/status, and pub/sub are compositions of these over directed traffic on Wires — not special routing modes (`CORE §23`).
+
+## 8.3 Promotion criteria and the privileged tail
 
 The catalog is a list of candidates, not a standard library and not an allocation authority. A Service is worth promoting to a published identity when it has a clear semantic boundary, a bounded schema, an explicit privilege model, compatibility metadata, a resource profile, test vectors, and **at least one real deployment** — the last of which is the criterion that stops the catalog from growing faster than the implementation.
 
@@ -206,7 +268,7 @@ The dangerous tail of the catalog — memory peek/poke, arbitrary register acces
 
 The same Service model can work across Ethernet, VPN, radio, or other remote Links. Remote maintenance should emphasize retained logs/events, identity/version, health, configuration, resumable firmware/object transfer, and selected telemetry.
 
-Two cautions already apply: high-rate internal Wires should not automatically be mirrored over narrow remote Links, and a remote link should not splice every internal Wire (`CORE §7.4`, `CORE §22`).
+Two cautions already apply: high-rate internal Wires should not automatically be mirrored over narrow remote Links, and a remote link should not splice every internal Wire (`CORE §7`, `CORE §22`).
 
 Undesigned: everything about authentication and authorization, which is the reason this is future work rather than a near-term feature. WireSpaces provides no security layer, so a remote deployment currently needs an external secure boundary.
 
@@ -232,7 +294,7 @@ Eighteen additional identifier bits are ample to carry a full 10-bit `WireNumber
 
 - the seven-named-alias-per-Link limit (`CORE §5.1`);
 - the need to spend scarce aliases on transit Wires;
-- some of the pressure behind the compact NS0 EID region (`CORE §8.3`);
+- some of the pressure behind the compact NS0 EID region (`LINK §2.4`);
 - the commissioning control-space squeeze (`LINK §2.13`), which exists only because 11 bits are fully spent.
 
 Wire, Direction, NodeId, Endpoint, and Transport semantics would be unchanged; only the projection into the identifier differs. The 11-bit profile remains valuable for the smallest nodes.
@@ -282,7 +344,7 @@ An earlier generation described a Domain Control concept: a management interface
 
 It was deferred rather than rejected. Nothing in the current architecture needs it: Endpoint registration is implementation-specific (`CORE §9.2`), configuration authority is host-side (`DEPLOY §1.1`), and privileged operations require a separate build (`CORE §22.1`). The pieces it would have coordinated are currently either local implementation detail or explicitly outside the protocol.
 
-It becomes interesting again if runtime Service replacement is ever wanted, which is also what the Endpoint lifetime problem in `CORE §9.5` is waiting on.
+It becomes interesting again if runtime Service replacement is ever wanted, which is also what the Endpoint lifetime problem in `CORE §9.7` is waiting on.
 
 Two ideas from that earlier design are worth recording, because they are the parts that were actually load-bearing:
 
@@ -302,11 +364,11 @@ Individually minor, collected so they are not re-proposed as novel:
 | Same-profile cut-through forwarding | Not the generic architecture (`CORE §12`) | Measured gateway latency problem, and only if behaviorally equivalent |
 | NodeId-based branch pruning | Flood-and-filter is the baseline (`CORE §12.1`) | Demonstrated bandwidth pressure on a multi-branch Wire |
 | Per-Wire congestion signaling | Coarse credit pools accepted (`CORE §15.6`) | A real system where head-of-line coupling is inadequate |
-| Link Manager Service | Telemetry exists; no consumer (`CORE §18.5`) | A gateway large enough for automatic policy to beat human diagnosis |
+| Link Manager Service | Telemetry exists; no consumer (`DEPLOY §3.5`) | A gateway large enough for automatic policy to beat human diagnosis |
 | Intermediate QoS profiles | Only Minimal and Full standardized (`CORE §14.1`) | Implementation experience showing a real need for `Normal+Background` |
 | Extended internal-Wire profile | 127 device-private Wires assumed ample (`CORE §4.4`) | An implementation genuinely needing hundreds of internal Wires |
 | Many-core profile | No special assumptions (`CORE §13.5`) | A very-large-many-core target, rather than canonical header bits spent now |
-| Reserved `InternalDebugWire` number | Per-deployment convention (`CORE §7.4`) | Enough deployments converging on one value to make it worth reserving |
+| Reserved `InternalDebugWire` number | Per-deployment convention (`CORE §7`) | Enough deployments converging on one value to make it worth reserving |
 | Header-extension format | ~8-byte target, not byte-exact (`CORE §2.3`) | A Link profile or Transport that actually needs an extension defined |
 
 The pattern in every row is the same, and it is the design rule from `INTRO §3`: the extension waits for a concrete implementation to demonstrate that the current model cannot solve the problem cleanly.

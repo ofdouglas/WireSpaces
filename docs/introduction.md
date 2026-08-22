@@ -101,7 +101,12 @@ The base architecture is not trying to provide:
 - mandatory full static system modeling before first communication;
 - a general byte-stream abstraction;
 - a requirement to use dynamic memory, an RTOS, or lock-free algorithms;
-- a requirement that tiny targets implement every feature.
+- a requirement that tiny targets implement every feature;
+- a defined interface between a Service and the application code that uses it.
+
+The last is deliberate rather than unfinished, and it is a statement about one boundary only. WireSpaces reaches as far as the Endpoint storage boundary — bounded delivery, declared storage semantics, declared writer concurrency, identity and authority — and stops there (`CORE §1.6`). What a Service hands to *its* user code is the Service author's design problem, because the span from a bare-metal `switch` to an RTOS task to an RTL register block to a host binding is too wide for one API vocabulary to fit honestly.
+
+The surface *below* a Service is the opposite case. The Endpoint API is meant to be a portability contract: a Service's WireSpaces-facing code should compile and behave identically across implementations on comparable stacks, so that a low-end and a high-end 32-bit MCU can run identical Service source over entirely different network stacks. That is a precondition for any Service ecosystem, and it is bounded the same way link independence is — by the Service's declared resource and timing envelope, and by whatever non-WireSpaces dependencies it reaches for.
 
 ---
 
@@ -159,7 +164,7 @@ Level 5
 
 > **Advanced features must not make Level 0 or Level 1 unnecessarily difficult.**
 
-This is a ladder of user commitment, and it is orthogonal to the implementation scaling profiles in `CORE §26`, which are a ladder of target hardware. A tiny bare-metal MCU can legitimately participate in a Level 3 system, and a Linux gateway can legitimately sit at Level 0 on a bench.
+This is a ladder of user commitment, and it is orthogonal to the implementation scaling profiles in `IMPL §2`, which are a ladder of target hardware. A tiny bare-metal MCU can legitimately participate in a Level 3 system, and a Linux gateway can legitimately sit at Level 0 on a bench.
 
 Three consequences are worth stating directly:
 
@@ -248,62 +253,11 @@ This is not a demo subset that violates the architecture. It is the architecture
 
 ## 8.2 Multicore MCU with telemetry
 
-```text
-                    MCU
-
-Core 0 Domain                Core 1 Domain
--------------                -------------
-SensorService                EstimatorService
-ControlService               PlannerService
-      \                          /
-       \                        /
-        shared-memory WS Link
-                 |
-           Core 2 Domain
-           -------------
-           HealthService
-           LogService
-           Telemetry Link
-                 |
-                CAN
-                 |
-                 PC
-```
-
-Internal application messages use device-private Wires. Same-domain traffic dispatches `Inline` or through `Serialized` Service inboxes. Cross-core traffic uses shared-memory Link Interfaces.
-
-Selected health/debug traffic uses the Internal Debug Wire, which is spliced to the host-facing telemetry Wire so it becomes visible on CAN as a network-visible WireNumber.
-
-No separate IPC middleware is required.
+See `CORE §13` (multicore Links), `CORE §7` and `DEPLOY §3.4` (Internal Debug Wire and splice), and `INTRO §6` Level 1–2 for discovery and commissioning.
 
 ## 8.3 CAN-to-Ethernet gateway
 
-```text
-CAN_A ----\
-CAN_B -----\
-CAN_C ------+--> MCU/FPGA gateway --> Ethernet --> Host
-CAN_D -----/
-```
-
-Receive path:
-
-```text
-CAN frame(s)
-    |
-CAN LLL / PDUA
-    |
-complete WS PDU
-    |
-Router table
-    |
-    +--> Ethernet TX
-    |
-    `--> optional local Endpoint Domain tap
-```
-
-Ethernet can coalesce multiple small PDUs. The gateway does not need to understand the application Service carried by every Wire.
-
-A copy-based MCU gateway may only need CAN LLL buffers, route lookup, an Ethernet TX copy queue, and a local tap copy if configured. A future FPGA implementation can replace the copies with streaming/buffer-descriptor mechanisms without changing the topology model.
+See `CORE §12` (gateway forwarding) and `DEPLOY §1.3` (recursive discovery through gateways).
 
 ---
 
@@ -315,9 +269,9 @@ A strong first implementation sequence:
 
 ```text
  1. Canonical PDU type + 40-bit descriptor helpers
- 2. Endpoint Domain Dispatcher (Inline + Serialized delivery)
+ 2. Queue and Snapshot Endpoints + Domain Dispatcher
  3. read-mostly Router + static forwarding table
- 4. copy-based send() abstraction and TX binding injection
+ 4. copy-based transmit Endpoints, Queue and Snapshot
  5. one simple host/serial or UDP Link
  6. one Classical CAN/vcan Link with PDUA + aggregate CRC
  7. LocalBus configured/unconfigured behavior
@@ -329,6 +283,8 @@ A strong first implementation sequence:
 ```
 
 Early concurrency should use mutexes, critical sections, bounded queues, and copies. More advanced routing tables, seqlocks, lock-free MPSC queues, per-Link pools, and zero-copy should be added after measurements demonstrate a need.
+
+Note that step 2 now lands on the least-settled part of the architecture rather than a well-worn one. The Endpoint API is a portability contract (`SVC-9`), so its shape is worth deciding deliberately before Services are written against it — the open items are in `REG §6.12`.
 
 Only after the above exist should the project freeze more advanced details such as UART framing, Link credits, richer Transport behavior, or static Manifest traffic analysis.
 
@@ -344,10 +300,14 @@ The current implementation state lives in `sim/`, which is at step 0: a process 
 |---|---|---|
 | `introduction.md` | `INTRO` | This document: intent, non-goals, maturity ladder, examples, roadmap |
 | `core_architecture.md` | `CORE` | The buildable protocol and node runtime. The main document |
+| `bit_layout.md` | `BITS` | Byte and bit ordering conventions; canonical descriptor packing |
 | `link_profiles.md` | `LINK` | Per-carrier encodings: Classical CAN, UART, Ethernet, I2C/SPI, others |
 | `deployment.md` | `DEPLOY` | Discovery, commissioning, Wiring, host tooling |
+| `conformance.md` | `CONFORM` | Reference vectors, boundary tests, exit criteria for provisional status |
+| `implementation.md` | `IMPL` | Language choices, scaling profiles, execution shape |
 | `future_work.md` | `FUTURE` | Material not yet designed. Nothing here is a requirement |
 | `architecture_register.md` | `REG` | Confidence levels, invariants, superseded concepts, open questions |
+| `history.md` | `HIST` | Revision history and provenance (not a control surface) |
 
 Cross-references use the document code plus a section number, for example `CORE §6.2`. A bare `§6.2` always means the current document.
 

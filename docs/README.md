@@ -21,6 +21,7 @@ Read in this order if you are new to the project:
 | [deployment.md](deployment.md) | Discovery, commissioning, Wiring, host tooling |
 | [conformance.md](conformance.md) | Reference vectors, boundary tests, exit criteria for provisional status |
 | [implementation.md](implementation.md) | Language choices, scaling profiles, execution shape for the reference code |
+| [library_architecture.md](library_architecture.md) | Core library structure, seams, and public API shape for the prototype |
 | [future_work.md](future_work.md) | Material not yet designed. Nothing here is a requirement |
 | [architecture_register.md](architecture_register.md) | Confidence levels, invariants, superseded concepts, open questions |
 | [history.md](history.md) | Revision history and provenance |

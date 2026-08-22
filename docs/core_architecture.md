@@ -210,9 +210,7 @@ Exact I2C and SPI transaction formats are `LINK §7` work; only their architectu
 
 ## 1.8 Terms intentionally no longer central
 
-Older documents used `PathTag`, `RoutingProfile`, `RoutingCode`, `PeerId`, `WireBand`, and `Main`. These are superseded by the simpler current Wire model.
-
-Current preferred terminology:
+Older documents used `PathTag`, `RoutingProfile`, `RoutingCode`, `PeerId`, `WireBand`, and `Main`. Current preferred terminology:
 
 ```text
 Main       -> Origin
@@ -222,21 +220,7 @@ MainToPeer -> OriginToNode
 PeerToMain -> NodeToOrigin
 ```
 
-The old term **Link Engine** should not be used as a catch-all for routing. Link-specific mechanics belong to the Link driver/LLL; generic Wire routing belongs to the Router. Where an older document says Link Engine, it usually means what is now the Link driver plus LLL (§1.3), and only the routing connotation is wrong.
-
-A generalized **Router Port** abstraction is not currently needed. Inter-core and internal communication channels are ordinary Link Interfaces.
-
-**Port** as an architectural term is also retired. It named the local typed interface at a Service boundary, as distinct from the network-visible Endpoint, and it was needed while delivery meant invoking a handler — the function a Service wrote was genuinely a different object from the identity the Dispatcher resolved. Bounded storage delivery collapses those into one object (§1.6), so the term now classifies without constraining. The property it carried survives without it: a Service's local interface never appears in a PDU. `TxBinding` becomes a transmit Endpoint (§10.3).
-
-Three further terms from the earliest generation have no current equivalent:
-
-```text
-Route            no separate path object; forwarding is a local table (§11)
-ParticipantId    no third identity space beyond Endpoint and Node identity
-Wire Space       survives only as an identity scope, renamed WireSpace (§4.6)
-```
-
-The full list of superseded concepts, with reasons, is `REG §5`.
+Retired terms include **Link Engine** (use Link driver/LLL for carrier mechanics, Router for Wire routing), **Router Port**, **Port** (bounded storage delivery collapses Port and Endpoint; `TxBinding` → transmit Endpoint, §10.3), **Route**, **ParticipantId**, and **Wire Space** (→ WireSpace, §4.6). Full supersession list and reasons: `REG §5`.
 
 ---
 
@@ -436,7 +420,7 @@ Current strong invariants:
 
 ## 3.4 Why a bus rather than pairwise edges
 
-An earlier family of designs tended toward one logical relationship per producer/consumer pair. The bus-oriented Wire is simpler and scales better for common embedded topologies:
+One Origin and many Nodes is one Wire, not many pairwise network objects — natural for CAN, RS-485, shared-memory broadcast, and FPGA interconnects (§4.4, §24):
 
 ```text
 Origin
@@ -447,10 +431,6 @@ Origin
   ...
   +-- Node 31
 ```
-
-is one Wire, not 31 independent network objects. This is particularly natural for CAN, RS-485 multidrop, shared-memory broadcast domains, host-to-device control groups, and FPGA on-chip interconnects.
-
-It also means a large FPGA does not need one Wire per geometric path across the fabric (§4.4, §24).
 
 ## 3.5 Physical Wires and Virtual Wires
 
@@ -487,9 +467,7 @@ redundancy or failover
 duplicate suppression
 ```
 
-Each of those exists only where something explicitly provides it: the selected Transport (§20), the Service contract (§21), a composition above the Wire (§19.2), a Link profile's flow control (§15.4), or deployment analysis (`DEPLOY §2.2`).
-
-This is worth stating positively because the bus metaphor invites the opposite assumption. "Both devices are on Wire 42" means their traffic is permitted and routable, and nothing more. In particular, configuring a Wire to reach a device by two different paths does not make the delivery redundant — redundancy is created only by a component that coordinates member Wires and owns the six responsibilities in §23.2.
+Each of those exists only where something explicitly provides it: the selected Transport (§20), the Service contract (§21), a composition above the Wire (§19.2), a Link profile's flow control (§15.4), or deployment analysis (`DEPLOY §2.2`). Membership on a Wire means traffic is permitted and routable, nothing more; multipath wiring does not create redundancy — that requires explicit composition (§23.11).
 
 ---
 
@@ -728,75 +706,26 @@ After canonicalization:
 
 No generic subsystem should continue carrying the label `kLocalBus` once canonicalization succeeds.
 
-## 5.3 Anonymous LocalBus fallback on RX
+## 5.3 Anonymous LocalBus
 
-If this Link's own physical Wire has **not** been assigned a canonical WireNumber, received `kLocalBus` traffic is still valid. It represents an **Anonymous Local-Bus Wire** — a real bus that has no canonical identity yet:
+If this Link's own physical Wire has **not** been assigned a canonical WireNumber, received `kLocalBus` traffic is still valid — an **Anonymous Local-Bus Wire**, a real bus with no canonical identity yet:
 
 ```text
-RX kLocalBus
-    + this Link's own Wire is unnamed
-        -> local Endpoint Domain delivery allowed
-        -> generic cross-Link forwarding not allowed
-        -> splicing not allowed
+RX kLocalBus + unnamed native Wire
+    -> local Endpoint Domain delivery allowed
+    -> generic cross-Link forwarding not allowed
+    -> splicing not allowed (§5.8)
 ```
 
-This enables a one-bus prototype to work without assigning any WireNumber.
+Logs should disambiguate: `CAN_A::LocalBus`, not bare `LocalBus`.
 
-For diagnostics before naming, logs should disambiguate the physical context:
+**TX:** zero-configuration TX only when unambiguous — one eligible Link Interface may use anonymous LocalBus; zero or two+ eligible interfaces fail until Wiring assigns a Wire. No guessing from "first Link," recent RX, or heuristics. Configuration gradient: one Link ≈ zero Wire config; several Links need explicit binding; gateway/multihop needs canonical WireNumber.
 
-```text
-CAN_A::LocalBus
-UART_0::LocalBus
-```
-
-rather than writing only `LocalBus`.
-
-## 5.4 Anonymous LocalBus TX
-
-Zero-configuration TX is allowed only when unambiguous.
+**Forwarding:** anonymous LocalBus must **never** be forwarded as `kLocalBus` onto another Link (`kLocalBus` on the egress Link means that Link's own native Wire):
 
 ```text
-0 eligible Link Interfaces:
-    fail
-
-1 eligible Link Interface:
-    anonymous LocalBus TX may automatically use that Link
-
-2+ eligible Link Interfaces:
-    ambiguous -> fail until Wiring assigns/selects a Wire
-```
-
-The protocol should not guess based on "first Link," recent RX traffic, or hidden heuristics.
-
-This produces a useful configuration gradient:
-
-```text
-one Link      -> almost zero Wire configuration
-several Links -> explicit destination binding becomes necessary
-gateway/multihop -> canonical WireNumber is required
-```
-
-Configuration is introduced when the topology actually creates ambiguity.
-
-## 5.5 Anonymous LocalBus forwarding invariant
-
-An anonymous LocalBus must **never** be forwarded as `kLocalBus` onto another Link.
-
-Bad:
-
-```text
-CAN_A kLocalBus -> gateway -> CAN_B kLocalBus
-```
-
-because `kLocalBus` on CAN_B means CAN_B's own native Wire, which may be unrelated.
-
-Correct:
-
-```text
-CAN_A kLocalBus
-    -> alias map -> Wire 42
-    -> Router
-    -> CAN_B Wire 42 -> alias 3
+Bad:     CAN_A kLocalBus -> gateway -> CAN_B kLocalBus
+Correct: CAN_A kLocalBus -> alias map -> Wire 42 -> Router -> CAN_B Wire 42 -> alias 3
 ```
 
 If CAN_A's LocalBus has no canonical mapping, cross-Link forwarding fails by construction.
@@ -989,7 +918,7 @@ The NodeId uniqueness requirement has a consequence worth stating explicitly: if
 
 A conventional use of device-private Wires and splicing is a **default debug/maintenance path**: Services publish to a device-private `InternalDebugWire`; an explicitly configured splice before egress makes selected traffic visible on a host-facing Wire. Without a splice, device-private traffic stays on the device by construction (`SCOPE-1`).
 
-The splice is the trust boundary where private traffic becomes externally visible. A remote maintenance link should not blindly splice every internal Wire (§22). Host tooling conventions, default `debug_tx` bindings, and the telemetry path are in `DEPLOY §3.4`–`§3.5`.
+The splice is the trust boundary where private traffic becomes externally visible. A remote maintenance link should not blindly splice every internal Wire (§22). Host tooling conventions, default `debug_tx` bindings, and the telemetry path are in `DEPLOY §3.2`–`§3.3`.
 
 **Open:** whether `InternalDebugWire` receives a standard reserved device-private WireNumber, or remains a per-deployment convention (`REG §6.2`).
 
@@ -1093,11 +1022,9 @@ arrival       the acceptance timestamp or tick (§9.4)
 
 ### Metadata is copied at acceptance, never viewed
 
-It is tempting to hand the consumer a read-only view into the ingress PDU rather than copying anything. Under bounded delivery that cannot work, and the reason is worth being precise about:
+> **A view into ingress storage cannot survive the storage boundary.** The consumer reads later, in its own context, after the LLL buffer is reclaimed. Metadata is copied into the Endpoint at acceptance (`§16.1`).
 
-> **A view into ingress storage cannot survive the storage boundary.** The consumer reads later, in its own context, by which time the LLL's receive buffer has been reclaimed or reused. Metadata is copied into the Endpoint at acceptance.
-
-This is `§16.1`'s borrowed-view rule meeting deferred consumption: a borrowed view is valid for one documented call or lease scope, and asynchronous delivery has neither. A view was viable under `Inline` precisely because the consumer ran before the buffer was released; withdrawing `Inline` withdraws the view with it. The *API* may still be an opaque read-only accessor — that is good encapsulation and keeps the wire encoding out of Service code — but it is backed by copied fields, not by a pointer into a PDU.
+Opaque read-only accessors are fine; they are backed by copied fields, not pointers into ingress storage.
 
 ### Metadata is declared, because it is not free
 
@@ -1149,13 +1076,13 @@ Routing itself stays synchronous and cheap. A Link RX path still calls the Route
 
 ### Why the boundary is mandatory rather than optional
 
-An earlier version of this architecture offered `Inline` and `Serialized` as declared per-Endpoint policies. `Inline` is withdrawn, and the reason is not tidiness:
+`Inline` delivery (withdrawn) made a Link's worst-case execution time depend on every Service that might be delivered to — unanalyzable and deployment-dependent. Bounded storage fixes that:
 
-**Inline delivery makes a Link's worst-case execution time depend on every Service that might be delivered to.** A CAN receive task that can synchronously enter application code cannot be analyzed in isolation, and its worst case changes when a deployment adds a Service its author never saw. Everything else follows from that. Message topology stops becoming call topology, so stack depth no longer depends on wiring. A Service can no longer reenter itself because it transmitted while handling a receive. The questions every Service otherwise has to answer — which context invokes me, may I block, am I reentrant, which primitives are safe here — stop having deployment-dependent answers.
+- modular WCET for Link RX paths;
+- coherent model across firmware, host, and RTL (no callback into an RTL Endpoint);
+- traded latency: consumer scheduling delay enters the loop; same-loop Link service then Endpoint drain minimizes extra delay (`CONFORM §3`).
 
-It also makes the model coherent with its own targets. An RTL Endpoint *is* a FIFO or a register block; there is no callback available, so `Inline` never existed there. Bounded storage is the only delivery model that spans firmware, host software, and RTL without a special case.
-
-The honest cost is latency. `Inline` was the lowest-latency path, and a storage boundary puts the consumer's scheduling delay into the loop. The trade is deliberate: `Inline` bought lower *typical* latency at the price of an unbounded worst case in the other direction, and for a control system an analyzable bound on both sides is worth more. One practical consequence deserves stating, because it is the difference between microseconds and a full period: a consumer that services its Links and then drains its Endpoints in the same loop iteration pays roughly one copy, while one that drains before servicing pays a whole cycle. Loop ordering is now an application concern worth checking (`CONFORM §3`).
+Rationale and history: `decision-bounded-endpoint-delivery.md`.
 
 ### What acceptance includes
 
@@ -1163,7 +1090,7 @@ Acceptance is framework work, and two parts of it are required rather than optio
 
 **Arrival time is captured at acceptance** wherever it is carried at all. With consumer latency now inside the delivery path, a Service can no longer distinguish "produced late" from "consumed late" by observing when it dequeued something, so recording it later is worthless. Freshness handling (§21.4) depends on it — a timestamp or a monotonic tick, per the platform's available time base. Snapshot Endpoints always carry it; a Queue declares it with the rest of its metadata (§9.3).
 
-**Nothing else runs.** Acceptance validates, stores, updates counters, and returns. It does not call application code, allocate, block, or invoke another Endpoint. Whether a narrowly scoped synchronous hook is ever permitted for instrumentation is an open question (`REG §6.12`); no such hook exists today, and application-supplied ones are not in prospect, because an unrestricted user callback recreates precisely the problem this rule removes.
+**Nothing else runs.** Acceptance validates, stores, updates counters, and returns — no application code, allocation, block, or Endpoint callback (`REG §6.12`).
 
 ## 9.5 Endpoint storage semantics
 
@@ -1395,7 +1322,7 @@ For Snapshot this keeps the sampled and sent generations single scalar fields in
 
 Useful defaults reduce configuration during bring-up:
 
-- single-Link anonymous LocalBus (§5.4);
+- single-Link anonymous LocalBus (§5.3);
 - the device-private Internal Debug Wire (§7), which is the natural default for `debug_tx`.
 
 Safety- or control-critical application outputs should generally require explicit bindings rather than silently falling back to a development/debug route.
@@ -1737,7 +1664,7 @@ semantic level      only the addressed participant is a recipient
 
 This is what makes §12.1 acceptable. Flooding is a bandwidth trade, not a widening of authority, and pruning by NodeId later changes efficiency without changing who was ever a participant.
 
-Two consequences are worth naming. First, a device that consumes traffic it merely observed is misbehaving, even though nothing on the bus can stop it; `NodeToOrigin` publications observed by other Nodes (§3.1) are usable only where configuration explicitly permits it. Second, observation without configuration is exactly what promiscuous mode (`DEPLOY §3.3`) is for, and that mode is deliberately restricted to host tooling and gateways and never creates Wiring.
+Two consequences are worth naming. First, a device that consumes traffic it merely observed is misbehaving, even though nothing on the bus can stop it; `NodeToOrigin` publications observed by other Nodes (§3.1) are usable only where configuration explicitly permits it. Second, observation without configuration is exactly what promiscuous mode (`DEPLOY §3.1`) is for, and that mode is deliberately restricted to host tooling and gateways and never creates Wiring.
 
 The same rule applies to broadcast, which deserves its own list because it is the case most often over-read. `NodeId 0` addresses the configured Nodes of one Wire. It does not:
 
@@ -2129,7 +2056,7 @@ A generalized TCP-like end-to-end congestion-control protocol is **not currently
 
 ## 15.1 Congestion occurs at a Link resource
 
-A Wire itself is not inherently "congested." Multiple Wires may converge on one slow Link:
+Congestion is a bounded TX-resource outcome (§14.4), not a Wire property. Multiple Wires may converge on one slow egress Link:
 
 ```text
 Wire A --\
@@ -2138,7 +2065,7 @@ Wire C ----+--> CAN_A TX queues --> bus capacity
 Wire D ---/
 ```
 
-The constrained resource is the egress Link Interface and its queues/serialization bandwidth. Link drivers/interfaces are therefore the authoritative source for queue occupancy, free TX storage, utilization, drop/reject counts, and link state.
+Link drivers/interfaces are the authoritative source for queue occupancy, free TX storage, utilization, drop/reject counts, and link state.
 
 ## 15.2 Static prevention is the preferred serious-deployment mechanism
 
@@ -2184,14 +2111,9 @@ If pressure propagates through several gateways, each upstream Link can reduce i
 
 **Strong candidates:** UART, RS-485, Ethernet WS links, USB-like streams, FTDI/FIFO links, shared-memory/FIFO links.
 
-**Classical CAN:**
+**Classical CAN:** see `LINK §2.11` (gateway upstream credit via §15.3).
 
-- ordinary Nodes should not be required to participate in generic Link flow control;
-- normal traffic is expected to be mostly static/bounded periodic traffic;
-- reliable image/file transfer should use Transport receiver windows/credits;
-- a CAN gateway's **TX queue pressure can still influence credit on an upstream Ethernet/UART/etc. Link**.
-
-**CAN FD / CAN XL:** may justify richer Link-level flow control in some profiles due to larger/faster transfers; still optional.
+**CAN FD / CAN XL:** may justify richer Link-level flow control in some profiles; still optional.
 
 A Link capability advertises whether hop-by-hop flow control is supported (§17).
 
@@ -2263,7 +2185,7 @@ Endpoint Queue and Snapshot storage (§9.5)
 fragment reassembly contexts (LINK §2)
 Transport retry windows and reassembly state (§20)
 gateway forwarding buffers (§12)
-observation, tap, and promiscuous-capture buffers (DEPLOY §3.3)
+observation, tap, and promiscuous-capture buffers (DEPLOY §3.1)
 credit and flow-control accounting state (§15.4)
 diagnostic counters and event storage (§18)
 ```
@@ -2506,17 +2428,9 @@ An empty response from a polled Link is not an error (§1.7).
 
 ### Rejection is silent on the wire
 
-One rule governs all of the above:
-
 > **Malformed, unrepresentable, or unauthorized traffic is counted and dropped. No error response is generated to the sender.**
 
-A WS node does not reply to traffic it refuses, and it does not emit anything resembling a CAN error frame at the PDU level. The reasons are worth stating because the alternative looks helpful:
-
-- **Authority.** Replying to unauthorized traffic requires a Wire and Endpoint that the sender, by definition, is not authorized for. There is no legitimate reverse path to use.
-- **Amplification.** A device stuck emitting a bad PDU would induce a matching flood of complaints, turning a single fault into bus-wide load exactly when the bus is already unhealthy.
-- **Diagnosis is a Service, not a reflex.** The information belongs in the local counters and in the telemetry Service (`DEPLOY §3.5`), where a host can poll it deliberately at a rate it controls.
-
-Errors are therefore reported *upward and locally*, never *backward and automatically*. This applies to receive rejection; a local send failure is still reported synchronously to the calling Service (§14.4), which is a return value and not wire traffic.
+Report upward locally via counters and the telemetry Service (`DEPLOY §3.3`). A local send failure is a synchronous return value to the calling Service (§14.4), not wire traffic.
 
 ### Diagnostic containment
 
@@ -2601,7 +2515,55 @@ Which QoS class dominated the burst?
 When did the congestion begin and end?
 ```
 
-Host-facing telemetry Service conventions and optional per-Wire top-talker reporting are in `DEPLOY §3.5`.
+Host-facing telemetry Service conventions and optional per-Wire top-talker reporting are in `DEPLOY §3.3`.
+
+## 18.4 Live and latched status have different lifetimes
+
+Status divides into two kinds with genuinely different availability, and merging them produces a diagnostic surface that goes blank at exactly the moment it was needed.
+
+**Live status** describes the current runtime and may stop being observable when that runtime fails:
+
+```text
+Link and restart-unit lifecycle state (§23.1)
+enabled / configured / operational flags
+current queue and pool occupancy, congestion state
+heartbeat and last-progress time
+counters scoped to the current runtime generation (§23.3)
+```
+
+**Latched status** is evidence, and is stored where a failure cannot take it with it:
+
+```text
+last fault code, source, and timestamp
+restart counts
+last recovery reason, action, and result
+error and drop totals intended to survive restart
+count of suppressed or rate-limited diagnostics
+```
+
+> **A live snapshot that has stopped changing does not mean healthy.** It is at least as likely to mean the thing producing it stopped.
+
+That inference is the reason the split matters: a reader that only has live status cannot distinguish a quiet system from a dead one, whereas latched fault and restart records remain readable from outside the failed runtime and answer the question directly. Which storage is durable across what boundary is set in §23.7.
+
+## 18.5 Unavailable is not zero
+
+A telemetry consumer needs to distinguish several conditions that a naive encoding flattens into one:
+
+```text
+valid          observed now, at the source
+stale          last known good, with an age
+unavailable    the source could not be observed
+not applicable this Link or profile has no such thing
+omitted        the selected telemetry schema does not carry this field
+```
+
+> **None of these may be encoded as an ordinary zero, false, or healthy value.**
+
+The concrete failure is worth naming because it is easy to write by accident. A Link with no credit-based flow control (§15.4) has no credit balance at all; reporting it as *zero credit* says the link is stalled and out of credit, which is a different and alarming condition. The same applies to a per-QoS queue depth on a Link whose classes share one inseparable hardware queue: reporting a fabricated split is worse than reporting that the split is not observable.
+
+Age carries a matching subtlety. It is elapsed monotonic time from the observation to the point the report was assembled, not wall-clock time and not evidence of clock synchronization, and a saturated maximum means "this old or older" rather than a specific value. This is the same freshness discipline Services owe their own data (§21.4), applied to the diagnostics.
+
+How these states are encoded — validity bits, reserved codes, per-section maps — is a schema decision (`REG §6.7`). That they are *distinguishable* is not.
 
 ---
 
@@ -2669,7 +2631,7 @@ Patterns above the bare Wire will eventually be wanted — request/response corr
 
 > **A composition pattern must reduce, at generation or configuration time, to ordinary Endpoints, Wires, bindings, and bounded local state.** The Router and the LLL must never need to understand the pattern.
 
-So a request/response pair flattens into two directed exchanges on existing Wires plus correlation state held by the requesting Service. A redundancy group flattens into several ordinary member Wires plus the coordination state described in §23.2. In both cases the data plane sees nothing new: the same canonical PDUs, the same forwarding table, the same dispatch.
+So a request/response pair flattens into two directed exchanges on existing Wires plus correlation state held by the requesting Service. A redundancy group flattens into several ordinary member Wires plus the coordination state described in §23.11. In both cases the data plane sees nothing new: the same canonical PDUs, the same forwarding table, the same dispatch.
 
 What this buys is specific. It keeps the forwarding path from accumulating cases, so a gateway written today still forwards correctly for patterns invented later, and it keeps a tiny Node from paying for abstractions it never uses. It is the mechanism behind `REG PDU-1` — the complete PDU stays the generic forwarding unit — extended upward instead of downward.
 
@@ -2849,7 +2811,7 @@ Freshness is the receive-side counterpart to the choices this architecture makes
 
 The practical minimum is unglamorous and cheap: a receiver that expects periodic data times out on absence and enters a defined degraded state, rather than continuing to act on the last value indefinitely. That single behavior is what makes an unreliable Transport safe (§20.2), and it is worth more than most delivery guarantees.
 
-Duplicates need the same treatment. Non-transactional multi-egress (§12.2), retried request/response, and future redundancy compositions (§23.2) can all present the same logical update twice. A Service that is not idempotent must say how duplicates are recognized and suppressed, and that suppression belongs to the Service or the composition — not to the Router, which deliberately has no duplicate-suppression state (§12.4).
+Duplicates need the same treatment. Non-transactional multi-egress (§12.2), retried request/response, and future redundancy compositions (§23.11) can all present the same logical update twice. A Service that is not idempotent must say how duplicates are recognized and suppressed, and that suppression belongs to the Service or the composition — not to the Router, which deliberately has no duplicate-suppression state (§12.4).
 
 Both outcomes are observable error categories (§18.1), so a system can report stale-data rejections and detected duplicates as counters rather than discovering them by behavior.
 
@@ -2896,7 +2858,7 @@ raw frame injection on a Link
 replay of captured traffic
 firmware update in unconstrained form
 fault injection and forced-fault control
-promiscuous observation (DEPLOY §3.3)
+promiscuous observation (DEPLOY §3.1)
 ```
 
 Each needs an explicit development or engineering build to exist at all. The distinction matters because a configuration-gated capability is one bad forwarding table, one mis-scoped splice, or one compromised host away from being reachable — whereas a capability that was never compiled cannot be reached by any sequence of messages.
@@ -2907,19 +2869,145 @@ For initial implementations and examples this means: favor receive-only observat
 
 ---
 
-# 23. Reliability, Restart, and Redundancy Boundaries
+# 23. Lifecycle, Restart, and Redundancy Boundaries
 
-WireSpaces should favor recoverable, bounded components. Likely recoverable units are LLL instances, Link Interfaces/drivers, Services, and Endpoint Domains; the base Router is close to static state and may have little dynamic state to restart. Detailed restart policy is component-specific and undesigned (`FUTURE §6`).
+WireSpaces should favor recoverable, bounded components. Likely recoverable units are LLL instances, Link Interfaces/drivers, Services, and Endpoint Domains; the base Router is close to static state and may have little dynamic state to restart.
 
-## 23.1 Link/status observability after failure
+Exact lifecycle enumerations, transition APIs, supervisor interfaces, and escalation parameters are implementation-owned and remain undesigned (`FUTURE §6`). What follows is the part that is not free to vary, because breaking it is visible to peers, to application code, or to whoever is reading the evidence after the failure.
 
-Because Link Telemetry can be reported over other healthy Links or internal debug paths, a device with multiple Links can often expose failure data even when one Link has failed.
+## 23.1 A Link and its restart unit have separate lifecycles
 
-## 23.2 Redundancy by composition
+Two different things can be down, and conflating them leaves a system whose only recovery is a reboot.
 
-The base Wire is not multipath and has exactly one Origin. Redundancy should initially be composed from multiple Wires rather than by giving one Wire hidden failover semantics. This keeps authority and failure behavior explicit.
+A **Link** is a configured attachment that can be administratively enabled or disabled and can also fail on its own:
 
-Composition is not free, though — it relocates work rather than eliminating it. Anything that coordinates redundant Wires must own, explicitly:
+```text
+disabled -> starting -> up
+    ^          |         |
+    |          v         v
+    +------ stopping <- degraded / faulted
+```
+
+A **restart unit** is the execution and fault-containment scope owning that Link's mutable state — parser and reassembly state, TX scheduling, timers, queues:
+
+```text
+stopped -> starting -> running -> stopping -> stopped
+                          |
+                          v
+                       faulted -> restarting -> starting
+```
+
+State names are implementation-defined. The contract is not:
+
+```text
+explicit start, stop, reset, enable, and disable requests
+idempotent handling, or explicit rejection, of a redundant request
+bounded acceptance and a completion report for every accepted request
+a defined terminal result for TX/RX work interrupted by stop or restart
+rejection of new work while the target cannot accept it
+a runtime generation separating before-restart from after-restart (§23.3)
+```
+
+> **Lifecycle control is not only a fault path.** Power management, maintenance, commissioning (`DEPLOY §1.2`), and reinitialization use the same operations — not only fault recovery.
+
+## 23.2 The restart unit
+
+The LLL instance is the natural default (`§13.3`, `LINK-11`). Grouping is permitted where scheduling or fault containment justifies it; **every mutable state item has exactly one owning restart unit**.
+
+A restart unit owns local Link state, not Wires: restarting makes paths temporarily unavailable without redefining a Wire or transferring producer authority (§1.7). In-flight traffic is lost and counted.
+
+## 23.3 Runtime generation
+
+> **A restart unit exposes a generation value that changes on every restart, and no observation may be compared or combined across a change in it.**
+
+Without it, counters, high-water marks, and handles suffer quiet mis-attribution across restart (including ABA on slot indices). Generation is local, not a clock; distinct from Endpoint snapshot generation (§10.4).
+
+## 23.4 Bounded quiesce, and discarding uncertain work
+
+> **Stopping must not wait indefinitely for a failed driver or an absent peer.**
+
+Declare a quiesce deadline; interrupted transmits reach a defined terminal outcome (§16.1).
+
+> **Transient state whose validity cannot be established is discarded, not reconstructed from partial evidence.**
+
+Half-parsed frames, incomplete reassembly, unknown TX completion: discard and count (§18.1). Continuity across restart is end-to-end (§21.4), not Link-local guessing.
+
+## 23.5 Recovery escalates from the smallest scope
+
+```text
+1  clear or reinitialize the Link driver
+2  disable and re-enable the Link
+3  rebuild the owning restart unit's transient state
+4  restart a larger communications subsystem, if the platform has one
+5  reset the device
+```
+
+An escalation policy declares attempt limits, backoff, and promotion rules. Avoid recovery busy-loops and diagnostic storms; do not skip escalation levels (a driver error should not default to device reset).
+
+## 23.6 Restart isolation is a claim, and must be declared
+
+> **Restarting one Link should not stop healthy sibling Links** — unless shared hardware, clocks, memory, or driver state genuinely prevents isolation, in which case that dependency is declared in configuration (`DEPLOY §2.2`).
+
+## 23.7 What outlives a restart, and its reset boundary
+
+A restart discards:
+
+```text
+partial frames and decoder state
+incomplete reassembly contexts
+pending timers and transient scheduler state
+in-progress transfers that cannot be completed safely
+queued work whose cancellation result has been reported
+counters explicitly scoped to the runtime generation
+```
+
+The following has to live somewhere a restart cannot reach:
+
+```text
+static configuration and profile selection
+diagnostic counters required to survive restart
+latched fault and restart records (§18.4)
+supervisor state and recovery attempt history
+resources shared with other restart units
+storage backing buffers already transferred to application ownership
+```
+
+Buffers transferred to application ownership must survive the Link restart that filled them (§16.1, `OWN-3`).
+
+> **"Persistent" here means surviving a restart unit's reconstruction. It does not mean surviving power loss** — each counter declares which boundary applies.
+
+## 23.8 A supervisor must sit outside what it supervises
+
+A restart unit cannot be relied on to detect all of its own failures, because the interesting cases are precisely the ones where the thing that would have noticed is the thing that stopped.
+
+What an external supervisor should be able to observe:
+
+```text
+missing execution heartbeat, or a missed deadline
+no RX/TX progress where progress was expected
+driver fault, or repeated restart
+invariant violation
+sustained queue or pool exhaustion
+explicit transition to faulted
+```
+
+> **A heartbeat written by the failed context and read only by that same context is not supervision.**
+
+Progress expectations, timeouts, and restart authority are configuration (`DEPLOY §2`). Conclusions are recorded outside state about to be discarded.
+
+## 23.9 An out-of-band debug path
+
+Low-complexity path independent of LLL parsing, dispatch, main buffer pool, telemetry, and restartable runtime state — complementary to the in-band Internal Debug Wire (`§7`, `DEPLOY §3.2`). Privileged capability (§22.1).
+
+## 23.10 Link/status observability after failure
+
+> **A failed Link is not required to report its own failure.**
+
+A healthy sibling Link or debug path can carry latched fault records and unavailable live state (`§18.4`, `DEPLOY §3.3`).
+
+## 23.11 Redundancy by composition
+
+The base Wire is not multipath and has exactly one Origin. Redundancy is composed from multiple Wires with explicit coordination of the six responsibilities below — not hidden failover on one Wire.
 
 ```text
 message-instance correlation   recognizing that two arrivals are one update
@@ -2930,14 +3018,12 @@ per-Wire health                each member's own liveness, independently observe
 per-sink coverage              which sinks are actually covered by which members
 ```
 
-That list is the price of admission. A design that claims redundancy without answering all six has usually just built duplicate traffic. Note also that none of it lives in the Router: the forwarding path has no duplicate-suppression state (§12.4), so this coordination is Service- or composition-level and must flatten into ordinary Wires and bounded local state per §19.2.
+Router forwarding has no duplicate-suppression state (§12.4); coordination is Service- or composition-level (§19.2).
 
-Two distinctions keep the model honest:
+- **Path redundancy ≠ replicated sources** — member Wires normally share one semantic producer identity.
+- **Observation is not coverage** — promiscuous observers (`DEPLOY §3.1`) are not failover paths.
 
-- **Path redundancy versus replicated sources.** Ordinary redundant member Wires carry the *same* producer's data over different paths, and normally share one semantic producer identity even though they are distinct configured Wires with separate health. Voting or arbitration across *genuinely independent* producers is a different problem with different failure modes, and should not be described in the same terms.
-- **Observation is not coverage.** A promiscuous or diagnostic observer (`DEPLOY §3.3`) that happens to see a Wire's traffic provides no redundancy coverage, is not a failover path, and never participates in duplicate suppression. Only configured members count.
-
-Cyclic and redundant forwarding profiles at the routing level remain deferred; the acyclic realization rule (§12.4) still holds, and redundancy composed above Wires does not violate it because each member Wire is independently acyclic.
+Cyclic/redundant *routing* profiles remain deferred; acyclic realization (§12.4) still holds for composed redundancy.
 
 ---
 
@@ -2975,33 +3061,20 @@ The host should not need to know whether an Endpoint is implemented in C++ or Sy
 
 # 25. Small MCU Profile
 
-A tiny implementation may have:
-
 ```text
-one Physical Link
-one Endpoint Domain
-few Services
-copies everywhere
-no dynamic allocation
-no Router task
-no network task
-no locks
+one Physical Link, one Endpoint Domain, few Services
+copies everywhere; no dynamic allocation; no Router/network task; no locks
 ```
 
-Receive: frame RX -> decode PDU -> switch/linear lookup on EID -> copy into that Endpoint's storage.  
-Transmit: Service -> write its transmit Endpoint -> LLL drains or samples it.
+Receive: frame RX → decode → dispatch on EID → copy into Endpoint storage. Transmit: Service → transmit Endpoint → LLL drains or samples. The storage boundary applies (§9.4) — typically one slot per Endpoint; cost is one copy and a loop iteration.
 
-The storage boundary is not a luxury a tiny node opts out of (§9.4). It is also cheaper than it sounds: a node with one receive Endpoint needs one message-sized buffer at depth 1, and a Snapshot needs exactly one value. What the boundary costs on this class of target is a copy and a main-loop iteration; what it buys is that the CAN receive path's execution time no longer depends on what the application does with the message.
+A constrained CAN node may use only `kLocalBus`, optimized N=1, NS0, and EIDs 1..127 (`LINK §2.4`) and still interoperate with richer hosts.
 
-Two shapes suit this profile particularly well. A Snapshot transmit Endpoint lets a periodic publisher write current state whenever it likes and lets the LLL sample it on its own cadence, with no queue at all (§10.4). And a bare-metal main loop can drain several Endpoints in sequence — service Links first, then drain, or pay a full period (§9.4).
+A conforming implementation need not instantiate runtime Link/LLL/Router objects if generated static equivalents preserve semantics, bounds, ownership, diagnostics, and compatibility fingerprint (`DEPLOY §2.4`).
 
-A constrained CAN node may support only `WireAlias = kLocalBus`, optimized N=1, Namespace 0, and EID < 128, and still interoperate meaningfully with richer WS hosts and gateways.
+Collapsing to a `switch` and constants is fine, but **semantic and authority distinctions must survive the fold** — one Origin, configured Endpoint acceptance only, bindings grant only declared transmit rights.
 
-The implementation should not be forced to instantiate abstract runtime objects that exist only to model features it cannot use. More generally, a conforming implementation is not required to instantiate runtime Link, LLL, Router, Wire, or Endpoint objects at all, provided the generated static equivalent preserves the same externally visible semantics, validation, bounds, ownership, diagnostics, and compatibility fingerprint. Generated tables, switch statements, descriptors, state machines, configuration images, and RTL parameters are all legitimate projections of the same model (`DEPLOY §2.4`).
-
-There is one thing collapsing does not license. A tiny target may fold Service, dispatch, and Link handling into a single `switch` and a few constants, but the **semantic and authority distinctions must survive the fold**. The compiled-out Router still had exactly one Origin; the inlined dispatch still accepted only configured Endpoint identities; the constant-folded binding still granted only the transmit rights it was given. What disappears is the runtime object, not the rule — otherwise the small node becomes the hole in every property the larger system relies on, and it is usually the node with the least review.
-
-Scaling profiles for other targets, language choices, and execution shape are in `IMPL`.
+Scaling profiles for other targets are in `IMPL`.
 
 ---
 

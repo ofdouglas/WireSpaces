@@ -1,4 +1,4 @@
-﻿# WireSpaces — Revision History
+# WireSpaces — Revision History
 
 **Status:** Provenance and change log only — not a control surface  
 **Purpose:** Record how the document set evolved  
@@ -8,9 +8,103 @@ Cross-references use document codes. Section numbers in older entries refer to l
 
 ---
 
-# 1. Revision 0.9 — bounded Endpoint delivery, `Port` retired, descriptor packing fixed
+# 1. Revision 0.12 — `LIB` built on the existing utility layer
 
-## 1.1 Bit and byte layout
+`Design/Firmware` was surveyed for components the core library would otherwise reinvent, and `LIB` was reworked to depend on them. The finding was that most of the utility layer already exists and is better tested than anything written fresh would be: `util::Span` replaced the `Span` the previous revision had invented, `RingBuffer` became the Queue Endpoint storage, and `hal::PlatformClock` became the time source.
+
+Two findings mattered more than the convenience.
+
+The first narrowed `REG §6.8`. `Firmware/crc` already implements and vector-tests candidate CRC-8 and CRC-16 algorithms, so the choice `LINK-6` needs is now between implemented options rather than table entries. It also surfaced a hard constraint that was not previously visible: the existing bitwise implementation asserts against reflection, so any reflected polynomial requires implementing reflection first. `REG §6.8` records both, and gained an open item about whether incremental CRC is needed for fragmented PDUs.
+
+The second was that `util/integer.h` contains, in `Uint24_s`, exactly the pattern the identity types want — a narrow value in a wider container whose serialization *fails* rather than truncating — and a TODO asking for the general form. `BITS §2` gives a WireNumber 10 bits and a NodeId 5, so out-of-range values are reachable and `PDU-2` requires rejecting them. Resolving that TODO into a general bounded-integer type would make reject-don't-mask a property of the type rather than a rule the codec must remember at each field boundary. `LIB §4.1` is written assuming it, with the plain-integer fallback stated.
+
+Three smaller things were recorded because they cost nothing to know now and are annoying to discover later. `memory_pool.h` does not compile as written, `RingBuffer` sits at global scope against the project's own namespace rule, and `Can::CanFrame` is not a usable base for the CAN profile because it carries bootloader-specific CRC and HDLC framing. None blocks phase 1.
+
+`LIB` also gained a build-integration section. The two trees use different build systems, but everything reused is header-only except `crc.cpp`, so an include path suffices; a vendored copy was considered and rejected as silently divergent. One consequence worth noting: a core that includes six `Firmware` headers is not meaningfully standalone, which weakens the case for keeping it separate from `Firmware` at all — that remains open in `LIB §15`.
+
+`Timestamp` was also separated from the platform clock, since a 64-bit nanosecond time point costs eight bytes in every stored slot against `CORE §9.3`'s budget of roughly four. Its resolution and wrap behavior are now open in `REG §6.7`.
+
+---
+
+# 2. Revision 0.11 — `LIB` added
+
+`library_architecture.md` (`LIB`) was added: module structure, seam mechanisms, and public API shape for the prototype core library. It changes no architecture and adds no invariants — `CORE` remains the source of behavior — but it is where the first implementation's structure gets argued about before code exists.
+
+Three of its choices are worth noting here because they are provisional answers to items `REG §6` had left open, and are recorded as candidates rather than decisions (`CONFORM §1.1`):
+
+- **Endpoints store bytes, not a decoded type**, until a generated codec exists. Hand-written decode called from acceptance would be unbounded-by-construction work in a Link's context, which is what `DISP-2` exists to prevent, so the byte form is what keeps acceptance trivially bounded. It also defers the `T` naming question in `REG §6.12` instead of answering it by accident.
+- **Declared metadata as a template parameter**, with the accessor type differing per level so that reading an undeclared field is a compile error. `REG §6.12` stated that preference; this is the cheapest mechanism that delivers it, and a runtime "unavailable" flag cannot.
+- **One wide reason registry plus a narrow API result type**, with a documented mapping between them. This is a third option for the question in `REG §6.7`, and it keeps a call-site `switch` exhaustive while still guaranteeing telemetry has one table.
+
+Two structural commitments are the part most worth protecting as the library grows. The dependency direction — `core` depending only on `platform`, with `link` and `forwarding` connected through two one-method interfaces — is what keeps each module testable alone. And the split between the framework-facing and Service-facing faces of an Endpoint is structural rather than documented: acceptance is a private virtual override reachable only through the dispatch interface, while the read side is a concrete templated API, so Service code cannot inject into its own Endpoint and the portability contract carries no indirection.
+
+The library also creates no tasks and owns no loop, which turns `IMPL §3`'s execution shape from an observation into a constraint on the code.
+
+---
+
+# 3. Revision 0.10 — lifecycle and restart, telemetry lifetimes, validation discipline
+
+Two `WS_old` sources were mined: `link_engine_runtime_and_status.md` and `prototype_and_validation.md`. They divided cleanly. The first was almost entirely recoverable, because it addressed a subject the current documents had explicitly deferred. The second was almost entirely superseded on protocol content — old `Control` order, `WireBand`, `PathTag`, `PeerId`, ascending QoS, PDUA to `N=16` — but its *validation discipline* was the best material in either document and survived intact.
+
+## 2.1 Lifecycle and restart
+
+`CORE §23` had been a stub: four sentences naming likely recoverable units and deferring everything else to `FUTURE §6`. It is now the lifecycle chapter, and `OWN-4`'s open question about terminal outcomes during restart is answered. Ten invariants were added as a new family (`RUN-1`..`RUN-10`).
+
+The load-bearing recoveries, each of which was absent rather than superseded:
+
+- **A Link and its restart unit have separate lifecycles** (`RUN-1`). Conflating them is what produces a system whose only recovery is a reboot. The corollary is easy to miss and worth as much: lifecycle control is not only a fault path — power management, maintenance, and commissioning use the same operations, so an implementation that can only bring a Link down by faulting it reports every planned shutdown as an incident.
+- **The restart unit** (`RUN-2`, `CORE §23.2`). The old term for this was *Link Engine*, superseded for being a routing catch-all — but its execution and fault-containment framing was the useful part and had been discarded with the name. The LLL instance is the natural default because `LINK-11` already gives it one serialized mutable context: the property that makes state safe to mutate is the same one that makes it coherent to discard.
+- **Runtime generation** (`RUN-4`). A restart is a discontinuity no consumer can see unless it is reported, and all three resulting bugs are quiet: counters read as traffic anomalies, a previous life's high-water mark attributed to this one, and a pre-restart handle honored because its slot index became valid again — ABA arriving through a path that looks like recovery.
+- **Bounded quiesce** (`RUN-5`), because otherwise the failure mode of the recovery mechanism is a hang, which is worse than the fault. And **discarding uncertain transient state rather than reconstructing it** (`RUN-6`) — guessing a half-parsed frame back into shape produces confident wrong data, where dropping it is a counted loss the system already handles.
+- **Escalation from the smallest scope** (`RUN-7`), **declared restart isolation** (`RUN-8`), and **two durability boundaries** (`RUN-9`). The last resolves a real ambiguity: "persistent" had been used for both surviving a restart and surviving power loss, which is how a diagnostic counter ends up either uselessly volatile or wearing out flash.
+- **A supervisor must sit outside what it supervises** (`RUN-10`), with the sharpest line in either source document: a heartbeat written by the failed context and read only by that same context is not supervision.
+- **An out-of-band debug path** (`CORE §23.9`). This is not a duplicate of the Internal Debug Wire, which is in-band by design and therefore shares the fate of the stack carrying it. Both are wanted, for different failures.
+
+## 2.2 Telemetry has two lifetimes, and unavailable is not zero
+
+Two additions to `CORE §18` (`ERR-4`, `ERR-5`).
+
+**Live versus latched** (`CORE §18.4`). Live status describes the current runtime and stops being observable when that runtime fails; latched status is evidence stored where the failure cannot reach it. The reason for the split is one bad inference: a live snapshot that has stopped changing is at least as likely to mean the producer died as it is to mean the system is quiet, and a reader holding only live status cannot tell.
+
+**The five value states** (`CORE §18.5`): valid, stale with age, unavailable, not applicable, omitted by schema — none of which may be encoded as an ordinary zero. The concrete case is what makes it worth an invariant. A Link with no credit-based flow control has no credit balance; reporting *zero credit* says it is stalled and out of credit, which is a different and alarming condition. Per-QoS depth on a Link with one shared hardware queue is the same error, and fabricating a split is worse than reporting the split is unobservable.
+
+Age got the same treatment: elapsed monotonic time to the point the report was assembled, not wall-clock and no evidence of clock sync, with a saturated maximum meaning "this old or older."
+
+## 2.3 One telemetry Service per Domain, with schema classes
+
+`DEPLOY §3.3` gained structure it had been missing. One Service per Endpoint Domain — not one per Link, and not a separate local-introspection Service beside a network-reporting one, since two Services over the same state is two chances to disagree about what "degraded" means. Two access faces over a single semantic model, so local telemetry stays useful during bring-up when no telemetry Wire is reachable.
+
+The Compact/Standard/Extended split by target scale was recovered as the plausible schema shape, along with the rule that a field absent from a smaller schema is unavailable rather than zero. Self-describing tag/type/value telemetry was rejected outright and recorded in `REG §5`: an unbounded parser on the receive path of the one Service most likely to be reachable during a fault is the wrong trade at any size.
+
+One recovery was a pleasant confirmation rather than an addition. The old requirement that each destination hold **at most one pending summary**, updated in place by a newer sample rather than queued behind it, is exactly a Snapshot transmit Endpoint (`CORE §10.4`) — designed in revision 0.9 for unrelated reasons. An older generation independently needing the same primitive is reasonable evidence it is the right one.
+
+## 2.4 Validation discipline
+
+`CONFORM` grew four sections from `prototype_and_validation.md`, none of them about encoding.
+
+**The evidence-generator stance** (`CONFORM §1.1`) is the most useful line in either source: an implementation choice does not close a specification gap and does not become a decision by being shipped. The failure it prevents is specific and familiar — someone picks a reassembly timeout because the code needs a number, and six months later it is in three implementations and a test suite while the actual question has been answered by nobody. Given that prototyping starts next, this arrives at the right time.
+
+**Capability claims** (`CONFORM §4`): required, optional-enabled, optional-disabled, unsupported — and a capability may be claimed only if its tests ran. This solves a problem a fixed pass/fail suite cannot, given targets from 8-bit nodes to Linux gateways, and it names the silently skipped success: a suite reporting green because the flow-control tests found no flow control and returned early. The **fixed rejection-reason registry** in the same section is the same idea applied to negatives, since an oversize PDU rejected as an unknown Wire passes an outcome-only test.
+
+**Budgets are inputs, not outputs** (`CONFORM §3.2`). A budget written after the measurement is a description and will accommodate whatever was measured. Also recovered: the load profiles nobody runs — startup, degraded, diagnostic burst, error storm — and the assertion that diagnostics cannot starve control, which is easy to build wrong because diagnostic traffic scales with how badly things are going.
+
+**Staged freezes** (`CONFORM §5`) replaced the old Gate 0-8 model with six stages ordered by where rework concentrates. CAN is last, not because it is hardest but because it is the only one whose mistakes are visible to other devices.
+
+`CONFORM §2.1` collects the restart cases, which are nearly all unreachable from a vector file and all reachable from a field failure.
+
+## 2.5 Also recovered, and rejected
+
+Recovered in smaller form: **receive-side offload** guidance was folded into existing rules rather than added, since `CORE §1.7` and `DISP-9` already cover an LLL doing framing, integrity, decode, and timestamp capture without becoming the producer; **static schedule entries** turned out to be transmit Endpoints plus an LLL cadence, already present in `CORE §10.3`; and a **candidate field-encoding vocabulary** went to `FUTURE §16`, where `SaturatingUInt<N>` (maximum means "at least this") and the rule that unassigned enum codes are reserved rather than mapped to a nearest known state are the parts carrying real weight.
+
+Newly recorded in `REG §5`: the older `Control` field order, which made both of `BITS §2`'s free properties impossible; the `RoutingWord` reserved bit, since the current layout is fully allocated; one status Service per Link; and self-describing telemetry.
+
+Deliberate divergences left standing rather than imported: the old prohibition on bidirectional Wires (already recorded), `Route` and its segments as objects, `ParticipantId`, and PDUA depth to `N=16`.
+
+---
+
+# 4. Revision 0.9 — bounded Endpoint delivery, `Port` retired, descriptor packing fixed
+
+## 3.1 Bit and byte layout
 
 `bit_layout.md` (`BITS`) was added, fixing conventions that had been deferred as "profile-owned" and were blocking the first roadmap step: descriptor helpers cannot be written without bit positions.
 
@@ -22,7 +116,7 @@ A related change fell out of writing it. `LINK §2.5`'s `PduControl` byte was de
 
 `Control` is now noted as fully allocated, with no reserved bits and no growth room, so any future global flag must go in a header extension.
 
-## 1.2 Bounded Endpoint delivery, and the retirement of `Port`
+## 3.2 Bounded Endpoint delivery, and the retirement of `Port`
 
 Adopted from `docs/proposal-bounded-endpoint-delivery-and-snapshot-semantics.md` with modifications. This is the largest semantic change since the QoS renumbering, and unlike that one it removes a capability rather than renumbering a field.
 
@@ -50,18 +144,18 @@ Five items were added to `REG §6.12` rather than settled: final type names, the
 
 ---
 
-# 2. Revision 0.8 — document-set trim and split
+# 5. Revision 0.8 — document-set trim and split
 
 Three structural changes, following the rule that `CORE` carries buildable runtime behavior and catalogs, host Service schemas, and test vectors live elsewhere:
 
-1. **`conformance.md` (`CONFORM`)** — extracted from `CORE §27` (vectors, boundary tests, exit criteria).
+1. **`conformance.md` (`CONFORM`)** — extracted from former `CORE §27` (vectors, boundary tests, exit criteria).
 2. **`implementation.md` (`IMPL`)** — language choice, scaling-profile table, and execution shape from former `CORE §25`–`§26.2`. Authority-preserving small-MCU rules remain in `CORE §25`.
 3. **`history.md` (`HIST`)** — this file; former `REG §8` revision history.
 
 Additional moves:
 
-- `CORE §7` compressed to the splice invariant; host debug path and default bindings → `DEPLOY §3.4`.
-- Link Telemetry Service sketch → `DEPLOY §3.5`.
+- `CORE §7` compressed to the splice invariant; host debug path and default bindings → `DEPLOY §3.2`.
+- Link Telemetry Service sketch → `DEPLOY §3.3`.
 - Namespace 0 compact EID allocation → `LINK §2.4`.
 - Service archetypes and Level-0 Service list → `FUTURE §8`.
 - `INTRO §8.2`–`§8.3` shortened to pointers.
@@ -70,7 +164,7 @@ Additional moves:
 
 ---
 
-# 3. Revision 0.7 — QoS renumbering, and the last three large legacy specifications
+# 6. Revision 0.7 — QoS renumbering, and the last three large legacy specifications
 
 Two changes: the canonical QoS numbering was reversed by decision, and the three largest remaining `WS_old/network` documents were mined, which completes the bulk of the legacy material.
 
@@ -113,7 +207,7 @@ Twenty invariants were added across eight families; no existing ID changed. `COR
 
 ---
 
-# 4. Revision 0.6 — recovered from the endpoint-domain and CAN-adapter specifications
+# 7. Revision 0.6 — recovered from the endpoint-domain and CAN-adapter specifications
 
 Two `WS_old/network` documents were mined: `endpoint_domains_wires_routes_and_access.md` and `can_pdu_adapter_spec.md`. Both belong to the superseded generation, and both held material with no current equivalent.
 
@@ -133,13 +227,13 @@ Also recovered: the Endpoint Domain as an explicitly *logical* boundary that is 
 - **The reassembly context model** (`LINK §2.8`): keyed by `(ingress Link, CAN identifier)`, one active context per key, drawn from a fixed pool, where exhaustion rejects rather than evicts. Evicting an in-progress reassembly would convert local pressure into phantom loss on an unrelated Wire.
 - **The ordered transmit procedure** (`LINK §2.12`), whose ordering is itself the requirement, plus the rules that transmit selects the smallest legal `N` against net capacity and that a failure after START aborts the whole PDU without retrying.
 
-Also recovered: a stricter PDUA depth policy for Critical QoS, justified by arbitration monopolization rather than memory (`LINK §2.6`); local scheduling realism — non-preemptible frames, controller mailbox limits, and local ordering as no bus-wide guarantee (`CORE §14.2`, `LINK-9`); QoS is not flow control (`QOS-6`); native CAN acknowledgment is not WS delivery (`ERR-2`); static profile selection with no negotiation (`LINK-8`); transmit ownership holding in every phase (`LINK-10`); rejection being silent on the wire (`CORE §18.1`, `ERR-1`); the four-phase commissioning model (`DEPLOY §1.2`, `CFG-11`); boundary-value conformance vectors and loss amplification with `N` (`CONFORM §2`, `CONFORM §3`); and exit criteria for provisional status (`CONFORM §4`).
+Also recovered: a stricter PDUA depth policy for Critical QoS, justified by arbitration monopolization rather than memory (`LINK §2.6`); local scheduling realism — non-preemptible frames, controller mailbox limits, and local ordering as no bus-wide guarantee (`CORE §14.2`, `LINK-9`); QoS is not flow control (`QOS-6`); native CAN acknowledgment is not WS delivery (`ERR-2`); static profile selection with no negotiation (`LINK-8`); transmit ownership holding in every phase (`LINK-10`); rejection being silent on the wire (`CORE §18.1`, `ERR-1`); the four-phase commissioning model (`DEPLOY §1.2`, `CFG-11`); boundary-value conformance vectors and loss amplification with `N` (`CONFORM §2`, `CONFORM §3`); and exit criteria for provisional status (`CONFORM §6`).
 
 One structural note: `ERR` is a new invariant family, added because rejection semantics fit none of the twelve established in revision 0.5. `LINK §2` subsections shifted by one to accommodate the new §2.1, and inbound references were updated. No existing invariant ID changed.
 
 ---
 
-# 5. Revision 0.5 — document set split
+# 8. Revision 0.5 — document set split
 
 The single working document `wirespaces_architecture_preliminary.md` (3,891 lines) was split into the current six documents plus this register. Content was preserved; the changes were structural.
 
@@ -158,7 +252,7 @@ Also in this revision:
 
 ---
 
-# 6. Revision 0.4 — recovered from `WS_old/network/architecture_overview.md`
+# 9. Revision 0.4 — recovered from `WS_old/network/architecture_overview.md`
 
 That document describes an earlier generation whose core model — the directed one-source/one-or-more-sink Wire, `{WireBand, RoutingCode}`, `RoutingAlias`, `PathTag`, Route as an object distinct from Wire, `ParticipantId`, and Tap/Relay/Replicator as base roles — is listed in `REG §5`. What survived:
 
@@ -168,7 +262,7 @@ That document describes an earlier generation whose core model — the directed 
 - **Link independence is conditional** (`CORE §13.4`): link-independent only inside declared size, timing, and transport compatibility. Revision 0.3 made the claim unqualified even though Link capabilities already had the machinery to check it.
 - **Master-initiated and polled Links** (`CORE §1.7`, `LINK §7`), including I2C and SPI as in-scope Physical Links, and `LINK-3`.
 - **Higher-level composition must flatten** (`CORE §19.2`), taken as a constraint without the component catalog.
-- **What a redundancy composition owns** (`CORE §23.2`), plus the distinction between path redundancy and voting across independent producers.
+- **What a redundancy composition owns** (`CORE §23.11`), plus the distinction between path redundancy and voting across independent producers.
 - **Electrical visibility is not membership** (`CORE §12.6`). Needed precisely because flood-and-filter was chosen.
 - **Proximity does not imply locality** (`CORE §4.5`), the inverse of the FPGA rule.
 - **WireSpace as an identity universe** (`CORE §4.6`), recovered as scoping only.
@@ -181,7 +275,7 @@ Noted but not recovered: Domain Control as a named layer, and the reusable Commu
 
 ---
 
-# 7. Revision 0.3 — recovered from `wirespaces_simplified_wire_and_autowiring_design_change.md`
+# 10. Revision 0.3 — recovered from `wirespaces_simplified_wire_and_autowiring_design_change.md`
 
 That document's terminology and CAN numbering are superseded, but several ideas had no equivalent in revisions 0.1 or 0.2:
 
@@ -194,14 +288,14 @@ That document's terminology and CAN numbering are superseded, but several ideas 
 - **Globally stable NodeIds as a convenience** (`DEPLOY §1.8`).
 - **Ephemeral configuration must announce itself** (`DEPLOY §1.9`).
 - **Structural validity versus contract** (`CORE §19.1`).
-- **Promiscuous / bring-up operation** (`DEPLOY §3.3`).
+- **Promiscuous / bring-up operation** (`DEPLOY §3.1`).
 - **A future 29-bit Classical CAN profile** (`FUTURE §11`).
 
 Rejected rather than recovered: ephemeral route repair / learned forwarding (recorded in `REG §5`), the 3-bit canonical WireNumber on CAN, and `Main`/`Peer`/`PeerId`, `Link Engine`, and WireContract as specified there.
 
 ---
 
-# 8. Revision 0.2 — merged the overview into the snapshot
+# 11. Revision 0.2 — merged the overview into the snapshot
 
 Merged from `wirespaces_high_level_architecture_design_overview.md`, having been confirmed as still current: Wire Splicing including the `spliceWire` route field and the before-egress ordering rule; the Default Internal Debug Wire; Service TX bindings and `Inline`/`Serialized` delivery; copy-based buffer ownership; Namespace and EndpointId allocation; why a bus rather than pairwise edges; small-device Router notes; Ethernet/CAN adaptation asymmetry; implementation scaling profiles; and the worked examples.
 
@@ -213,7 +307,7 @@ Carried forward from the snapshot and still superseding the overview: PDUA MaxN 
 
 ---
 
-# 9. Superseded source documents
+# 12. Superseded source documents
 
 | Document | Superseded by |
 |---|---|

@@ -29,72 +29,54 @@ Invariants have short stable IDs (`SPLICE-2`, `PDU-1`) rather than positions in 
 
 ## 2.1 Strong / current direction
 
-- Wire = one Origin + zero or more Nodes.
-- Canonical 40-bit base descriptor.
-- Physical Link / Link Interface / LLL / Router / Endpoint Domain separation.
-- Complete canonical PDU as the generic forwarding unit.
-- Link-scoped WireAlias and `kLocalBus` semantics.
-- Device-private Wire range and the `kLocalDomain` reserved value.
-- Wire Splicing as the single sanctioned way a device-private Wire reaches an external Link, applied before egress.
-- Shared read-mostly Router state with caller-context routing.
-- Copy-based buffer ownership as the first-class baseline; zero-copy deferred.
-- Injected transmit Endpoints rather than hard-coded Wires.
-- Endpoint delivery crosses a bounded storage boundary and never runs Service code synchronously.
-- Queue and Snapshot are the two Endpoint storage semantics; one Endpoint owns exactly one storage element.
-- Storage semantics and writer concurrency are immutable properties of a Service definition, not deployment choices.
-- Arrival time is captured at acceptance, because consumer latency now sits inside the delivery path.
-- A Snapshot Endpoint always carries a generation counter; Snapshot transmit Endpoints echo sampled and sent generations.
-- Optional QoS implementation profiles: Minimal and Full.
-- Bounded queue policies and congestion as a normal send failure.
-- Link telemetry, Link capabilities, and static capacity checking.
-- Classical CAN PDUA maximum of 8 frames, with N <= 4 as the normal target.
-- Classical CAN aggregate CRC policy: none / CRC-8 / CRC-16 by frame count.
-- Namespace 0 compact CAN region and Namespace 3 as the FOSS ecosystem space.
-- Physical Wires and Virtual Wires as named cases of one abstraction.
-- `kLocalBus` as the compression code for a Link's own physical Wire number.
-- Usage maturity levels 0-5, with Levels 0-1 protected from advanced-feature complexity.
-- Structural validity always enforced; contract-level policy always optional.
-- Promiscuous/bring-up observation as a tooling and gateway capability that never creates Wiring.
-- Ephemeral auto-Wiring must announce itself and is never silently authoritative.
-- A future 29-bit Classical CAN profile as the planned escape hatch from 11-bit limits.
-- WireSpaces defines no Service-to-application interface; its reach ends at the Endpoint storage boundary.
-- The Endpoint API is a portability contract, so WireSpaces-facing Service code is portable across comparable stacks.
-- An Endpoint holds declared metadata plus payload, copied at acceptance; reading source metadata authorizes no transmission.
-- One Service writes a transmit Endpoint; one reads a Queue Endpoint; any number read a Snapshot Endpoint.
-- An Endpoint Domain provides implementation-defined serialization for concurrent writers.
-- Every transmit Endpoint has exactly one consuming Wire binding; fan-out is splicing or gateway work.
-- Transport chosen by Service semantics; reliability is not assumed safer than loss with freshness detection.
-- Link independence bounded by declared size, timing, and transport compatibility.
-- Master-initiated/polled Links; initiating a transfer never confers producer authority.
-- Electrical attachment to a medium confers no membership, delivery, forwarding, or transmit authority.
-- Physical proximity does not imply `kLocalDomain` or a device-private Wire.
-- Higher-level communication composition must flatten into ordinary Endpoints, Wires, and bindings.
-- Privileged capabilities require a separate build; runtime configuration alone cannot enable them.
-- One WireSpace is one identity universe; joining two requires an explicit translating gateway.
-- QoS is the count of strictly-higher-priority classes: Critical 0 .. Background 3, so lower wins and CAN packs it unchanged.
-- One externally visible producer per `(Endpoint Domain, Namespace, EndpointId)`, with declared Endpoint concurrency preserved.
-- Endpoint identity provides naming only; Wires, bindings, and typed handles provide authority.
-- An Endpoint Domain is a logical dispatch/authority boundary, not a physical node and not a security boundary.
-- Direction is structural: it names the producing end, not the interaction pattern.
-- Source lineage is preserved by every forwarding mechanism; re-origination starts new lineage and needs its own authority.
-- Every delivery path has bounded storage and a chosen exhaustion behavior.
-- Malformed or unauthorized traffic is counted and dropped with no response emitted.
-- Link profiles are selected statically; nothing auto-detects or negotiates framing.
-- Committed versus Guest CAN as distinct profile families, with Guest undesigned.
-- Transmit ownership on a shared medium holds in every phase, including commissioning.
-- Four-phase commissioning: Unconfigured, Selected, Staged, Committed.
-- Little-endian serialization for literal multi-byte numeric values; MSB-first field order within a byte.
-- Canonical `Control` and `RoutingWord` bit placement fixed, with CAN `PduControl` aligned on their shared six bits.
-- Priority occupies the most significant available bits, so a numerically lower QoS always wins.
-- Reserved fields are rejected on receive, not ignored.
-- A header extension block is self-describing in length, so a parser can skip what it does not know.
-- Exactly one binding mode per Endpoint registration; reply authority is never inferred from Direction.
-- A Service contract is a schema over bytes; generated language types are views.
-- Protocol version, compatibility fingerprint, and build identity are three separate identities.
-- Storage semantics, ownership representation, and writer concurrency are independent axes and never substitute.
-- One serialized mutable execution context per LLL instance.
-- Hop integrity and end-to-end integrity are different claims; a gateway breaks the hop chain.
-- Diagnostic containment: an error report can never trigger another.
+The following areas are settled at the architectural level. Numeric limits, field widths, and profile specifics are in §3; normative rules with stable IDs are in §4; detail is in `CORE`.
+
+**Model and identity**
+
+- Bus-oriented Wire model (one Origin, many Nodes); canonical 40-bit PDU; Physical Link → LLL → Router → Endpoint Domain layering.
+- Wire scopes (`kLocalBus`, device-private Wires, `kLocalDomain`, WireSpace); WireAlias; Wire Splicing before egress.
+- Physical and Virtual Wires; Direction is structural; Endpoint identity is naming — authority comes from Wires and bindings.
+
+**Delivery and Endpoints**
+
+- Bounded storage delivery; no synchronous Service execution; Queue vs Snapshot; copy-based ownership baseline.
+- Declared metadata copied at acceptance; one producer per external Endpoint identity; one Wire binding per transmit Endpoint.
+- No Service-to-application interface; Endpoint API as portability contract for Service-facing code.
+
+**QoS, congestion, and bounds**
+
+- QoS Minimal/Full; congestion as a normal send outcome; every delivery path bounded with chosen exhaustion behavior.
+
+**Links and profiles**
+
+- Static profile selection; Classical CAN PDUA/CRC direction (§3); master-initiated/polled Links.
+- Committed vs Guest CAN families; four-phase commissioning; transmit ownership in all phases.
+
+**Forwarding and gatewaying**
+
+- Caller-context routing over read-mostly tables; complete PDU as forwarding unit; flood-and-filter baseline.
+- Source lineage preserved; re-origination needs its own authority; splice-only Wire representation change on forward.
+
+**Lifecycle, telemetry, and discipline**
+
+- Separate Link and restart-unit lifecycles; runtime generation; bounded quiesce; escalation; declared isolation.
+- Live vs latched telemetry; five distinguishable value states; diagnostic containment; one telemetry Service per Domain.
+- Prototype generates evidence, does not close open questions (`CONFORM §1.1`); capability claims require tests.
+
+**Security and tooling posture**
+
+- Privileged capabilities require separate build; promiscuous observation never creates Wiring; ephemeral auto-Wiring must announce itself.
+- Malformed/unauthorized traffic counted and dropped with no wire response.
+
+**Serialization and contracts**
+
+- Little-endian multi-byte values; `Control`/`RoutingWord` packing (`BITS`); self-describing header extensions; reserved fields rejected.
+- Service contract is schema over bytes; protocol version, fingerprint, and build identity are separate.
+- Structural validity always enforced; contract-level policy optional; composition must flatten.
+
+**Maturity**
+
+- Usage levels 0–5; Levels 0–1 protected from advanced-feature complexity; 29-bit CAN as planned escape hatch.
 
 ## 2.2 Provisional implementation direction
 
@@ -219,6 +201,16 @@ All of these live in `FUTURE`, which is where their current thinking is recorded
 | Service message prefix | `u8 protocol_version`, `u8 message_type` (recommended default) |
 | Master-initiated Links | I2C, SPI in scope; LLL polls without becoming producer |
 | Privileged capabilities | separate build required; config cannot enable them |
+| Default restart unit | the LLL instance; grouping permitted and declared |
+| Runtime generation | changes on every restart; nothing compared across a change |
+| Recovery escalation | driver → Link → restart unit → subsystem → device |
+| Restart isolation | assumed independent unless a dependency is declared |
+| Durability boundaries | two: restart-unit reconstruction, and power loss |
+| Telemetry lifetimes | live (current generation) and latched (survives restart) |
+| Telemetry value states | valid, stale, unavailable, not applicable, omitted |
+| Telemetry Services | one per Endpoint Domain; local and network faces, one model |
+| Telemetry schema classes | Compact / Standard / Extended, fixed schema per version |
+| Capability claims | required / optional-enabled / optional-disabled / unsupported |
 | Interoperability | not claimed |
 | RTL support | future first-class target |
 
@@ -391,6 +383,23 @@ Particularly important when generating code or designs from these documents. Cit
 | `ERR-1` | **Malformed, unrepresentable, or unauthorized traffic is counted and dropped, with no response emitted.** Errors are reported upward and locally, never backward and automatically. |
 | `ERR-2` | **Native Link acknowledgment and controller retransmission are not WS delivery.** They operate below the LLL and say nothing about whether any Endpoint received a PDU. |
 | `ERR-3` | **Diagnostic reporting is contained.** An error report can never generate another error report, local counters remain authoritative, and a malformed or babbling peer cannot force unbounded diagnostic work. |
+| `ERR-4` | **Live and latched status have different lifetimes, and a static live snapshot is not evidence of health.** Latched fault and restart records remain readable from outside a failed runtime. |
+| `ERR-5` | **Unavailable, stale, not-applicable, and schema-omitted values are distinguishable from an ordinary zero or healthy value.** A telemetry field is never fabricated to fill a schema slot. |
+
+## 4.14 Runtime lifecycle and restart — `RUN`
+
+| ID | Invariant |
+|---|---|
+| `RUN-1` | **A Link's lifecycle is separate from that of the restart unit owning its state.** Both support explicit start, stop, reset, enable, and disable; lifecycle control serves power management, maintenance, and commissioning, not only faults. |
+| `RUN-2` | **Every mutable state item has exactly one owning restart unit.** The LLL instance is the default, following its single serialized mutable context (`LINK-11`); grouping several Links into one unit is permitted and declared. |
+| `RUN-3` | **A restart unit owns local Link state and local forwarding availability, never the Wires realized through it.** Restarting it does not redefine a Wire, relocate its Origin, or transfer producer authority. |
+| `RUN-4` | **A runtime generation changes on every restart, and no observation may be compared or combined across a change in it.** Its width and wrap behavior are declared; it is distinct from an Endpoint snapshot generation. |
+| `RUN-5` | **Stopping is bounded.** A quiesce deadline and forced-cancellation behavior are declared, and every accepted transmit interrupted by stop or restart reaches a defined terminal outcome. |
+| `RUN-6` | **Transient state whose validity cannot be established is discarded, not reconstructed from partial evidence.** The resulting loss is counted; continuity across a restart is an end-to-end concern. |
+| `RUN-7` | **Recovery escalates from the smallest affected scope upward**, under declared attempt limits and deadlines, and never becomes a busy loop or a diagnostic storm. |
+| `RUN-8` | **Restart isolation is a declared claim.** Sibling Links continue through another's restart unless a shared dependency is declared in configuration. |
+| `RUN-9` | **"Persistent" means surviving a restart unit's reconstruction, not surviving power loss.** Every counter and record declares which boundary applies, and storage backing application-owned buffers outlives the Link that filled it. |
+| `RUN-10` | **A supervisor sits outside what it supervises and depends on less infrastructure than it watches.** A heartbeat written and read by the same context is not supervision, and absence of traffic alone is not a fault. |
 
 ---
 
@@ -404,7 +413,7 @@ Older documents contain these concepts. They should not be assumed current:
 - old `{WireBand, RoutingCode}` architecture.
 - old 11-bit CAN `PathTag`/`PeerId` allocations, including 4-bit PathTag and 4-bit PeerId.
 - a globally scarce 3-bit Wire number on CAN.
-- a mandatory `Link Engine` object that performs generic routing.
+- a mandatory `Link Engine` object that performs generic routing. Only the routing role is superseded; the execution and fault-containment framing is recovered as the restart unit (`CORE §23.2`).
 - a generalized RouterPort abstraction for Endpoint Domains/inter-core channels.
 - requirement that static Wiring/Manifest exist before a network is useful.
 - treating Flow/WireContract as implicit or mandatory base-network concepts.
@@ -440,6 +449,10 @@ Older documents contain these concepts. They should not be assumed current:
 - **`Port` as an architectural term.** It named the local typed interface at a Service boundary as distinct from the network-visible Endpoint. That distinction was real only while delivery meant invoking a handler; bounded storage makes the object the Service holds and the object the network addresses the same one (`CORE §1.6`). The term survived as a classification that constrained nothing. What it carried is preserved by `DISP-3`: a Service's local interface never appears in a PDU, and restructuring it is not a protocol change. `TxBinding` became a transmit Endpoint.
 - **Endpoint-level transmit fan-out** ("one Endpoint implementation may source several Wires"). Superseded by `DISP-11`. It would have forced per-reader sampled/sent state into every Snapshot transmit Endpoint, and the capability already exists one layer down as splicing or gateway forwarding, both of which preserve source lineage.
 - **Multi-reader Queue Endpoints** ("several local consumers may read one Endpoint where its contract permits", as applied to queues). Superseded by `DISP-10`. Draining is destructive, so two consumers silently split the stream — it passes every test with one consumer and loses messages in production. It is a worker-pool construct with no RTL meaning, and it will be asked for again as a "load-balanced handler pool."
+- **The older `Control` field order** (`Namespace, TransportType, QoS, HasHeaderExtensions`, in that allocation order). Superseded by `BITS §2`, which places QoS in the most significant bits so that a numeric comparison of whole `Control` bytes orders by priority and CAN can carry the field unchanged. The old order is not merely a different arrangement — it makes both of those free properties impossible.
+- **A reserved bit inside `RoutingWord`.** The old 16-bit layout was `WireBand 2 + Reserved 1 + RoutingCode 13`. The current layout is fully allocated as `NodeId 5 + Direction 1 + WireNumber 10` with no spare bit (`BITS §3`), so there is nothing there to validate and no room for a future field. Reserved-field rejection (`PDU-2`) still applies to `Control` and to header extensions.
+- **One status Service per Link, or separate local-introspection and network-telemetry Services.** Superseded by one Service per Endpoint Domain presenting two faces over a single semantic model (`DEPLOY §3.3`). Two Services over the same underlying state is two chances to disagree about what "degraded" means.
+- **Self-describing telemetry** — a runtime tag/type/value encoding for status. Rejected in favor of a fixed schema per version selected by identifier. A self-describing format is an unbounded parser on the receive path of the one Service most likely to be reachable during a fault.
 
 If an implementation task appears to require one of these, first verify that the current architecture genuinely cannot solve the problem without it.
 
@@ -499,14 +512,20 @@ If an implementation task appears to require one of these, first verify that the
 
 ## 6.7 Telemetry
 
-- Exact Domain Local Link Telemetry Service schema.
+- Exact Domain Local Link Telemetry Service schema, and its Endpoint allocation.
 - Exact minimum counters required by conformance classes.
 - Exact per-Wire top-talker/drop-report format.
+- How the five value states of `ERR-5` are encoded: per-section validity, reserved codes, an explicit validity map, or a mix. That they are distinguishable is settled; the mechanism is not, and it is the choice that determines whether Compact stays small.
+- Field widths and quantization for each of Compact, Standard, and Extended, and whether schema evolution preserves any byte-prefix compatibility (the working assumption is that it does not need to).
+- Whether the counter registry and the rejection-reason registry (`CONFORM §4`) are one enumeration or two. They serve different consumers but must not drift, and merging them is the cheap way to guarantee that. `LIB §4.5` proposes a third option — one wide registry plus a narrow API result type with a documented mapping — which keeps a call-site `switch` exhaustive without allowing two tables.
+- Detail pagination and cursor behavior for Extended, including what happens to a cursor across a restart.
+- Resolution, epoch, and wrap-comparison rules for the arrival timestamp stored in an Endpoint slot. `LIB §4.3` fixes only that the stored form is narrower than the platform clock's 64-bit nanosecond time point and that the reduction happens once on the ingress path; the width and what a wrap means for a staleness test are open.
 
 ## 6.8 Classical CAN
 
-- Final CRC-8 algorithm/parameters; SAE J1850 is the current implemented candidate.
-- Final CRC-16 algorithm/parameters.
+- Final CRC-8 algorithm/parameters. Two implemented, vector-tested candidates exist in `Design/Firmware/crc` (`LIB §2.2`): SAE J1850 (poly 0x1D) and Autosar CRC-8 (poly 0x2F). Both are non-reflected, which is a hard constraint rather than a preference — the existing bitwise implementation asserts against reflection, so a reflected polynomial would require implementing reflection first.
+- Final CRC-16 algorithm/parameters; CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF) is the implemented candidate, also non-reflected.
+- Whether the CRC needs incremental `update`/`finalize` rather than whole-buffer computation. A PDUA CRC covers a PDU delivered as up to eight frames, so accumulating across frames avoids holding the reassembly buffer solely to checksum it. Reassemble-then-checksum is correct and is the phase-1 behavior; this is an optimization with a measurable trigger.
 - Aggregate CRC placement, coverage, and byte order.
 - Final byte-exact General PDUA and optimized-N1 encoding.
 - Physical placement and significance order of Direction, WireAlias, and NodeId in the remaining 8 identifier bits, and which Direction value means `OriginToNode`. The QoS position and inversion are settled (`LINK §2.2`).
@@ -550,8 +569,9 @@ If an implementation task appears to require one of these, first verify that the
 
 ## 6.12 Endpoint API and composition
 
+- Whether Endpoints store a decoded representation or raw payload bytes. `LIB §5.1` argues for bytes until a generated codec exists, on the grounds that hand-written decode called from acceptance is unbounded-by-construction work in a Link's context. That defers the naming question below rather than settling it.
 - Final type and API names. `QueueEndpoint<T, N>` and `SnapshotEndpoint<T>` are working names only, and they are misleading in one respect worth fixing before they stick: **a slot is declared metadata plus payload** (`DISP-14`), so `T` names the payload representation rather than the slot. `T` is also the **decoded local representation**, never the wire contract — the schema is (`SVC-7`), and naming that lets `T` look like the wire type is how a messaging layer accidentally becomes ABI-dependent. These names are higher-stakes than usual because the Endpoint API is a portability contract (`SVC-9`), so they are the surface Services get written against rather than an implementation choice.
-- How delivered metadata is declared and accessed: how the three levels are named and selected, whether recognized extensions are exposed decoded or as bytes, and what an accessor returns when a Service reads a field its Endpoint did not declare — a compile error is preferable to a zero.
+- How delivered metadata is declared and accessed: how the three levels are named and selected, whether recognized extensions are exposed decoded or as bytes, and what an accessor returns when a Service reads a field its Endpoint did not declare — a compile error is preferable to a zero. `LIB §5.2` sketches a provisional shape that delivers the compile error; it is a candidate, not a decision.
 - How much of the Endpoint API `SVC-9` actually fixes, and how it is verified. Candidates: a documented signature set, a header a conforming implementation must satisfy, or a portability test suite that compiles the same Service against two implementations. Nothing is decided, and without one of them the contract is an intention rather than a check.
 - Whether a small documented default Queue capacity is offered, or every Queue Endpoint declares its depth. A default in general builds with profiles able to require explicit capacity is the likely compromise; prototype experience should decide.
 - Whether a narrowly scoped synchronous hook is ever permitted for instrumentation, tracing, or platform scheduling notifications. Framework arrival-timestamping at acceptance is settled (`DISP-2`); **application-supplied hooks are not in prospect**, since an unrestricted user callback recreates what `Inline` was withdrawn for. If one is ever considered it must answer: who may supply it, before or after acceptance, may it inspect payload, may it transmit, may it block, what bound applies, and whether a dedicated observation Endpoint consumed asynchronously would do instead.
@@ -573,7 +593,7 @@ If an implementation task appears to require one of these, first verify that the
 
 ## 6.15 Services and schemas
 
-- The schema language and code generator for Service contracts. `SVC-7` fixes that the schema is the contract; it names no format.
+- The schema language and code generator for Service contracts. `SVC-7` fixes that the schema is the contract; it names no format. A candidate field-encoding vocabulary is recorded in `FUTURE §16`; the per-field definition checklist there is the part worth adopting regardless of syntax.
 - What the compatibility fingerprint covers, and whether it is generated from the schema alone or from schema plus profile and configuration choices (`DEPLOY §2.4`).
 - Whether the recommended `protocol_version` / `message_type` prefix becomes a requirement or stays a default.
 - The exact API representation of a reply context: storage, lifetime, correlation, invalidation, and the retained-handle form needed for deferred responses (`CORE §10.6`).
@@ -587,6 +607,18 @@ If an implementation task appears to require one of these, first verify that the
 - Security/authentication profiles.
 - Redundant/cyclic Wire realization if ever justified.
 - Whether a Domain Control layer is ever needed for group management of Services.
+
+## 6.17 Lifecycle, restart, and supervision
+
+`CORE §23` settles the observable shape; these are the parts still open.
+
+- The lifecycle state enumeration and transition API, and the vocabulary for a cancelled or faulted transmit. Both are local naming, but they appear in every Link driver, so getting them wrong is a wide edit later.
+- Runtime generation width and wrap comparison rules (`RUN-4`). Narrow enough to be cheap on a constrained node, wide enough that a comparison window is unambiguous — the same trade already made for the Snapshot generation, and probably deserving the same answer.
+- Where persistent counters and latched fault records actually live on each target class, and how a field declares which of the two boundaries in `RUN-9` applies to it.
+- How a restart-unit dependency group (`RUN-8`) is expressed in configuration, and whether tooling can check a claimed isolation against the platform's real sharing.
+- The heartbeat and supervisor interface, including what a supervisor is on a single-core bare-metal target where there may be nothing more privileged to run it.
+- Whether a peer's restart is observable to a Service holding learned bindings or reply contexts, and if so whether that requires a protocol field (`FUTURE §6`). This is the one item here that could become a wire change.
+- Whether stale application-owned handles must be detectable after a restart that reuses compact slot indices, or whether a generation-tagged handle is required (`RUN-9`, `REG §6.6`).
 - Whether a communication-component catalog is worth establishing once `SVC-5` has been exercised.
 
 ---
@@ -597,14 +629,14 @@ The following older documents have **not** yet been mined. Their model is the su
 
 | Source | Approx. lines | Expected destination |
 |---|---:|---|
-| `WS_old/network/link_engine_runtime_and_status.md` | 640 | `CORE §18`, `LINK` |
-| `WS_old/network/hdlc_logical_link_profile.md` | 560 | `LINK §3` |
-| `WS_old/network/prototype_and_validation.md` | 1,460 | `CONFORM`, possibly `code/sim_rfp.md` |
+| `WS_old/network/hdlc_logical_link_profile.md` | 410 | `LINK §3` |
 | `WS_old/network/rationale_use_cases_and_risks.md` | 510 | `INTRO`, `FUTURE` |
 
 The copy of `can_pdu_adapter_spec.md` that sat in this directory was byte-identical to the `WS_old` one, so mining the latter covered both. It has moved to `archive/`.
 
-`link_engine_runtime_and_status.md` is now the most valuable remaining source, because `CORE §13.3` and `OWN-4` opened questions about restart and lifecycle that it was written to answer.
+Two sources were mined in revision 0.10. `link_engine_runtime_and_status.md` answered the restart and lifecycle questions that `CORE §13.3` and `OWN-4` had opened, and supplied the telemetry lifetime and validity distinctions (`CORE §23`, `CORE §18.4`, `CORE §18.5`, `RUN-1`..`RUN-10`, `ERR-4`, `ERR-5`). `prototype_and_validation.md` supplied validation discipline rather than architecture: the evidence-generator stance, capability claims, the reason registry, frozen budgets, and staged freezes (`CONFORM §1.1`, `CONFORM §3.2`, `CONFORM §4`, `CONFORM §5`). Its own protocol content was almost entirely the superseded generation.
+
+Of the two remaining, `hdlc_logical_link_profile.md` is the more useful, because `LINK §3` is a sketch and the credit and lifeline mechanics in `CORE §15.4` were derived from it secondhand. `rationale_use_cases_and_risks.md` is non-normative by its own description and is the lowest priority of anything on this list.
 
 The mining method that has worked so far: read for concepts that were *dropped* rather than *superseded*, recover the ones that still hold, record the rejections in §5 so they cannot leak back, and note deliberate divergences rather than silently overriding them.
 
@@ -612,6 +644,6 @@ The mining method that has worked so far: read for concepts that were *dropped* 
 
 # 8. Revision History
 
-Current revision: **0.9** (bounded Endpoint delivery, Snapshot semantics, the retirement of `Port`, and canonical descriptor packing — see `HIST §1`).
+Current revision: **0.12** (`LIB` reworked to build on the existing `Design/Firmware` utility layer; narrows `REG §6.8` to implemented CRC candidates; no architectural change — see `HIST §1`).
 
 Full revision narrative and superseded-source provenance live in [history.md](history.md). `REG` keeps only status; `HIST` is archival and is not part of the control surface.

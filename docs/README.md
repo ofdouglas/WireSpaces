@@ -28,13 +28,13 @@ Read in this order if you are new to the project:
 
 Other material:
 
-- [decision-bounded-endpoint-delivery.md](decision-bounded-endpoint-delivery.md) — decision record for the revision 0.9 delivery model: what was adopted, rejected, and why
-- `can_id_provisioning.md` — CAN identifier allocation working notes
-- `sim/` — the reference implementation, currently at an early stage
-- `sim_rfp.md` — simulator requirements
-- `archive/` — superseded documents, retained for provenance only
+- [`archive/`](../archive/) — superseded specifications and adopted decision records (provenance only; not normative)
+  - [`decision-bounded-endpoint-delivery.md`](../archive/decision-bounded-endpoint-delivery.md) — revision 0.9 delivery-model decision record (detail beyond `HIST §4.2`)
+- [`notes/can_id_provisioning.md`](notes/can_id_provisioning.md) — CAN commissioning / identifier working notes (not yet in `LINK` / `DEPLOY`)
+- `code/sim/` — reference implementation, currently at an early stage
+- [`code/sim_rfp.md`](../code/sim_rfp.md) — simulator requirements
 
-A decision record explains reasoning that would bloat `CORE` if inlined. It has no authority: `CORE` and `REG` are normative, and a decision record only says how they got there.
+Decision records and superseded specs have no authority: `CORE` and `REG` are normative. They explain how the current documents got there.
 
 ## Conventions
 

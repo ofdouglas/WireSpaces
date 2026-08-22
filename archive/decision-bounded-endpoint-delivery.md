@@ -1,6 +1,6 @@
 # Decision Record: Bounded Endpoint Delivery and Snapshot Semantics
 
-**Status:** Adopted with modifications, revision 0.9  
+**Status:** Adopted with modifications, revision 0.9 — archived under `archive/` (provenance only; moved from `docs/`)  
 **Purpose:** Record what was decided, what was rejected, and why — the normative text lives in `CORE`  
 **Authority:** None. `CORE` and `REG` are authoritative; this file explains how they got here
 

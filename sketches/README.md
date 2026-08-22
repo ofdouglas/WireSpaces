@@ -341,3 +341,6 @@ When a tempting decomposition turns out wrong (physical-link Wires, forced maint
 | Sketch | Key lesson |
 |---|---|
 | `01_dev_board.md` | Authority-shaped vs physical-link Wires; fair USB-gateway baseline; dual Wire overlap on four devices is a strong fit with Mild friction at worst |
+| `02_peer_can.md` | Peer telemetry via observation is clean; peer-addressed control is the fracture; nominated Origin Significant; native CAN ID matrix simpler for true peer symmetry |
+| `03_rs485_sensors.md` | Strong fit Config A; Config B: semantic Origin ≠ Link poll scheduler; one Wire across two locally-polled RS-485 segments |
+| `04_pi_robot.md` | Forward vs compose; B: WiFi ≠ Wire change; C: Wiring survives Origin offline, no role reassignment |

@@ -80,7 +80,7 @@ Archetypes are chosen to span the design space — **not as predicted verdicts**
 
 **Write order:** this README → `01_dev_board.md` → `02_peer_can.md` → `03_rs485_sensors.md` → `04_pi_robot.md` → `05_multicore_gateway.md` → `06_redundant_gateway.md`.
 
-`basic.md` will be superseded by Config A of `01_dev_board.md` (leave a short pointer or remove when 01 exists).
+`basic.md` was superseded by Config A of `01_dev_board.md` and removed.
 
 **Phase 2 check:** After `01` and `02` exist, have **independent agents** sketch the same system from the same neutral description (peer CAN is the first candidate). Divergent Wire decompositions suggest underspecified guidance; convergence without coordination is a strong positive signal.
 
@@ -305,3 +305,39 @@ If that pattern adds topology or configuration without a clear benefit in the sk
 | `docs/library_architecture.md` | Endpoint API shape (Queue/Snapshot, transmit bindings) |
 
 Cross-references in sketch text use document codes and section numbers, e.g. `CORE §3.1`, `DEPLOY §3.2`.
+
+---
+
+## Guidance from sketch reviews
+
+Assumes you have read the basic architecture docs (`INTRO`, `CORE`, `DEPLOY`, `LINK`). These are non-obvious lessons from drafting and reviewing sketches — not repeated protocol rules.
+
+### Wires are not Physical Links
+
+A common first mistake is assigning **one Wire per cable** (USB Wire + CAN Wire) and having the gateway **translate between them**. That recreates a USB↔CAN tunnel protocol with WS names on the segments.
+
+When a gateway joins Links, prefer **authority-shaped Wires** that **span** the Links involved (`CORE §3`). Gateway forwarding carries the **same canonical Wire** across Link Interfaces — it does not hop between semantic networks. A second Wire usually exists because there is a **second Origin** (e.g. plant control vs PC bench), not because there is a second cable. Keep a physical-link-shaped decomposition as an **alternative** when comparing, not as the primary mapping.
+
+### Compare conventional baselines fairly
+
+Do not compare WS explicit Wiring against a stripped-down conventional design ("fixed CAN IDs only"). A `PC -- USB -- gateway -- CAN -- nodes` system **already** needs USB framing, request routing, CAN node/message IDs, opcode-to-CAN mapping, and response routing — implicit in gateway firmware, but real. Count that when assessing configuration burden and forwarding tax.
+
+Note which physical topology the sketch actually uses. `PC -- PCAN -- CAN` is a different conventional baseline than `PC -- USB -- gateway -- CAN`.
+
+### Friction ratings mean observed clunkiness
+
+Rate **None / Mild / Significant** for friction signals based on whether the **chosen happy-path mapping** feels awkward in practice — not whether an edge-case policy could be documented, and not merely because a design choice existed. Reserve **Significant** for topology where WS structure stays burdensome even with Organizer auto-Wiring (asymmetric memberships, wire proliferation, configs that are hard to audit after generation). A richer model with small symmetric Wires over few devices is usually **Mild**, not **Significant**.
+
+### Overlapping membership is often a feature
+
+One participant may be **Origin on one Wire and Node on another** over the same physical topology, with per-Wire NodeIds (`CORE §3`). Example: PC is Origin on a bench Wire and Node on a plant Wire. Autonomous telemetry on the plant Wire can be published once and **forwarded** to PC on that same Wire — no duplicate bus transmission, no cross-Wire re-publish. Awkwardness appears mainly if you insist the same data also arrive on the bench Wire via a second transmit binding.
+
+### Record the rejected mapping
+
+When a tempting decomposition turns out wrong (physical-link Wires, forced maintenance/user split on one serial link, IDebug splice on a one-cable board), **keep it as an alternative** with a short comparison table. That is often more valuable than only showing the final answer.
+
+### Prior sketches
+
+| Sketch | Key lesson |
+|---|---|
+| `01_dev_board.md` | Authority-shaped vs physical-link Wires; fair USB-gateway baseline; dual Wire overlap on four devices is a strong fit with Mild friction at worst |

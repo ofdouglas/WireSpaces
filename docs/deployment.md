@@ -313,7 +313,7 @@ The exact mechanism — what is covered, how it is computed, whether it is per-L
 
 ### One source generates every projection
 
-The same configuration is emitted in very different forms: C++ tables, RTL parameters, a host tool's view of the deployment, generated Python constants. A single deployment may contain all four (`CORE §26`).
+The same configuration is emitted in very different forms: C++ tables, RTL parameters, a host tool's view of the deployment, generated Python constants. A single deployment may contain all four (`IMPL §2`, `CORE §25`).
 
 > **One authoritative Wiring source generates every participating projection**, and validation rejects projections that disagree about a Wire, an alias, an Endpoint binding, a profile, a bound, or a capability.
 
@@ -408,3 +408,61 @@ The capability must be absent from normal builds — compiled out for constraine
 This pairs naturally with the counters and drop journals in `CORE §18`: a gateway that can already count what it rejects is most of the way to reporting what it observed. An observer also provides no redundancy coverage (`CORE §23.2`).
 
 **Open:** how far promiscuous capability may extend on a gateway that is simultaneously carrying production traffic, and the exact build-time removal rules.
+
+## 3.4 Internal Debug Wire and default bindings
+
+Before static system allocation, multiple devices cannot safely assume that the same *external* WireNumber refers to their own private debug traffic. Every device may instead use the same **device-private debug Wire identity** without collision, because that identity never leaves the device unspliced (`CORE §7`).
+
+```text
+Device
+
+ Service A ----\
+ Service B -----+---- InternalDebugWire ---- splice ---- host-facing Wire
+ Service C ----/                               |
+                                               v
+                                               PC
+```
+
+Once commissioned, a typical host path is:
+
+```text
+InternalDebugWire (e.g. 1020)
+    <splice>
+Wire 101
+    |
+USB / Ethernet / CAN
+    |
+PC
+```
+
+A reusable Service can have a default injected `debug_tx` binding (`CORE §10`) without knowing which physical Link reaches the developer, which host transport is in use, which external WireNumber was assigned, or whether the device is still in anonymous bring-up mode. Selected Services can later be moved to different application or diagnostic Wires.
+
+This gives WS a useful zero-configuration bring-up path while avoiding accidental external WireNumber collision.
+
+## 3.5 Link telemetry and observability Services
+
+A proposed default-enabled **Domain Local Link Telemetry Service** collects periodic snapshots from all Link Interfaces in one Endpoint Domain.
+
+```text
+Endpoint Domain
+    +-- CAN_A
+    +-- CAN_B
+    +-- shared-memory Link
+    +-- Ethernet
+    |
+    `-- Link Telemetry Service
+            |
+            | ~1 Hz snapshots
+            v
+       InternalDebugWire
+            |
+            | splice (§3.4)
+            v
+       host-facing Wire -> PC
+```
+
+The telemetry Service can remain small on embedded targets while host/Linux implementations expose much richer detail. The exact schema is open (`REG §6.7`).
+
+Larger gateways may additionally report Wires using the most bandwidth, Wires producing the most congestion drops, and per-QoS pressure. This is useful for human diagnosis even if no automatic congestion manager is ever implemented.
+
+A future optional Link Manager Service could consume this telemetry and change admission/shedding policy, but that is **not base protocol behavior** (`FUTURE §15`).

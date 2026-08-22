@@ -1,0 +1,11 @@
+# Default owner for the repository.
+* @ofdouglas
+
+# Architecture and protocol documents.
+/docs/ @ofdouglas
+
+# Reference implementation and simulator code.
+/code/ @ofdouglas
+
+# CI and repository automation.
+/.github/ @ofdouglas

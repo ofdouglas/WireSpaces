@@ -253,7 +253,7 @@ This is not a demo subset that violates the architecture. It is the architecture
 
 ## 8.2 Multicore MCU with telemetry
 
-See `CORE §13` (multicore Links), `CORE §7` and `DEPLOY §3.4` (Internal Debug Wire and splice), and `INTRO §6` Level 1–2 for discovery and commissioning.
+See `CORE §13` (multicore Links), `CORE §7` and `DEPLOY §3.2` (Internal Debug Wire and splice), and `INTRO §6` Level 1–2 for discovery and commissioning.
 
 ## 8.3 CAN-to-Ethernet gateway
 
@@ -286,6 +286,8 @@ Early concurrency should use mutexes, critical sections, bounded queues, and cop
 
 Note that step 2 now lands on the least-settled part of the architecture rather than a well-worn one. The Endpoint API is a portability contract (`SVC-9`), so its shape is worth deciding deliberately before Services are written against it — the open items are in `REG §6.12`.
 
+This is a build order, not a decision order. What has to be settled before each stage, and what is safe to leave provisional as long as it is labeled, is in `CONFORM §5`; the discipline that keeps a provisional choice from quietly becoming a decision is in `CONFORM §1.1`. The two interact, because steps 1 and 2 sit directly on the stages where rework is cheapest to avoid and most expensive to perform afterwards.
+
 Only after the above exist should the project freeze more advanced details such as UART framing, Link credits, richer Transport behavior, or static Manifest traffic analysis.
 
 Agents should produce **small concrete reference implementations and tests**, not generalized framework hierarchies, unless the same abstraction is already demanded by more than one real Link/target.
@@ -305,6 +307,7 @@ The current implementation state lives in `sim/`, which is at step 0: a process 
 | `deployment.md` | `DEPLOY` | Discovery, commissioning, Wiring, host tooling |
 | `conformance.md` | `CONFORM` | Reference vectors, boundary tests, exit criteria for provisional status |
 | `implementation.md` | `IMPL` | Language choices, scaling profiles, execution shape |
+| `library_architecture.md` | `LIB` | Core library structure, seams, and public API shape |
 | `future_work.md` | `FUTURE` | Material not yet designed. Nothing here is a requirement |
 | `architecture_register.md` | `REG` | Confidence levels, invariants, superseded concepts, open questions |
 | `history.md` | `HIST` | Revision history and provenance (not a control surface) |

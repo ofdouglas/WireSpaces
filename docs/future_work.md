@@ -8,20 +8,9 @@
 
 # 1. How to Read This Document
 
-Material lives here when both of the following are true:
+Material lives here when it is **not yet designed** and its absence from the main documents **cannot cause a wrong implementation decision today**. Boundary statements that prevent wrong builds stay in `CORE`; this file holds discussion only.
 
-1. it describes something **not yet designed**; and
-2. its absence from the main documents **cannot cause a wrong implementation decision today**.
-
-The second clause is why several things that look like future work are *not* here. Boundary statements — origin failover is not a Wire feature, composition must flatten, redundancy owns six named responsibilities, a constrained LLL must not grow into a transport — stay in `CORE` precisely because removing them would let someone build the thing they exist to prevent. Where a topic needed both, the constraint stayed in `CORE` and the discussion moved here.
-
-Two consequences for anyone generating code or designs from this repository:
-
-> **Do not implement anything in this document** unless a specific instruction says to. It is a record of intent, not a backlog that has been agreed.
-
-> **`REG` is authoritative for status.** If an item appears both as an open question in `REG §6` and as a section here, the `REG` entry is the current state and this document only expands it.
-
-While there is exactly one implementation of WireSpaces, "optional" and "future" collapse into the same thing: not yet built. Both are collected here. If the project ever publishes, they will need separating again, because a published profile has to distinguish "an implementation may omit this" from "nobody can implement this yet."
+> **Do not implement anything here** unless explicitly instructed. **`REG §6` is authoritative for status** — if an item appears in both places, the register entry is current and this document only expands it.
 
 ---
 
@@ -149,9 +138,11 @@ The maturity ladder places this work at Levels 4-5 (`INTRO §6`), and the defini
 
 # 6. Restart and Reliability Direction
 
-`CORE §23` states which components are likely to be recoverable units. Detailed restart policy is component-specific and undesigned.
+`CORE §23` now covers the parts of restart behavior that are observable outside the component: separate Link and restart-unit lifecycles, runtime generation, bounded quiesce, escalation, declared isolation, reset boundaries, and external supervision. What remains here is the part that is genuinely undesigned.
 
-The broader project direction favors Link status counters, health reporting, bounded logging, and non-recursive diagnostic failure paths. What is missing is anything concrete about restart ordering, state re-establishment after an LLL or Link Interface restart, whether reassembly state survives, what a Service is entitled to assume about its bindings after a peer Domain restarts, and how a restart is reported.
+Local, and mostly a matter of naming: the lifecycle state enumeration and transition API, the vocabulary for a cancelled or faulted transmit, the ownership and timeout rules for asynchronous lifecycle commands, the heartbeat and supervisor interface, and how a restart-unit dependency group is expressed in configuration.
+
+Distributed, and harder because it crosses a trust boundary: restart *ordering* across components, state re-establishment after an LLL or Link Interface restart, and what a Service is entitled to assume about its bindings after a **peer** Domain restarts. The last is the interesting one. Local generation says nothing about a peer's restart, so either a Service treats every binding as suspect after any silence — which is expensive and vague — or something observable carries a peer's restart across the Wire, at which point it is a protocol feature with a field, a width, and a wrap rule rather than a local convention. Learned-from-ingress bindings and reply contexts (`CORE §10.6`) are where this bites first, since both are peer state held locally with no natural invalidation event.
 
 Cyclic and redundant forwarding profiles at the routing level are also deferred. The acyclic realization rule (`CORE §12.4`) holds until such a profile exists, and redundancy composed above Wires does not need one.
 
@@ -179,18 +170,16 @@ Open: the registry *process* — who allocates, how experimental ranges are recl
 
 ## 8.1 Level-0 Services and allocation hierarchy
 
-A compelling base ecosystem should make one PC-connected device useful immediately. Likely standard/common Services:
+A compelling base ecosystem should make one PC-connected device useful immediately without complicated network configuration. Likely Level-0 / common Services:
 
-- stable device identity;
-- software/build/version information;
-- heartbeat / uptime / reset reason;
-- text logs;
-- structured events;
-- Link health/telemetry;
-- firmware update / object transfer;
-- application-specific telemetry and control.
-
-A device should not need complicated network configuration merely to expose these over one Link.
+```text
+identity / build version
+heartbeat / health / reset reason
+text logs / structured events
+Link telemetry
+firmware update / object transfer
+application telemetry and control
+```
 
 Service allocation hierarchy across Namespaces:
 
@@ -205,31 +194,7 @@ NS3 EID 1024..65535
     richer-link ecosystem Services
 ```
 
-Not every Service needs to be in the compact Namespace-0 Common region. This avoids wasting the scarce N=1 encoding while leaving the future community ample permanent address space. The Classical-CAN optimized region split is in `LINK §2.4`.
-
-A wider catalog of candidates has been sketched but not designed:
-
-```text
-Identity / device information
-Build / version information
-Heartbeat / health
-Text logs
-Structured system events
-Link status / traffic counters
-Telemetry / scalar snapshots
-Crash / fault records
-Firmware update
-Bulk data transfer
-Discovery / enumeration
-Lifecycle / reset control
-Persistent configuration
-Time synchronization
-RPC-style utilities
-```
-
-Service schemas should eventually have portable, deterministic definitions and useful code generation, but the schema language and toolchain are not chosen. The contract they must express is `CORE §21.3`: a schema over bytes, from which language types are generated as views.
-
-Time synchronization is worth flagging as coupled to an open question elsewhere: freshness representation (`CORE §21.4`) may or may not need a canonical timestamp, and that decision should be made with time sync in view rather than separately.
+Not every Service needs the compact NS0 Common region (`LINK §2.4`). Service schemas need portable definitions and code generation eventually; the contract is `CORE §21.3`. Freshness representation (`CORE §21.4`) and time sync should be decided together.
 
 ## 8.2 Service archetypes
 
@@ -266,11 +231,7 @@ The dangerous tail of the catalog — memory peek/poke, arbitrary register acces
 
 # 9. Remote Maintenance
 
-The same Service model can work across Ethernet, VPN, radio, or other remote Links. Remote maintenance should emphasize retained logs/events, identity/version, health, configuration, resumable firmware/object transfer, and selected telemetry.
-
-Two cautions already apply: high-rate internal Wires should not automatically be mirrored over narrow remote Links, and a remote link should not splice every internal Wire (`CORE §7`, `CORE §22`).
-
-Undesigned: everything about authentication and authorization, which is the reason this is future work rather than a near-term feature. WireSpaces provides no security layer, so a remote deployment currently needs an external secure boundary.
+The same Service model can work across Ethernet, VPN, radio, or other remote Links — logs, identity, health, configuration, resumable transfer, selected telemetry. Constraints already in `CORE`: do not mirror high-rate internal Wires over narrow remote Links; do not splice every internal Wire (`CORE §7`, `CORE §22`). Authentication and authorization are undesigned; an external secure boundary is required today.
 
 ---
 
@@ -364,7 +325,7 @@ Individually minor, collected so they are not re-proposed as novel:
 | Same-profile cut-through forwarding | Not the generic architecture (`CORE §12`) | Measured gateway latency problem, and only if behaviorally equivalent |
 | NodeId-based branch pruning | Flood-and-filter is the baseline (`CORE §12.1`) | Demonstrated bandwidth pressure on a multi-branch Wire |
 | Per-Wire congestion signaling | Coarse credit pools accepted (`CORE §15.6`) | A real system where head-of-line coupling is inadequate |
-| Link Manager Service | Telemetry exists; no consumer (`DEPLOY §3.5`) | A gateway large enough for automatic policy to beat human diagnosis |
+| Link Manager Service | Telemetry exists; no consumer (`DEPLOY §3.3`) | A gateway large enough for automatic policy to beat human diagnosis |
 | Intermediate QoS profiles | Only Minimal and Full standardized (`CORE §14.1`) | Implementation experience showing a real need for `Normal+Background` |
 | Extended internal-Wire profile | 127 device-private Wires assumed ample (`CORE §4.4`) | An implementation genuinely needing hundreds of internal Wires |
 | Many-core profile | No special assumptions (`CORE §13.5`) | A very-large-many-core target, rather than canonical header bits spent now |
@@ -372,3 +333,26 @@ Individually minor, collected so they are not re-proposed as novel:
 | Header-extension format | ~8-byte target, not byte-exact (`CORE §2.3`) | A Link profile or Transport that actually needs an extension defined |
 
 The pattern in every row is the same, and it is the design rule from `INTRO §3`: the extension waits for a concrete implementation to demonstrate that the current model cannot solve the problem cleanly.
+
+---
+
+# 16. Declared Field Encodings
+
+There is no schema language yet (`REG §6.15`), and the first thing needing one is telemetry (`DEPLOY §3.3`). A candidate vocabulary is recorded here because it is small, and because its interesting parts are semantic rather than syntactic:
+
+```text
+UInt<N>            unsigned, codes 0..2^N-1
+SInt<N>            two's complement
+Bool               one bit; unknown is NOT a third value (CORE §18.5)
+Enum<N>            explicit code registry; unassigned codes are reserved and
+                   are never silently mapped to a known state
+Percent<N>         quantized 0..100%, with declared rounding and clamping
+Ratio<N>           quantized over a declared range, e.g. occupied/capacity
+SaturatingUInt<N>  stops at its maximum, which means "at least this value"
+```
+
+`SaturatingUInt<N>` and the `Enum<N>` rule are the two carrying real weight. A saturating counter whose maximum *means* "at least this" is honest about a bounded field in a way that a wrapping counter is not, and it lets a 4-bit field remain useful during a fault storm. And an enum that maps unassigned codes to a nearest-known state is how a receiver confidently reports a condition that never happened — the same fail-closed reasoning as rejecting nonzero reserved fields (`CORE §2.2`).
+
+`N` is the serialized width, never the width of whatever host type holds the value. Each field definition then has to state its meaning and observation lifetime, width, unit, semantic range, exact quantization and clamping, every reserved and unavailable code, and its bit offset and octet order — including what happens when it crosses an octet boundary. A field missing any of those is not implementable twice, which is the only test that matters. And the general prohibition applies: native bitfields do not define a layout (`BITS §1.1`).
+
+Nothing here is a decision. It is a starting point that has already survived one design pass, offered so that the schema question begins somewhere other than a blank page.

@@ -8,7 +8,7 @@ Multiple unconfigured nodes may simultaneously transmit the same `DLC = 0` frame
 
 This provides a primitive equivalent to:
 
-> “Does at least one unconfigured node matching predicate P exist?”
+> "Does at least one unconfigured node matching predicate P exist?"
 
 ## CAN Identifier Layout
 

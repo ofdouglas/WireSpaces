@@ -60,3 +60,5 @@ Passive infrastructure: routing tables, dispatch tables, static bindings, bounde
 ```
 
 Data moves directly from producer context toward its configured destination. This makes the cost of communication visible: queues exist where a scheduling or ownership boundary actually requires them, not because the framework mandates a central broker.
+
+The concrete consequence is that the core library creates no tasks and owns no loop. How that is expressed in module structure and API shape is `LIB §11`.

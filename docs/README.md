@@ -21,6 +21,7 @@ Read in this order if you are new to the project:
 | [deployment.md](deployment.md) | Discovery, commissioning, Wiring, host tooling |
 | [conformance.md](conformance.md) | Reference vectors, boundary tests, exit criteria for provisional status |
 | [implementation.md](implementation.md) | Language choices, scaling profiles, execution shape for the reference code |
+| [library_architecture.md](library_architecture.md) | Core library structure, seams, and public API shape for the prototype |
 | [future_work.md](future_work.md) | Material not yet designed. Nothing here is a requirement |
 | [architecture_register.md](architecture_register.md) | Confidence levels, invariants, superseded concepts, open questions |
 | [history.md](history.md) | Revision history and provenance |
@@ -60,3 +61,4 @@ If you are generating code or designs from these documents:
 4. Use `conformance.md` for test vectors and boundary cases; use `implementation.md` for language and scaling choices.
 5. Prefer small concrete implementations and tests over generalized framework hierarchies. Do not introduce an abstraction until two real Links or targets need it.
 6. Nothing in `archive/` is current.
+7. `library_architecture.md` assumes a sibling `Design/Firmware` checkout on the include path when building the core library (`LIB §12.1`).

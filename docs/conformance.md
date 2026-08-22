@@ -31,6 +31,18 @@ This helps prevent software and RTL implementations from quietly becoming differ
 
 One check is not a vector at all but belongs with them. Because the Endpoint API is a portability contract rather than an implementation detail (`SVC-9`), the strongest test of it is to **compile one unmodified Service against two implementations** and run the same behavioral cases against both. Golden vectors verify that implementations agree on bytes; only this verifies that they agree on the surface Services are written against. It is worth doing as soon as a second implementation exists, since API divergence is cheap to fix early and expensive once Services depend on it.
 
+## 1.1 A prototype is an evidence generator, not a source of architecture
+
+The first implementation will encounter every open question in `REG §6` and will have to do *something* at each one. That is fine and unavoidable. What is not fine is the default consequence:
+
+> **An implementation choice does not close a specification gap, and does not acquire the status of a decision by being shipped.**
+
+Left unstated, this fails in a specific and familiar way. Someone picks a reassembly timeout because the code needs a number; six months later it is in three implementations and a test suite, and the question "what should the timeout be, and why" has been answered by nobody while becoming expensive to reopen. The same path turns a placeholder CRC polynomial into a compatibility constraint.
+
+Two habits are enough to prevent it. Anything chosen to make code run rather than because it was decided is **labeled provisional in the code, the vectors, and any report** — the open item in `REG §6` stays open and gains a note about what the prototype happens to do. And a test asserting a provisional value is understood to be pinning current behavior for regression purposes, not ratifying it.
+
+The inverse error is worth naming too: the prototype is the *only* thing that can answer several of those questions, because they are measurement questions rather than design ones (§3). The point is not to defer to the documents, it is to keep straight which kind of question is being answered.
+
 ---
 
 # 2. Test at the Boundaries, Not in the Middle
@@ -99,6 +111,43 @@ binding modes        every enabled mode, including reply contexts that are
 
 The parser-chunking case earns its place: a framing bug that only appears when a PDU straddles two reads is invisible to any test that hands the parser whole messages, and it is the default behavior of a real UART.
 
+## 2.1 Lifecycle and restart cases
+
+Restart behavior (`CORE §23`) needs its own group, because almost none of it is reachable from a vector file and all of it is reachable from a field failure:
+
+```text
+planned stop         a Link disabled and re-enabled without ever entering
+                     a fault state, and a redundant request either idempotent
+                     or explicitly rejected
+in-flight work       restart with transmit accepted, reassembly partial,
+                     timers pending, and queues full - every accepted
+                     transmit reaching exactly one terminal outcome
+bounded quiesce      stop against a driver that never completes, hitting the
+                     deadline and forcing cancellation rather than hanging
+generation           counters and high-water marks not compared across a
+                     runtime generation change, and a pre-restart handle
+                     rejected rather than honored on a reused slot
+retained buffers     application-owned receive buffers surviving restart,
+                     released safely afterwards, and the resulting temporary
+                     capacity reduction bounded and counted
+sibling isolation    a healthy Link continuing through another's restart,
+                     wherever configuration claims they are independent
+reset boundary       latched fault and restart evidence surviving restart,
+                     generation-scoped counters resetting, and each obeying
+                     its declared boundary rather than a convenient one
+supervision          a hung restart unit detected from outside it, and an
+                     idle Link with no traffic not reported as faulted
+escalation           repeated fault injection producing bounded records,
+                     bounded restart attempts, and no diagnostic storm
+telemetry lifetime   live status becoming unavailable while latched status
+                     stays readable; a faulted Link's status published over
+                     a healthy one; no torn mixed-generation snapshot
+unavailable fields   a not-applicable field distinguishable from zero, on a
+                     Link with no flow control and on shared QoS queues
+```
+
+Two of these deserve emphasis because they are the ones most often skipped. Testing the *planned* stop path matters because an implementation that only ever exercises fault-driven recovery tends to have no working clean shutdown, and discovers it during a firmware update. And the diagnostic-storm case is the one where a correct-in-isolation node becomes the bus's problem — a restart loop that reports each attempt is worse than the fault it is reporting.
+
 ---
 
 # 3. What a Vector Suite Cannot Tell You
@@ -115,9 +164,90 @@ On an AMP target or a simulation of one, it is also worth demonstrating that int
 
 One effect is specific enough to name. **Fragmentation amplifies loss.** An `N`-fragment PDU is lost if any one of its fragments is lost, so at a per-frame loss rate `p` the PDU loss rate is roughly `1 - (1-p)^N` — about `N * p` for small `p`. A 1% frame loss rate becomes an 8% PDU loss rate at `N = 8`. This is a strong argument for keeping `N` small on lossy media and for measuring PDU-level rather than frame-level loss, and it is a reason a Service should not treat a large fragmented PDU as being as dependable as a small one on the same Link.
 
+## 3.1 Load profiles
+
+Steady-state throughput is the least informative load to measure, and the easiest. Four others are where designs actually fail:
+
+```text
+startup         everything initializing, tables loading, peers not yet up,
+                and periodic Services all first firing in the same window
+degraded        a Link down, a peer silent, reassembly timing out
+diagnostic burst telemetry, drop journaling, and fault records at full rate
+error storm     sustained malformed or unauthorized traffic from a babbling
+                source, with every rejection counted
+```
+
+The specific property worth asserting under the last two is that **diagnostics cannot starve control**: configured control traffic still makes its deadline under the selected QoS discipline while diagnostics run at their maximum admitted rate. A system whose telemetry can suppress its own control path has inverted its priorities, and this is easy to build accidentally, since diagnostics are the traffic that scales with how badly things are going.
+
+## 3.2 Budgets are inputs, not outputs
+
+> **A resource budget is frozen before the run that measures against it.**
+
+The reason is uncomfortable but reliable: a budget written after the measurement is a description, and it will accommodate whatever was measured. Reversing the order is what makes an overrun visible as a failure rather than as a new baseline.
+
+What is worth reporting per configuration, since a single "RAM used" figure hides the decisions:
+
+```text
+RAM         static and peak, broken out by generated tables, Endpoint
+            storage, pools, queues, reassembly contexts, and telemetry
+stack       worst case, plus any initialization-only allocation
+flash       by layer - core, Link profile, codecs, Services
+bandwidth   encoded bytes, per-PDU overhead, cadence, resulting Link load
+latency     distributions rather than averages, per stage and end to end
+work        copies, atomics, critical-section time, cache maintenance,
+            DMA transitions, scheduler wakeups
+CPU         at idle, normal, worst admitted, restart, and error-storm load
+```
+
+One property is checkable rather than merely measurable: **no dynamic allocation on any steady-state path**. Initialization may allocate; the running system may not, and a test can assert this directly by failing the allocator after setup.
+
+Counters need their own discipline, since they are the primary evidence for everything above. Each one declares width, unit, saturation or wrap behavior, the exact point it increments, and its reset boundary (`CORE §23.7`) — and a test asserts the *expected delta*, not merely that the counter exists. A counter nobody has predicted the value of is decoration.
+
 ---
 
-# 4. Exit Criteria for Provisional Status
+# 4. Capability Claims and Reason Categories
+
+Targets range from an 8-bit node to a Linux gateway, so a single pass/fail suite would either exclude the small targets or test nothing. The resolution is to make the claim explicit and separate from the result.
+
+Each configuration declares every optional capability as one of:
+
+```text
+required            must work; failure fails the suite
+optional-enabled    claimed and enabled; its tests must run and pass
+optional-disabled   supported but off here; tests not run, claim not made
+unsupported         not present on this target; recorded as an expected gap
+```
+
+> **A capability may be claimed only if its tests actually ran.** A target that declares something unsupported is not failed for omitting the test — and does not inherit the claim either.
+
+The failure mode this prevents is the silently skipped success: a suite that reports green because the flow-control tests found no flow control and returned early. Capabilities worth declaring this way include credit-based flow control, promiscuous observation, zero-copy receive, DMA involvement, hardware timestamps, multi-mailbox CAN transmit with priority-aware selection and safe cancellation, non-coherent multicore operation, out-of-band debug (`CORE §23.9`), and independently restartable sibling Links (`CORE §23.6`).
+
+The same explicitness applies to rejections. Every drop and refusal is counted (`ERR-1`), and the counters are only useful if the categories are stable:
+
+> **Rejection reasons come from a fixed registry, and a test asserts the reason, not merely that something was rejected.**
+
+Otherwise a test passes for the wrong cause — an oversize PDU rejected as an unknown Wire looks identical from outside, and the bug surfaces later as traffic that mysteriously fails to route. The registry needs to be an enumeration with a declared width and no catch-all bucket large enough to hide in, and it is shared between the implementation, the telemetry schema (`REG §6.7`), and the vectors.
+
+---
+
+# 5. Staged Freezes
+
+Decisions have dependencies, and the expensive mistake is building on one that has not been made. It is worth grouping the open items into stages where each stage is settled before the work that depends on it starts — not to add process, but because these are the seams where rework is cheap on one side and expensive on the other.
+
+| Stage | Settled before | Contents |
+|---|---|---|
+| Representation | any codec is written | descriptor bit layout (`BITS`), extension length encoding, identity allocation fences, WireAlias canonicalization, little-endian rule |
+| Endpoint API | any Service is written | Queue and Snapshot vocabulary, capacity declaration, metadata declaration, transmit Endpoint shape, decoded-representation naming (`REG §6.12`) |
+| Storage and ownership | concurrency is optimized | ownership transitions on every accept and reject path, memory ordering for Snapshot publication, ISR and cross-core rules |
+| Congestion and QoS | load testing means anything | send-result vocabulary, per-Endpoint capacities, drop and replacement policy, QoS discipline parameters |
+| Lifecycle and telemetry | a supervisor or host tool is written | lifecycle operations, runtime generation width, reset boundaries, reason registry, counter registry, telemetry schema class |
+| CAN profile | any device ships on a shared bus | identifier field positions, CRC parameters, DLC and padding, reassembly timeout, generation and reset rules, commissioning control space |
+
+Two things follow from the ordering. Later stages can proceed with earlier ones provisional as long as the provisional status is labeled (§1.1) — the table describes where rework concentrates, not a gate that blocks all work. And the CAN row is last for a reason unrelated to difficulty: it is the only one whose mistakes are visible to other devices, so it is the only one where being wrong costs a coordinated update rather than a recompile.
+
+---
+
+# 6. Exit Criteria for Provisional Status
 
 This architecture and its Link profiles are provisional. Recording what "no longer provisional" requires is useful now, because it keeps the label from becoming permanent by default. A Link profile may drop the provisional label when:
 

@@ -1082,7 +1082,7 @@ Routing itself stays synchronous and cheap. A Link RX path still calls the Route
 - coherent model across firmware, host, and RTL (no callback into an RTL Endpoint);
 - traded latency: consumer scheduling delay enters the loop; same-loop Link service then Endpoint drain minimizes extra delay (`CONFORM §3`).
 
-Rationale and history: `decision-bounded-endpoint-delivery.md`.
+Rationale and history: `HIST §4.2`; full decision record in [`archive/decision-bounded-endpoint-delivery.md`](../archive/decision-bounded-endpoint-delivery.md).
 
 ### What acceptance includes
 

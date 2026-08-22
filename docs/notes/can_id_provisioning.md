@@ -1,5 +1,7 @@
 # Runtime CAN ID Provisioning by Anonymous Binary Search
 
+**Location:** `docs/notes/` — working notes, not part of the main doc set (`INTRO §10`). Intended to fold into `LINK` / `DEPLOY` when commissioning identifier layout is normative.
+
 ## Overview
 
 WireSpaces CAN nodes may be commissioned at runtime using a CAN-native discovery mechanism based on **anonymous identical responses** and binary search over a permanent 64-bit `DeviceId`.

@@ -61,3 +61,4 @@ If you are generating code or designs from these documents:
 4. Use `conformance.md` for test vectors and boundary cases; use `implementation.md` for language and scaling choices.
 5. Prefer small concrete implementations and tests over generalized framework hierarchies. Do not introduce an abstraction until two real Links or targets need it.
 6. Nothing in `archive/` is current.
+7. `library_architecture.md` assumes a sibling `Design/Firmware` checkout on the include path when building the core library (`LIB §12.1`).

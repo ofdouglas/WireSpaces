@@ -46,7 +46,7 @@ The library also creates no tasks and owns no loop, which turns `IMPL §3`'s exe
 
 Two `WS_old` sources were mined: `link_engine_runtime_and_status.md` and `prototype_and_validation.md`. They divided cleanly. The first was almost entirely recoverable, because it addressed a subject the current documents had explicitly deferred. The second was almost entirely superseded on protocol content — old `Control` order, `WireBand`, `PathTag`, `PeerId`, ascending QoS, PDUA to `N=16` — but its *validation discipline* was the best material in either document and survived intact.
 
-## 2.1 Lifecycle and restart
+## 3.1 Lifecycle and restart
 
 `CORE §23` had been a stub: four sentences naming likely recoverable units and deferring everything else to `FUTURE §6`. It is now the lifecycle chapter, and `OWN-4`'s open question about terminal outcomes during restart is answered. Ten invariants were added as a new family (`RUN-1`..`RUN-10`).
 
@@ -60,7 +60,7 @@ The load-bearing recoveries, each of which was absent rather than superseded:
 - **A supervisor must sit outside what it supervises** (`RUN-10`), with the sharpest line in either source document: a heartbeat written by the failed context and read only by that same context is not supervision.
 - **An out-of-band debug path** (`CORE §23.9`). This is not a duplicate of the Internal Debug Wire, which is in-band by design and therefore shares the fate of the stack carrying it. Both are wanted, for different failures.
 
-## 2.2 Telemetry has two lifetimes, and unavailable is not zero
+## 3.2 Telemetry has two lifetimes, and unavailable is not zero
 
 Two additions to `CORE §18` (`ERR-4`, `ERR-5`).
 
@@ -70,7 +70,7 @@ Two additions to `CORE §18` (`ERR-4`, `ERR-5`).
 
 Age got the same treatment: elapsed monotonic time to the point the report was assembled, not wall-clock and no evidence of clock sync, with a saturated maximum meaning "this old or older."
 
-## 2.3 One telemetry Service per Domain, with schema classes
+## 3.3 One telemetry Service per Domain, with schema classes
 
 `DEPLOY §3.3` gained structure it had been missing. One Service per Endpoint Domain — not one per Link, and not a separate local-introspection Service beside a network-reporting one, since two Services over the same state is two chances to disagree about what "degraded" means. Two access faces over a single semantic model, so local telemetry stays useful during bring-up when no telemetry Wire is reachable.
 
@@ -78,7 +78,7 @@ The Compact/Standard/Extended split by target scale was recovered as the plausib
 
 One recovery was a pleasant confirmation rather than an addition. The old requirement that each destination hold **at most one pending summary**, updated in place by a newer sample rather than queued behind it, is exactly a Snapshot transmit Endpoint (`CORE §10.4`) — designed in revision 0.9 for unrelated reasons. An older generation independently needing the same primitive is reasonable evidence it is the right one.
 
-## 2.4 Validation discipline
+## 3.4 Validation discipline
 
 `CONFORM` grew four sections from `prototype_and_validation.md`, none of them about encoding.
 
@@ -92,7 +92,7 @@ One recovery was a pleasant confirmation rather than an addition. The old requir
 
 `CONFORM §2.1` collects the restart cases, which are nearly all unreachable from a vector file and all reachable from a field failure.
 
-## 2.5 Also recovered, and rejected
+## 3.5 Also recovered, and rejected
 
 Recovered in smaller form: **receive-side offload** guidance was folded into existing rules rather than added, since `CORE §1.7` and `DISP-9` already cover an LLL doing framing, integrity, decode, and timestamp capture without becoming the producer; **static schedule entries** turned out to be transmit Endpoints plus an LLL cadence, already present in `CORE §10.3`; and a **candidate field-encoding vocabulary** went to `FUTURE §16`, where `SaturatingUInt<N>` (maximum means "at least this") and the rule that unassigned enum codes are reserved rather than mapped to a nearest known state are the parts carrying real weight.
 
@@ -104,7 +104,7 @@ Deliberate divergences left standing rather than imported: the old prohibition o
 
 # 4. Revision 0.9 — bounded Endpoint delivery, `Port` retired, descriptor packing fixed
 
-## 3.1 Bit and byte layout
+## 4.1 Bit and byte layout
 
 `bit_layout.md` (`BITS`) was added, fixing conventions that had been deferred as "profile-owned" and were blocking the first roadmap step: descriptor helpers cannot be written without bit positions.
 
@@ -116,7 +116,7 @@ A related change fell out of writing it. `LINK §2.5`'s `PduControl` byte was de
 
 `Control` is now noted as fully allocated, with no reserved bits and no growth room, so any future global flag must go in a header extension.
 
-## 3.2 Bounded Endpoint delivery, and the retirement of `Port`
+## 4.2 Bounded Endpoint delivery, and the retirement of `Port`
 
 Adopted from `docs/proposal-bounded-endpoint-delivery-and-snapshot-semantics.md` with modifications. This is the largest semantic change since the QoS renumbering, and unlike that one it removes a capability rather than renumbering a field.
 
@@ -311,7 +311,7 @@ Carried forward from the snapshot and still superseding the overview: PDUA MaxN 
 
 | Document | Superseded by |
 |---|---|
-| `wirespaces_high_level_architecture_design_overview.md` | Revision 0.2 |
+| `archive/wirespaces_high_level_design_overview.md` | Revision 0.2 |
 | `wirespaces_architecture_snapshot_2026-08-20.md` | Revision 0.2 |
 | `wirespaces_simplified_wire_and_autowiring_design_change.md` | Revision 0.3 |
 | `WS_old/network/architecture_overview.md` | Revision 0.4 |

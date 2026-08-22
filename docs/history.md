@@ -8,7 +8,31 @@ Cross-references use document codes. Section numbers in older entries refer to l
 
 ---
 
-# 1. Revision 0.12 — `LIB` built on the existing utility layer
+# 1. Revision 0.13 — `LIB` corrected after review
+
+`LIB` was reviewed and several of its choices were wrong. This entry records the corrections, because three of them were errors rather than preferences and the reasoning is worth keeping.
+
+**A hidden dependency cycle.** `PduSink` and `IngressSink` were defined in `forwarding`, but `LogicalLink` implements `PduSink` and a transmit Endpoint holds one, so `link` and `endpoint` both depended on `forwarding` while `forwarding` depended on them. The module diagram asserted independence that the types denied. A fourth wrong-way edge was worse because it was invisible: the LLL was described as sampling bound `SnapshotTransmitEndpoint`s, which would have made `link` depend on `endpoint`. The fix puts the one-method seam interfaces in the dependency root and adds a `PduSource` for the pull direction, so the LLL samples through a neutral interface. `core` now depends on nothing at all — the previous `core -> platform` edge was unnecessary, since no part of the descriptor codec needs a clock or a lock, and removing it means the codec and the conformance-vector tools build with no port present.
+
+This also forced an honest statement of what `core` is. It holds canonical protocol types *and* dependency-root runtime types such as `ReceivedPdu` and `LinkIndex`. The earlier rule — a Link-scoped concept in `core` means a type is in the wrong module — was violated by the document that stated it. The rule now applies per header rather than per target.
+
+**One byte-span driver seam for every carrier.** This was the most expensive error, because it would have been discovered only once a CAN driver existed. `sendUnit(Span<const uint8_t>)` cannot express a CAN frame, and in WireSpaces that is not generic awkwardness: `LINK §2` packs QoS, WireAlias, NodeId, and Direction into the 11-bit identifier, so the identifier carries descriptor content that the peer's LLL must recover. Forcing it through a byte span means inventing a private serialization format to talk to ourselves. The `TransferUnitKind` capability field was the tell — a seam needing a runtime enumeration to describe the true shape of its own arguments has the wrong signature. Hardware driver contracts are now typed per carrier shape (`CanDriver`, `ByteStreamDriver`, a datagram driver when one is needed), and carrier-neutrality is asserted at the Logical Link, which is what every layer above actually sees. The capability descriptor split with it, along the line of whether a property survives a change of controller.
+
+**Snapshot coherence, now decided.** The review caught that a writer-side lock policy does nothing to make `read()` coherent against a concurrent `tryAccept()`: with a single writer, a no-op policy, and a reader in another task, a reader can observe metadata from one message beside payload from the next. The previous draft's claim that an RTOS could run every Link and Service in its own task "with the same objects and no library change" had no basis, and `REG §6.12` had listed Snapshot memory ordering as open throughout.
+
+The resolution is a decision rather than a deferral: **a Snapshot Endpoint uses a seqlock**, so concurrent reads are safe by construction and coherence is not a configurable policy — every alternative setting would be one where an ordinary read tears. Three consequences are recorded in `LIB §9.2`: a read may retry and so is not wait-free, which makes the writer-priority relationship a real constraint; writers still need exclusion from each other, since a seqlock coordinates one writer with many readers; and the seqlock sequence is kept distinct from the `DISP-12` generation so an implementation detail is not exported as a Service-facing contract. Concurrency beyond Snapshot reads — several writers into one Endpoint, and concurrent access to one Logical Link — stays undesigned, with a narrow phase-1 contract requiring the application to serialize it.
+
+**Two reversals of positions taken one revision earlier.** Revision 0.12 argued that resolving `util::Uint24_s`'s TODO into a general bounded-integer type was the highest-leverage change available, on the grounds that it would make reject-don't-mask "a property of the type rather than a rule the codec must remember." That argument does not hold. A type carrying an integer and an `isValid()` does not prevent invalid instances; the codec still has to call the check at every field, so nothing is centralized. Delivering the claimed property needs controlled construction — a private constructor with a `tryMake` factory — which is a substantially larger exercise. The sequencing was also backwards, and contradicted the `INTRO §9` rule this project applies elsewhere: one descriptor codec is the first demand, not the second. `LIB §4.1` now uses plain range-checked wrappers with an explicit stopping condition.
+
+Revision 0.12 also recommended putting `Design/Firmware` on the core library's include path. That was wrong for a reason confirmed by inspection: `WireSpaces` and `Firmware` are in **separate repositories**, so an include path makes a clean checkout unbuildable except when an unrelated repository happens to sit at the right relative filesystem location, at an unrecorded revision. The earlier objection to copying — silent divergence — is answered by recording the upstream commit, which makes divergence a visible, reviewable event. A vendored extraction with recorded provenance is now the recommendation, and the observation that a core vendoring six foreign headers is not standalone in any meaningful sense strengthens the open question of whether the library belongs in the other repository entirely.
+
+**Smaller corrections.** `decode()` returned `bool`, which made `CONFORM §4`'s requirement to assert *why* something was rejected impossible to satisfy; per-operation result enumerations replace it. `AcceptResult::kReplaced` was removed: replacement is simply what a Snapshot does, so every healthy publication after the first would have reported a non-accepted result, and any counter aggregating those would read a working system as a failing one — consumers learn what they missed from the generation counter instead, and overwriting a never-read value became a counter rather than a return value. The promise that `Reason` had stable append-only numbering was withdrawn as premature; names are stable, numbers freeze when they become externally visible. `RouteEntry` gained an explicit splice flag, because `CORE` reserves a high WireNumber range and one top value but **not** zero, so the `splice_to == 0 means none` sentinel would have silently disabled a legitimate splice. And the empty `DeliveredMetadata` specialization was described as costing nothing, which is untrue for a data member in C++17.
+
+The first prototype increment now includes a transmit Endpoint feeding a recording sink, so both faces of the Endpoint model are exercised. The second is deliberately adversarial: a fake Classical CAN driver and the simplest CAN LLL path, before any byte-stream work, because CAN is what tests whether the redesigned seams are genuinely carrier-neutral rather than only claimed to be.
+
+---
+
+# 2. Revision 0.12 — `LIB` built on the existing utility layer
 
 `Design/Firmware` was surveyed for components the core library would otherwise reinvent, and `LIB` was reworked to depend on them. The finding was that most of the utility layer already exists and is better tested than anything written fresh would be: `util::Span` replaced the `Span` the previous revision had invented, `RingBuffer` became the Queue Endpoint storage, and `hal::PlatformClock` became the time source.
 
@@ -26,7 +50,7 @@ Three smaller things were recorded because they cost nothing to know now and are
 
 ---
 
-# 2. Revision 0.11 — `LIB` added
+# 3. Revision 0.11 — `LIB` added
 
 `library_architecture.md` (`LIB`) was added: module structure, seam mechanisms, and public API shape for the prototype core library. It changes no architecture and adds no invariants — `CORE` remains the source of behavior — but it is where the first implementation's structure gets argued about before code exists.
 
@@ -42,7 +66,7 @@ The library also creates no tasks and owns no loop, which turns `IMPL §3`'s exe
 
 ---
 
-# 3. Revision 0.10 — lifecycle and restart, telemetry lifetimes, validation discipline
+# 4. Revision 0.10 — lifecycle and restart, telemetry lifetimes, validation discipline
 
 Two `WS_old` sources were mined: `link_engine_runtime_and_status.md` and `prototype_and_validation.md`. They divided cleanly. The first was almost entirely recoverable, because it addressed a subject the current documents had explicitly deferred. The second was almost entirely superseded on protocol content — old `Control` order, `WireBand`, `PathTag`, `PeerId`, ascending QoS, PDUA to `N=16` — but its *validation discipline* was the best material in either document and survived intact.
 
@@ -102,7 +126,7 @@ Deliberate divergences left standing rather than imported: the old prohibition o
 
 ---
 
-# 4. Revision 0.9 — bounded Endpoint delivery, `Port` retired, descriptor packing fixed
+# 5. Revision 0.9 — bounded Endpoint delivery, `Port` retired, descriptor packing fixed
 
 ## 4.1 Bit and byte layout
 
@@ -144,7 +168,7 @@ Five items were added to `REG §6.12` rather than settled: final type names, the
 
 ---
 
-# 5. Revision 0.8 — document-set trim and split
+# 6. Revision 0.8 — document-set trim and split
 
 Three structural changes, following the rule that `CORE` carries buildable runtime behavior and catalogs, host Service schemas, and test vectors live elsewhere:
 
@@ -164,7 +188,7 @@ Additional moves:
 
 ---
 
-# 6. Revision 0.7 — QoS renumbering, and the last three large legacy specifications
+# 7. Revision 0.7 — QoS renumbering, and the last three large legacy specifications
 
 Two changes: the canonical QoS numbering was reversed by decision, and the three largest remaining `WS_old/network` documents were mined, which completes the bulk of the legacy material.
 
@@ -207,7 +231,7 @@ Twenty invariants were added across eight families; no existing ID changed. `COR
 
 ---
 
-# 7. Revision 0.6 — recovered from the endpoint-domain and CAN-adapter specifications
+# 8. Revision 0.6 — recovered from the endpoint-domain and CAN-adapter specifications
 
 Two `WS_old/network` documents were mined: `endpoint_domains_wires_routes_and_access.md` and `can_pdu_adapter_spec.md`. Both belong to the superseded generation, and both held material with no current equivalent.
 
@@ -233,7 +257,7 @@ One structural note: `ERR` is a new invariant family, added because rejection se
 
 ---
 
-# 8. Revision 0.5 — document set split
+# 9. Revision 0.5 — document set split
 
 The single working document `wirespaces_architecture_preliminary.md` (3,891 lines) was split into the current six documents plus this register. Content was preserved; the changes were structural.
 
@@ -252,7 +276,7 @@ Also in this revision:
 
 ---
 
-# 9. Revision 0.4 — recovered from `WS_old/network/architecture_overview.md`
+# 10. Revision 0.4 — recovered from `WS_old/network/architecture_overview.md`
 
 That document describes an earlier generation whose core model — the directed one-source/one-or-more-sink Wire, `{WireBand, RoutingCode}`, `RoutingAlias`, `PathTag`, Route as an object distinct from Wire, `ParticipantId`, and Tap/Relay/Replicator as base roles — is listed in `REG §5`. What survived:
 
@@ -275,7 +299,7 @@ Noted but not recovered: Domain Control as a named layer, and the reusable Commu
 
 ---
 
-# 10. Revision 0.3 — recovered from `wirespaces_simplified_wire_and_autowiring_design_change.md`
+# 11. Revision 0.3 — recovered from `wirespaces_simplified_wire_and_autowiring_design_change.md`
 
 That document's terminology and CAN numbering are superseded, but several ideas had no equivalent in revisions 0.1 or 0.2:
 
@@ -295,7 +319,7 @@ Rejected rather than recovered: ephemeral route repair / learned forwarding (rec
 
 ---
 
-# 11. Revision 0.2 — merged the overview into the snapshot
+# 12. Revision 0.2 — merged the overview into the snapshot
 
 Merged from `wirespaces_high_level_architecture_design_overview.md`, having been confirmed as still current: Wire Splicing including the `spliceWire` route field and the before-egress ordering rule; the Default Internal Debug Wire; Service TX bindings and `Inline`/`Serialized` delivery; copy-based buffer ownership; Namespace and EndpointId allocation; why a bus rather than pairwise edges; small-device Router notes; Ethernet/CAN adaptation asymmetry; implementation scaling profiles; and the worked examples.
 
@@ -307,7 +331,7 @@ Carried forward from the snapshot and still superseding the overview: PDUA MaxN 
 
 ---
 
-# 12. Superseded source documents
+# 13. Superseded source documents
 
 | Document | Superseded by |
 |---|---|

@@ -1,7 +1,7 @@
 ﻿# WireSpaces — Core Architecture
 
-**Status:** Private first draft; working architecture; provisional but intended to be buildable  
-**Scope:** The protocol model and node runtime. Everything here is meant to be implementable now  
+**Status:** Private first draft; working architecture; provisional but intended to be buildable
+**Scope:** The protocol model and participant runtime. Everything here is meant to be implementable now
 **Excluded:** Per-carrier encodings (`LINK`), configuration and tooling (`DEPLOY`), test vectors (`CONFORM`), implementation notes (`IMPL`), undesigned material (`FUTURE`)
 
 This is the main WireSpaces document. It is **not a normative protocol specification**: byte-exact Link encodings, CRC parameters, API signatures, timing requirements, and registry allocations belong to `LINK` or to narrower profile specifications. Where this document gives a concrete field width or behavior, it means "current agreed direction" unless the text says it is frozen.
@@ -27,14 +27,16 @@ Link Interface
         v
 Logical Link Layer (LLL)
     framing / validation / PDU fragmentation and reassembly
-    Link-local representations such as WireAlias
+    Link Binding, field elision, and participant projection
         |
         v
 complete canonical WireSpaces PDU
+    Wire + source ParticipantId + destination ParticipantId
         |
         v
 Router
-    decides local delivery and/or egress Link Interfaces
+    propagates the PDU across the configured Wire topology
+    and selects destination Endpoint Domain(s) for local delivery
        / \
       /   \
      v     v
@@ -85,14 +87,16 @@ Typical responsibilities:
 - fragmentation and reassembly when the carrier is smaller than a PDU;
 - aggregation when the carrier is much larger than a PDU;
 - Link-local control metadata;
-- translating `WireAlias <-> WireNumber` where aliases are used;
+- reconstructing an unambiguous canonical Wire, source ParticipantId, and destination ParticipantId from the Link Binding and received representation;
+- eliding canonical fields on egress where the Link Binding makes them uniquely recoverable;
+- projecting Link-local participant codes to canonical ParticipantIds where a constrained profile requires it;
 - optional Link-level flow control;
 - bounded scheduling or polling where the carrier is master-initiated (§1.7);
 - native Link error/status accounting.
 
-The LLL **does not generally own Wire routing policy**. It may need to understand a Link-local Wire representation such as `WireAlias`, but the generic decision about which other Links or Domains carry a Wire belongs to the Router.
+The LLL **does not generally own Wire routing policy**. It owns carrier representation and the Link Binding needed to reconstruct canonical identity. The generic decision about which other Links carry a Wire, and which local participant Domain may accept the destination, belongs to the Router.
 
-The generic routing boundary is the **complete PDU**, not an arbitrary carrier fragment. This is what permits heterogeneous gatewaying without every pair of Links requiring a custom bridge protocol.
+The generic routing boundary is the **complete canonical PDU**, not an arbitrary carrier fragment. Before a PDU reaches the Router or canonical dispatch, ingress has reconstructed its full canonical Wire, source ParticipantId, and destination ParticipantId. This is what permits heterogeneous gatewaying without every pair of Links requiring a custom bridge protocol.
 
 ## 1.4 Router
 
@@ -137,7 +141,7 @@ What the serialized region may contain is constrained, and this is what keeps it
 Two cautions about the word "Domain":
 
 - **A Domain is not a security boundary by itself.** Typed APIs and static configuration reduce accidental misuse, but enforcement against compromised or untrusted code needs a real protection boundary: MPU/MMU isolation, process isolation, hardware partitioning, or separation into independently protected Domains. See §22.
-- **A Domain is not a Node.** In WireSpaces, `Node` is a *role on a Wire* carrying a NodeId (§3.1). One device may host several Endpoint Domains and be a Node on several Wires, and neither term is a synonym for a device. Older documents used "Node" to mean roughly what this document calls an Endpoint Domain; that usage is superseded.
+- **A Domain is not necessarily a device.** Each independently routed and dispatchable Endpoint Domain has exactly one deployment-scoped ParticipantId and uses that same ParticipantId on every Wire in which it participates (§3.1). One device may host several Endpoint Domains; several execution contexts may share one when they share dispatch and authority.
 
 ## 1.6 Endpoint and Service
 
@@ -187,12 +191,12 @@ This raises the stakes on the Endpoint API's shape. Names, capacity declaration,
 
 ## 1.7 Master-initiated and polled Links
 
-Not every carrier lets both sides transmit whenever they choose. On I2C and SPI, and on some half-duplex turnaround schemes, data moves only when one side initiates a transaction. A Node on such a Link cannot push a `NodeToOrigin` publication at the moment it is produced; the traffic appears only when the master polls for it.
+Not every carrier lets both sides transmit whenever they choose. On I2C and SPI, and on some half-duplex turnaround schemes, data moves only when one side initiates a transaction. A participant on such a Link cannot push a publication at the moment it is produced; the traffic appears only when the initiating side polls for it.
 
 This is a Link mechanic, and it belongs entirely to the LLL and driver. The LLL may therefore:
 
 - schedule transmission of Service-owned state on its own timetable;
-- initiate a bus transaction purely to collect whatever a Node has queued;
+- initiate a bus transaction purely to collect whatever the remote participant has queued;
 - poll at a cadence unrelated to when any Service called `send()`.
 
 None of that makes the LLL a producer:
@@ -201,94 +205,90 @@ None of that makes the LLL a producer:
 
 The practical consequences are worth stating, because they are easy to get wrong:
 
-- A polled Node's publication is stale by up to one polling interval. That latency is a Link capability fact (§17), not a Service behavior, and it is exactly the kind of thing freshness handling (§21.4) exists to expose.
-- The master's polling cadence bounds the Node's effective TX rate, so static capacity checking (`DEPLOY §2.2`) has to account for it.
+- A polled participant's publication is stale by up to one polling interval. That latency is a Link capability fact (§17), not a Service behavior, and it is exactly the kind of thing freshness handling (§21.4) exists to expose.
+- The initiator's polling cadence bounds the remote participant's effective TX rate, so static capacity checking (`DEPLOY §2.2`) has to account for it.
 - A poll that returns nothing is not an error. An empty response is the normal case on a mostly idle Link and must not be counted as a Link fault (§18.1).
 - QoS on a polled Link is limited by cadence, not arbitration. A Critical publication cannot beat the next poll, so such Links are usually QoS-Minimal (§14.1).
 
 Exact I2C and SPI transaction formats are `LINK §7` work; only their architectural placement is settled here.
 
-## 1.8 Terms intentionally no longer central
+## 1.8 Canonical and retired terminology
 
-Older documents used `PathTag`, `RoutingProfile`, `RoutingCode`, `PeerId`, `WireBand`, and `Main`. Current preferred terminology:
+The canonical participant fields are `SrcParticipantId` and `DestParticipantId`. `ParticipantId` identifies one Endpoint Domain throughout a deployment; it is not a per-Wire role.
 
-```text
-Main       -> Origin
-Peer       -> Node
-PeerId     -> NodeId
-MainToPeer -> OriginToNode
-PeerToMain -> NodeToOrigin
-```
+`Origin`, `Node`, `NodeId`, and canonical `Direction` are retired. Older documents and historical explanations may use them when describing superseded architectures, but current configuration, APIs, descriptors, diagnostics, and invariants must not.
 
-Retired terms include **Link Engine** (use Link driver/LLL for carrier mechanics, Router for Wire routing), **Router Port**, **Port** (bounded storage delivery collapses Port and Endpoint; `TxBinding` → transmit Endpoint, §10.3), **Route**, **ParticipantId**, and **Wire Space** (→ WireSpace, §4.6). Full supersession list and reasons: `REG §5`.
+Other retired terms include `PathTag`, `RoutingProfile`, `RoutingCode`, `PeerId`, `WireBand`, `Main`, **Link Engine** (use Link driver/LLL for carrier mechanics, Router for Wire routing), **Router Port**, and **Port** (bounded storage delivery collapses Port and Endpoint; `TxBinding` → transmit Endpoint, §10.3). `WireAlias` is likewise not a canonical concept: constrained profiles use field elision and, where needed, explicit Link-local projection. Full historical supersession reasons belong in `HIST`/`REG`, not in the current model.
 
 ---
 
 # 2. Canonical PDU Descriptor
 
-The current canonical base descriptor is **40 bits / 5 bytes**.
+The accepted canonical descriptor semantics are the fields `Control`, `WireNumber`, `SrcParticipantId`, `DestParticipantId`, and `Endpoint`. Their widths are not part of that semantic acceptance. The current preferred provisional packing is **48 bits / 6 bytes**:
 
 ```text
 Control: 8 bits
-    QoS                   2  // MSB of Qos is MSB of Control
-    Namespace             2
+    QoS                   2
+    Reserved              2  // zero on transmit; nonzero is invalid
     HasHeaderExtensions   1
-    TransportType         3  // LSB of TransportType is LSB of Control
+    TransportType         3
 
-RoutingWord: 16 bits
-    Direction             1
-    NodeId                5
-    WireNumber           10
+WireNumber:               8 bits
+SrcParticipantId:         8 bits
+DestParticipantId:        8 bits
 
-EndpointId: 16 bits
+Endpoint: 16 bits
+    Namespace             2
+    EndpointId           14
 --------------------------------
-Base descriptor:         40 bits
+Base descriptor:         48 bits
 ```
 
-The architectural significance here is field width and meaning. Exact bit placement within the descriptor is fixed in `BITS §2`–`§3`, and profile identifier layouts remain a `LINK` concern.
+Every displayed width and partition above is **provisional pending topology-corpus and headroom evidence**. In particular, neither the WireNumber width nor the ParticipantId width/allocation is accepted as final. Exact bit placement and final registry identifiers must be frozen only after the concurrently updated registry and bit-layout documents agree; profile identifier layouts remain a `LINK` concern.
 
-**Byte order is settled.** Wherever any representation serializes a literal multi-byte numeric value, WireSpaces uses **little-endian** order, so a literal five-byte descriptor serializes as `Control`, then the low and high bytes of the routing word, then the low and high bytes of `EndpointId`.
+**Byte order is settled.** Wherever any representation serializes a literal multi-byte numeric value, WireSpaces uses **little-endian** order. Under the current packing candidate, a literal descriptor is ordered `Control`, `WireNumber`, `SrcParticipantId`, `DestParticipantId`, then the low and high bytes of `Endpoint`.
 
 Settling this early costs nothing and removes a whole class of divergence between the project's C++, Python, and RTL implementations. Two boundaries keep it honest:
 
-- It applies to **literal multi-byte numeric values only.** Bit placement inside a byte is a separate decision, settled for `Control` and `RoutingWord` in `BITS` and still open for the CAN identifier (`REG §6.8`).
+- It applies to **literal multi-byte numeric values only.** Bit placement inside a byte is a separate decision, and constrained-Link identifier layouts remain profile work.
 - **Native object layout is never a wire representation.** A C++ `struct`, its padding, its enum widths, its bitfield allocation order, and the host's endianness define nothing. Encode and decode explicitly, and test on a big-endian model as well as a little-endian one (`CONFORM §2`).
 
 **Reserved fields are rejected, not ignored.** A reserved field is zero on transmit, and a receiver that sees a nonzero reserved field **drops the PDU and counts it** (§18.1) rather than masking the field and proceeding. This is the choice that keeps future field assignment safe: a receiver that ignores reserved bits today cannot be given new meaning for them tomorrow without silently misreading traffic from every older device. Rejecting costs nothing while the fields are unused and preserves the ability to use them.
 
-## 2.1 Canonical address-space snapshot
+## 2.1 Preferred provisional address-space snapshot
 
-| Concept | Current canonical capacity |
+| Concept | Current preferred provisional capacity |
 |---|---:|
 | Namespaces | 4 |
-| EndpointId width | 16 bits per Namespace |
-| Valid EndpointIds | 1..65535 |
-| Usable Namespace/EID combinations | 262,140 |
-| WireNumber width | 10 bits |
-| NodeId width | 5 bits |
-| Nodes per Wire | 31 Nodes + 1 Origin |
+| EndpointId width | 14 bits per Namespace |
+| Valid EndpointIds | 1..16383 |
+| Usable Namespace/EID combinations | 65,532 |
+| WireNumber width | 8 bits |
+| ParticipantId width | 8 bits |
+| Ordinary ParticipantIds | `0x00..0xFE` |
+| Broadcast destination | `0xFF` |
 | QoS field | 2 bits / 4 canonical values |
 | TransportType | 3 bits / up to 8 values |
 
-`EndpointId == 0` is invalid in every Namespace, which is why the usable combination count is `4 * 65,535` rather than `4 * 65,536`.
+`EndpointId == 0` is invalid in every Namespace. Under the current ParticipantId allocation candidate, `0x00..0xFE` are ordinary identities and `0xFF` represents `kBroadcastParticipant`, which is invalid as a source and reserved exclusively as a broadcast destination. The destination-only broadcast semantic is accepted; its numeric value and the number of ordinary identities remain provisional with the ParticipantId width.
 
-The exact allocation of the 10-bit WireNumber space is still provisional; the current direction reserves a high range for device-private communication and one top value for `kLocalDomain` (§4).
+WireNumber width, allocation, and partitioning likewise remain provisional pending topology-corpus and headroom evidence. Reserved local and device-private scope values are described semantically in §4 without freezing numeric fences here.
 
 ## 2.2 Carrier encodings need not be literal
 
-A Physical Link is **not required to transmit this exact five-byte sequence literally**. A Link profile may:
+Under the current packing candidate, a Physical Link is **not required to transmit the six-byte sequence literally**. A Link profile may:
 
 - encode some fields in native metadata;
-- use aliases;
-- omit values implied by the profile;
+- elide values uniquely implied by its Link Binding;
+- project a Link-local participant code to a canonical ParticipantId;
 - use a compact representation;
-- reconstruct the canonical descriptor before handing a PDU to the Router/Endpoint layer.
+- reconstruct the complete canonical descriptor before handing a PDU to the Router or Endpoint Domain Dispatcher.
 
-Classical CAN is the clearest example: QoS, Direction, WireAlias, and NodeId live in the CAN arbitration ID rather than consuming CAN data bytes (`LINK §2.2`).
+**Elision and projection are distinct.** Elision omits a canonical value because Link context supplies that same value, such as a CAN11 Link Binding supplying its one WireNumber. Projection translates a constrained Link-local code through configured state to a canonical ParticipantId. Neither changes canonical semantics.
 
 ## 2.3 Header extensions
 
-The base descriptor includes `HasHeaderExtensions`. The current compact-header target is that the **canonical WS header remains at most approximately 8 bytes including ordinary WS header extensions**.
+The base descriptor semantics include `HasHeaderExtensions`. Under the current 6-byte packing candidate, the compact-header target is that the **canonical WS header remains approximately 9 bytes or less including ordinary WS header extensions**.
 
 This target is useful for logging and bounded-buffer implementations. It is not yet a frozen byte-exact extension format.
 
@@ -305,7 +305,7 @@ length code 10    3 extension bytes total
 length code 11    reserved -> reject
 ```
 
-which yields the 8-byte figure above: a 5-byte base descriptor plus at most 3 extension bytes. The bits left over after the length code — 6, 14, or 22 — are available to separately standardized fields.
+which yields the current candidate's 9-byte figure: a 6-byte base descriptor plus at most 3 extension bytes. The bits left over after the length code — 6, 14, or 22 — are available to separately standardized fields.
 
 The value of self-description is that it decouples the payload boundary from the extension registry. A device built today can receive a PDU carrying an extension defined next year, locate the Service payload correctly, and dispatch it. Without a length, the same device has to reject anything it does not recognize, which makes every extension a flag-day change across the whole deployment.
 
@@ -314,7 +314,7 @@ Two clarifications follow from the encoding:
 - **`HasHeaderExtensions` and the length code carry no meaning about content.** Neither indicates a timestamp, a sequence number, security metadata, or fragmentation. Presence and size only.
 - **Extension bytes are canonical header, not Service payload.** They are inside the header budget, they are not delivered to the Service as data, and a Service's size accounting must include them where a profile permits or requires them (§21.2).
 
-**Open, and consequential:** whether a device that receives a well-formed extension it does not recognize must **preserve and forward** it or **reject** the PDU. `PDU-1` argues for preserving — the complete PDU is the forwarding unit, and a gateway that strips extensions silently downgrades traffic it was only supposed to carry. But a receiving Endpoint may need the opposite, since an unrecognized extension could be exactly the metadata that makes the payload safe to act on. The likely answer is that forwarding preserves while dispatch may reject, decided per extension rather than globally. This must be settled before any extension is defined.
+Complete-PDU forwarding preserves well-formed extension bytes even when the forwarding implementation does not interpret them. A receiving Endpoint may reject an unrecognized extension where that extension's definition requires understanding for safe acceptance. Forwarding and local acceptance are therefore deliberately different decisions.
 
 **Link-local LLL extensions are separate.** For example, an 8-byte QoS-Full flow-control credit extension on an Ethernet LLL frame is Link metadata, not part of the canonical WS PDU header budget.
 
@@ -324,137 +324,102 @@ Two clarifications follow from the encoding:
 
 # 3. Wire Model
 
-A **Wire** is a logical bus containing:
+A **Wire** is a loop-free **Logical Bus**: a connected logical propagation domain realized by one or more configured Links. A complete PDU injected onto a Wire propagates across that Wire's configured Link topology. `DestParticipantId` controls which participant accepts the PDU; it does not normally select the forwarding path.
 
-- exactly one Origin;
-- zero or more Nodes;
-- a canonical WireNumber when named;
-- zero or more Physical Links that realize it;
-- local Endpoint participation as configured.
-
-A Wire is a communication-domain abstraction, not a list of pairwise Endpoint connections. A Wire may coincide with one complete Physical Link, select only a subset of participants on a Physical Link, or span several Physical Links through gateways. Multiple Wires may share the same Physical Link and may overlap in device membership.
+A Wire is not a list of pairwise routes. It may coincide with one Physical Link, select participants across several Links, or overlap another Wire in participant or Link membership. Overlap is useful when broad dissemination and narrow high-rate traffic need different propagation scopes.
 
 ```text
-Wire MotorBus
+BroadStatusWire:  Controller, MotorA, MotorB, Logger
+MotorControlWire: Controller, MotorA
 
-Origin:
-    MainSoC
-
-Nodes:
-    MotorA
-    MotorB
-    MotorC
+Controller and MotorA participate in both Wires.
+High-rate motor traffic uses the smaller MotorControlWire.
 ```
 
-## 3.1 Direction semantics
+> **Prefer the smallest Wire that usefully represents the required communication or broadcast scope.** Span several Links when a shared Logical Bus is useful, not merely because forwarding makes it possible.
 
-The Wire supports two structural directions:
+## 3.1 Participant identity
+
+Every independently routed and dispatchable Endpoint Domain has exactly one deployment-scoped `ParticipantId`. The Domain uses that same ParticipantId on every Wire in which it participates; ParticipantId is not allocated separately per Wire.
+
+The current preferred provisional allocation is:
 
 ```text
-OriginToNode
-NodeToOrigin
+0x00..0xFE   ordinary ParticipantId
+0xFF         kBroadcastParticipant; destination only
 ```
 
-### OriginToNode
+The width, ordinary range, and numeric broadcast value remain provisional pending topology/headroom evidence. Participant identity is nevertheless semantically stable across Wire membership, replies, forwarding, and placement changes.
+
+`SrcParticipantId` identifies the participant Domain that authored the PDU. `DestParticipantId` identifies the participant Domain allowed to accept it, or `kBroadcastParticipant` for broadcast. The broadcast sentinel is structurally invalid as a source; under the current allocation candidate its value is `0xFF`.
+
+Participant identity does not identify a device, Link, process, core, or Service. A device may contain several Endpoint Domains and therefore several ParticipantIds. Conversely, one Endpoint Domain may span execution contexts if they share one coherent dispatch and authority boundary.
+
+## 3.2 Source, destination, and acceptance
+
+Directed and broadcast traffic use the same canonical PDU:
 
 ```text
-NodeId == 0      broadcast to all Nodes
-NodeId 1..31     selected destination Node
-source           Origin
+directed:
+    SrcParticipantId  = authoring Domain
+    DestParticipantId = one ordinary ParticipantId
+
+broadcast:
+    SrcParticipantId  = authoring Domain
+    DestParticipantId = kBroadcastParticipant
 ```
 
-### NodeToOrigin
+A directed PDU still propagates over the Wire's configured topology. Only the destination participant Domain may accept it for ordinary local dispatch. Other attached participants may physically observe it, and a Router may forward it to every configured branch of that Wire, but observation does not confer acceptance or authority (§12.6).
 
-```text
-NodeId 1..31     transmitting/source Node
-NodeId == 0      invalid
-required sink    Origin
-```
+Broadcast is bounded fan-out to the configured local participant Domains that belong to the Wire. It is not "every electrically attached device," does not discover membership, and does not grant recipients transmit authority.
 
-On a broadcast Physical Link, other Nodes may physically observe and optionally consume `NodeToOrigin` publications where filtering/configuration permits it. That does not make arbitrary Node-to-Node unicast a base Wire primitive, and it does not make an observer a participant (§12.6).
-
-If two Nodes require substantial direct addressed interaction, another Wire can be created with one of them as Origin.
-
-### Direction is structural
-
-Direction names which end of the Wire produced the PDU. That is all it means. It does **not** encode:
-
-```text
-requester / responder
-client / server
-command / status
-initiator / responder
-upstream / downstream
-```
-
-Those are Service semantics, and they are free to run either way across a Wire. An `OriginToNode` PDU may be a command, a response, a status broadcast, or a firmware fragment; the Direction bit says only that the Origin sent it. A request/response interaction is therefore an ordinary pair of exchanges on one Wire (§10.1), not a Direction property, and a Service that needs correlation owns that state itself (§19.2).
-
-## 3.2 Origin is a per-Wire role
-
-`Origin` is not a permanent device class.
-
-```text
-MainComputer
-    |
-  Wire A
-    |
-   ECU1       Node on Wire A
-    |
-  Wire B
-   /   \
- ECU2 ECU3    ECU1 is Origin on Wire B
-```
-
-A device may be Origin on several Wires, Node on several Wires, or Origin on one and Node on another. There is no universal system-wide "master" implied by the model.
+Source and destination say nothing about request/response, client/server, command/status, initiator/responder, or upstream/downstream. Those are Service semantics. A response is a new PDU authored by the responding Domain, with the request's source selected as its destination under an authorized reply binding (§10).
 
 ## 3.3 Wire structural invariants
 
 Current strong invariants:
 
-- exactly one semantic Origin per Wire;
-- NodeIds are unique across the entire Wire, including across spliced segments;
-- a participant is not both Origin and Node on the same Wire;
-- `NodeId == 0` is not an individual Node;
-- gateway forwarding preserves Direction, NodeId, Namespace, EndpointId, TransportType, QoS, and PDU payload. The **only** field a forwarding step may change is the Wire representation, and only through an explicitly configured Wire Splice (§6). Anything that alters other fields or re-originates traffic is a higher-level transformation service, not forwarding;
-- physical realization does not change Wire identity.
+- every Endpoint Domain has one deployment-scoped ParticipantId and uses it on every Wire;
+- the reserved broadcast participant sentinel is destination-only and invalid as a source;
+- a Wire realization is connected and loop-free;
+- ordinary generic forwarding is keyed by `WireNumber`, or by `(WireNumber, ingress Link Interface)` when topology requires ingress-sensitive fan-out; destination is not an ordinary next-hop key;
+- complete-PDU forwarding preserves source ParticipantId, destination ParticipantId, Endpoint identity, TransportType, QoS, extensions, payload, and source lineage;
+- a configured splice may deliberately change only Wire scope while preserving participant identity and every other PDU semantic (§6);
+- a component that consumes and authors semantically new traffic is composition, not forwarding, and uses its own source ParticipantId;
+- physical realization and Link-local representation do not change canonical Wire or participant identity.
 
-## 3.4 Why a bus rather than pairwise edges
+## 3.4 Why a Logical Bus rather than pairwise edges
 
-One Origin and many Nodes is one Wire, not many pairwise network objects — natural for CAN, RS-485, shared-memory broadcast, and FPGA interconnects (§4.4, §24):
+One publication to several participants is one Wire, not a set of pairwise network objects:
 
 ```text
-Origin
-  |
-  +-- Node 1
-  +-- Node 2
-  +-- Node 3
-  ...
-  +-- Node 31
+Participant 0x12
+    |
+    +-- Participant 0x27
+    +-- Participant 0x41
+    `-- Participant 0x83
 ```
 
-## 3.5 Physical Wires and Virtual Wires
+This matches CAN, RS-485, shared-memory broadcast, and FPGA interconnects while remaining valid across point-to-point Link topologies. Directed destination acceptance and Wire-wide propagation are deliberately separate.
 
-The simplest Wire is just a physical bus.
+## 3.5 Physical realization and overlapping Wires
 
-> A physical bus is itself a Wire. Every physical bus therefore has a Wire identity, whether or not a canonical WireNumber has been assigned to it yet.
+The simplest Wire coincides with one physical bus, but the concepts are not identical. A Physical Link is a carrier; a Wire is configured logical propagation scope. One Link may carry several Wires where its profile can represent them, and one Wire may span several Links through Routers.
 
-A **Virtual Wire** is a Wire whose logical broadcast domain is not exactly one complete physical bus. A Virtual Wire may be formed by:
+Multiple Wires may overlap:
 
-- taking the union of several physical buses;
-- selecting a subset of participants on one physical bus;
-- selecting subsets from several physical buses and joining them through gateways or splices.
+- in participant membership;
+- on some but not all Links;
+- at a Router or Endpoint Domain;
+- as broad and narrow scopes for different traffic.
 
-Therefore:
+The resulting forwarding topology is validated independently for each Wire. A loop in one Wire is invalid even when the underlying physical graph is useful for another Wire.
 
-- every physical bus has a physical Wire identity;
-- some logical Wires span several physical Link segments;
-- some physical participants may be excluded from a Virtual Wire even though they share one of its constituent physical buses.
-
-These are two named cases of one abstraction, not two mechanisms. Routing, Direction, NodeId, and Endpoint semantics are identical in both. The distinction matters for explaining `kLocalBus` (§5), for tooling that must show a user what a Wire physically covers, and as a reminder that the common case needs no composition at all.
+Constrained profiles may support less than the canonical model. In particular, one CAN11 Link Binding carries one Wire (§5.3), although separately suitable bindings or Guest allocations may coexist on one physical CAN interface. CAN29 or another richer profile is preferred when the required overlap cannot be expressed cleanly by those bindings.
 
 ## 3.6 What a Wire does not guarantee
 
-A Wire defines who may produce, who may receive, and in which direction. A Physical Link defines reachability. Neither, on its own, supplies any of the following:
+A Wire defines propagation scope and configured participant membership. A Physical Link defines carrier reachability. Neither, on its own, supplies any of the following:
 
 ```text
 reliability
@@ -467,7 +432,7 @@ redundancy or failover
 duplicate suppression
 ```
 
-Each of those exists only where something explicitly provides it: the selected Transport (§20), the Service contract (§21), a composition above the Wire (§19.2), a Link profile's flow control (§15.4), or deployment analysis (`DEPLOY §2.2`). Membership on a Wire means traffic is permitted and routable, nothing more; multipath wiring does not create redundancy — that requires explicit composition (§23.11).
+Each exists only where something explicitly provides it: the selected Transport (§20), the Service contract (§21), composition above the Wire (§19.2), a Link profile's flow control (§15.4), or deployment analysis (`DEPLOY §2.2`). Membership means the participant may take part under configured bindings; it does not imply that every Endpoint is reachable. Multipath wiring does not create redundancy — that requires explicit composition (§23.11).
 
 ---
 
@@ -481,15 +446,14 @@ The current scope ladder is:
 kLocalDomain
     one Endpoint Domain only
 
+kLocalBus
+    one canonical local-only Wire bound to at most one local Link Interface
+
 Device-private Wire
     one device / SoC, possibly crossing cores/domains
 
 Named network Wire
     routable across devices and Physical Links
-
-kLocalBus
-    Link-local representation of the native Wire;
-    anonymous until mapped to a canonical WireNumber
 ```
 
 ## 4.1 Named network Wires
@@ -498,23 +462,13 @@ A named Wire has a canonical `WireNumber`. Generic routing and cross-Link forwar
 
 Named Wire metadata may eventually include a stable UUID, a human-readable name, and configuration/version identity. The exact metadata schema is not part of the base PDU.
 
-The UUID and name exist for the same reason device UUIDs do (`DEPLOY §1.7`): they provide **continuity in tooling and logs even when the short WireNumber changes**. A WireNumber is a compact routing identity and may legitimately be reassigned between deployments, during commissioning, or when a topology is reorganized. Historical captures, drop journals (§18.3), and exported Wiring should remain interpretable across such a change, which requires an identity that is not the 10-bit number.
+The UUID and name exist for the same reason device UUIDs do (`DEPLOY §1.7`): they provide **continuity in tooling and logs even when the short WireNumber changes**. A WireNumber is a compact routing identity and may legitimately be reassigned between deployments, during commissioning, or when a topology is reorganized. Historical captures, drop journals (§18.3), and exported Wiring should remain interpretable across such a change, which requires an identity that is not the 8-bit number.
 
 ## 4.2 Device-private Wires
 
-A high WireNumber range is reserved for **device-private Wires**.
+A portion of WireNumber space is reserved for **device-private Wires**. Exact widths, numeric fences, and the partition between network-visible, device-private, `kLocalDomain`, and `kLocalBus` values remain provisional pending topology-corpus analysis. This document relies on the scope categories, not on provisional registry numbers.
 
-Current proposed split:
-
-```text
-0..895       network-visible WireNumber space
-896..1022    device-private Wires (127 values)
-1023         kLocalDomain
-```
-
-The exact numeric fences remain provisional, but the **range-based model and roughly 127 internal Wires are considered ample** for normal CPU-to-CPU / domain-to-domain communication.
-
-A device-private Wire is a real Wire. It has one Origin, one or more Nodes, Direction semantics, Endpoint semantics, and ordinary routing. It:
+A device-private Wire is a real Logical Bus with ordinary source, destination, Endpoint, and propagation semantics. It:
 
 - can cross internal Physical Links such as shared memory;
 - can span CPU cores or Endpoint Domains;
@@ -525,9 +479,9 @@ The single sanctioned exception is a **Wire Splice** (§6): a device-private Wir
 
 Absent such a splice, an external LLL/Router boundary treats a device-private Wire on external ingress or egress as invalid configuration/traffic.
 
-## 4.3 `kLocalDomain`
+## 4.3 Local-only scopes
 
-`kLocalDomain` is the top reserved Wire value and means:
+`kLocalDomain` is a reserved Wire value meaning:
 
 > Deliver within the originating Endpoint Domain; do not enter a Link Interface.
 
@@ -535,15 +489,21 @@ This is useful when several Endpoints in one Domain communicate using ordinary E
 
 The same `kLocalDomain` value is used independently in every Endpoint Domain because its scope is inherently local. Unlike a device-private Wire, `kLocalDomain` is **never** spliceable and never reaches a Link Interface.
 
-`kLocalDomain` is distinct from `kLocalBus`:
+`kLocalBus` is also a reserved canonical WireNumber, but it includes one local Physical Link:
 
 ```text
 kLocalDomain:
     no Physical Link involved
 
 kLocalBus:
-    the native Wire represented on one Physical Link
+    canonical local-only Wire
+    bound to at most one local Link Interface per Router/Endpoint Domain
+    fully canonical on ingress
+    dispatchable locally
+    never transparently forwarded or spliced as itself
 ```
+
+The detailed `kLocalBus` rules are in §5.
 
 ## 4.4 FPGA interpretation
 
@@ -591,183 +551,101 @@ skipping structural validity checks
 
 The device-private range (§4.2) is likewise scoped by *device*, not by proximity. A companion chip on the same board is not inside the device boundary just because it is inside the enclosure, and traffic reaching it needs an ordinary Wire or an explicit splice (§6).
 
-## 4.6 One WireSpace is one identity universe
+## 4.6 One deployment identity universe
 
-Every canonical identifier in this architecture — WireNumber, NodeId, and `Namespace + EndpointId` — is unique within **one statically configured WireSpace**, and means nothing outside it. This is what the plural in the project's name refers to.
+Canonical ParticipantId assignment is coordinated within one deployment identity scope. WireNumber and Endpoint identity are interpreted within that same configured WireSpace. They mean nothing in an independently assigned universe.
 
 ```text
-Link-scoped        WireAlias                         (§5)
-Domain-scoped      kLocalDomain                      (§4.3)
-Device-scoped      device-private WireNumbers        (§4.2)
-WireSpace-scoped   WireNumber, NodeId, Namespace/EID (here)
+Link-scoped        Link-local projected codes, if any
+Domain-scoped      kLocalDomain
+Local-Link-scoped  canonical kLocalBus use
+Device-scoped      device-private WireNumbers
+Deployment-scoped  ParticipantId, WireNumber, Namespace/EndpointId
 ```
 
 The operational rule is the same shape as splicing:
 
 > **Two independently engineered WireSpaces do not become one by being connected.** Joining them requires a gateway that explicitly translates identity, in the same way a device-private Wire requires an explicit splice to become externally visible.
 
-A plain forwarding gateway (§12) is **not** such a translator. It preserves canonical identity by design (§3.3), so wiring two WireSpaces together with one produces silent identity collisions: two different Wire 42s merge, NodeIds duplicate, and the uniqueness invariants are violated with nothing detecting it.
+A plain forwarding gateway (§12) is **not** such a translator. It preserves canonical identity by design (§3.3), so wiring two independently assigned WireSpaces together with one can create silent collisions in WireNumbers, ParticipantIds, and Endpoint identities.
+
+Plain forwarding also never merges independently assigned ParticipantId universes merely because two Links are connected. Identity translation, where needed, is explicit composition that authors new traffic; it is not a splice and not transparent forwarding.
 
 A WireSpace is **not** claimed here as a security or memory-protection boundary; it is the scope within which identity is meaningful and uniqueness is checkable. Most systems are one WireSpace and can ignore this section. What a translating gateway would look like is `FUTURE §12`.
 
 ---
 
-# 5. `kLocalBus`, Anonymous Wires, and WireAlias
+# 5. `kLocalBus`, Link Bindings, and Constrained Profiles
 
-`kLocalBus` exists to make the first-use experience extremely easy while still allowing a system to grow into explicit multi-Link routing.
+`kLocalBus` is a reserved **canonical local-only WireNumber**. It exists for low-configuration bring-up and permanently local Link use without weakening the universal canonical-ingress rule.
 
-Because every physical bus is itself a Wire (§3.5), a Link always has a *native* Wire — the one its own physical bus realizes. The model follows from that:
-
-> `kLocalBus` is **WireAlias 0**, the Link-relative compression code for **this Link's own physical Wire number**.
-
-Alias 0 is therefore not an arbitrary reserved value. It is the one Wire identity a Link never has to be told, because it is the Link itself. Two consequences shape the rest of this section:
-
-- when the Link's own Wire has been assigned a canonical WireNumber, alias 0 is a pure compression of it and canonicalizes losslessly (§5.2);
-- when it has not, alias 0 still names something real — this bus — but that identity is meaningful only on this Link, which is exactly what limits forwarding and splicing (§5.3, §5.8).
-
-`kLocalBus == 0` does **not** mean that every physical bus has canonical WireNumber zero.
-
-## 5.1 WireAlias
-
-A `WireAlias` is a compact, Link-scoped representation of a canonical Wire.
-
-For the current constrained 11-bit Classical CAN direction:
+An ingress LLL bound to `kLocalBus` produces a complete canonical PDU:
 
 ```text
-WireAlias 0      kLocalBus
-WireAlias 1..7   configured aliases for named Wires
+Wire                  = kLocalBus
+SrcParticipantId      = reconstructed ordinary ParticipantId
+DestParticipantId     = reconstructed ordinary ParticipantId or kBroadcastParticipant
+Endpoint / class data = canonical values
 ```
 
-Aliases are independent on each Physical Link:
+There is no anonymous or partially canonical LocalBus state. A valid local source ParticipantId remains required.
+
+## 5.1 Binding and scope
+
+A Router/Endpoint Domain may bind `kLocalBus` to **at most one local Link Interface at a time**. This keeps an autonomous `send(..., Wire = kLocalBus)` unambiguous without selecting a Link from traffic history, interface order, or heuristics.
+
+`kLocalBus` may:
+
+- enter through its one bound Link Interface;
+- be dispatched to the destination local Endpoint Domain;
+- use ordinary Endpoint storage and validation;
+- be transmitted on that same bound Link when authorized.
+
+`kLocalBus` must not:
+
+- be transparently forwarded to another Link Interface;
+- be spliced as `kLocalBus`;
+- be promoted into a named Wire because traffic was observed;
+- be used without a valid ordinary source ParticipantId.
+
+To extend the same Service relationship beyond this local Link, configure an ordinary named Wire. Composition may consume local traffic and author new traffic on another Wire, but that is visible re-origination with the composition Domain's source ParticipantId, not transparent forwarding.
+
+## 5.2 Carrier elision and participant projection
+
+Carrier compression is expressed through the Link Binding:
+
+- **field elision** omits a canonical field because the binding or frame context supplies the same value unambiguously;
+- **participant projection** translates a constrained Link-local participant code through configured state to a canonical ParticipantId.
+
+Projection is not aliasing a Wire and is not a new participant universe. Every ingress path reconstructs the deployment-canonical ParticipantIds before Router or dispatch processing. Every egress verifies that the canonical PDU is representable under the selected Link Binding before emitting a frame.
+
+**TODO:** Atomic map activation and the treatment of in-flight reassembly when projection state changes remain undefined here. `LINK` must settle the activation boundary and reassembly behavior; CORE does not choose or require flush, expiry, versioning, isolation, or another mechanism.
+
+## 5.3 CAN11 qualification
+
+CORE defines only the architectural qualification for CAN11. The accepted static profile names are:
 
 ```text
-Canonical Wire 107
-
-CAN_A:
-    alias 2 -> Wire 107
-
-CAN_B:
-    alias 6 -> Wire 107
+Guest VCN
+Native VCN
+Native Participant-Compressed
 ```
 
-Generic routing never treats alias 2 and alias 6 as different Wires. Each ingress LLL canonicalizes its alias before handing the PDU to the Router.
+> **Each CAN11 Link Binding/profile instance selects one of these profiles statically and carries exactly one Wire.**
 
-The seven named aliases are a **per-CAN-Link** limit, not a system-wide Wire limit.
+The accepted ordinary/control boundary reserves the all-ones VCN in Guest VCN and Native VCN, and reserves Participant-Compressed General code 31 in the control direction for Link control. These reserved values do not enter ordinary forwarding or Endpoint dispatch. Control payloads, opcodes, and commissioning state details remain deferred to `LINK` and `DEPLOY`.
 
-## 5.2 Configured `kLocalBus`
+The CAN11 frame does not select among several canonical Wires. Its Link Binding supplies the WireNumber on ingress and validates it on egress. With no named-Wire configuration, that one binding may use `kLocalBus` if the uniqueness rule in §5.1 is satisfied.
 
-Once this Link's own physical Wire has been assigned a canonical WireNumber:
+A CAN11 profile may directly represent canonical participant identities or project constrained Link-local participant codes, but in both cases ingress reconstructs full canonical source and destination identity. Profile selection and projection configuration are static Link Binding properties.
 
-```text
-CAN_A physical Wire = 42
-    -> alias 0 on CAN_A means Wire 42
-```
+Several CAN11 bindings or Guest allocations may coexist on one physical CAN interface where each is separately suitable under the `LINK` rules and the implementation can support them. Use CAN29 or another richer Link profile when several WS Wires must share one physical CAN interface **without** separate suitable bindings, when CAN11 map/configuration limits are awkward, when participant-compressed topology constraints do not fit, or when richer routing identity and payload efficiency justify it. Byte-exact layouts, compact code limits, commissioning frames, coexistence constraints, and profile-specific validation belong in `LINK`, including the detailed crossover guidance in `LINK §2.16`.
 
-the LLL translates in both directions:
+## 5.4 Small LocalBus-only participants
 
-```text
-Receive:
-    alias 0
-        -> restore this Link's own canonical WireNumber (42)
+A tiny participant may permanently use one `kLocalBus` Link Binding, one Endpoint Domain, a fixed ParticipantId, and generated direct dispatch. It need not implement generic forwarding, a dynamic Wire database, or participant projection.
 
-    alias 1..7
-        -> configured alias map -> canonical WireNumber
-
-Transmit:
-    canonical Wire == this Link's own physical Wire
-        -> encode alias 0
-
-    canonical Wire has a configured alias on this Link
-        -> encode that alias
-
-    otherwise
-        -> not representable on this Link; reject before emitting a frame
-```
-
-Example:
-
-```text
-CAN_A physical Wire = 107
-
-RX alias 0    -> canonical Wire 107
-RX alias 5    -> whatever CAN_A's alias 5 maps to
-TX Wire 107   -> alias 0
-```
-
-Because alias 0 restores an *arbitrary* canonical number, a physical bus may hold any WireNumber while still using the single-code compact representation on the wire. The scarce values 1..7 are spent only on Wires whose identity must stay explicit while crossing this particular segment.
-
-After canonicalization:
-
-- routing uses Wire 42;
-- logs use Wire 42 / its human-readable name;
-- local Endpoint delivery uses canonical identity;
-- cross-Link forwarding is permitted according to the route table;
-- splicing is permitted, because the Wire now has canonical identity.
-
-No generic subsystem should continue carrying the label `kLocalBus` once canonicalization succeeds.
-
-## 5.3 Anonymous LocalBus
-
-If this Link's own physical Wire has **not** been assigned a canonical WireNumber, received `kLocalBus` traffic is still valid — an **Anonymous Local-Bus Wire**, a real bus with no canonical identity yet:
-
-```text
-RX kLocalBus + unnamed native Wire
-    -> local Endpoint Domain delivery allowed
-    -> generic cross-Link forwarding not allowed
-    -> splicing not allowed (§5.8)
-```
-
-Logs should disambiguate: `CAN_A::LocalBus`, not bare `LocalBus`.
-
-**TX:** zero-configuration TX only when unambiguous — one eligible Link Interface may use anonymous LocalBus; zero or two+ eligible interfaces fail until Wiring assigns a Wire. No guessing from "first Link," recent RX, or heuristics. Configuration gradient: one Link ≈ zero Wire config; several Links need explicit binding; gateway/multihop needs canonical WireNumber.
-
-**Forwarding:** anonymous LocalBus must **never** be forwarded as `kLocalBus` onto another Link (`kLocalBus` on the egress Link means that Link's own native Wire):
-
-```text
-Bad:     CAN_A kLocalBus -> gateway -> CAN_B kLocalBus
-Correct: CAN_A kLocalBus -> alias map -> Wire 42 -> Router -> CAN_B Wire 42 -> alias 3
-```
-
-If CAN_A's LocalBus has no canonical mapping, cross-Link forwarding fails by construction.
-
-## 5.6 LocalBusOnly devices
-
-A small **LocalBusOnly** device may permanently use only alias 0 and never know its canonical WireNumber.
-
-Such a device may know only alias 0, never participate in generic forwarding, implement only optimized N=1 CAN, use a small dispatch table or switch, and hold no canonical Wire database. This is a first-class small-device profile, not an error state.
-
-It can still participate in a larger named/multihop Wire because a gateway or richer participant maps:
-
-```text
-alias0 on this CAN bus <-> canonical Wire 42
-```
-
-This is an important scalability property for tiny MCUs and RTL nodes.
-
-**Being commissionable is independent of being routable.** A LocalBusOnly or N=1-only node may still support having its NodeId assigned, and its Wire identity assigned or changed, without implementing any forwarding, alias table, or gateway behavior. Management capability and routing capability are separate axes, and the small-device profile should not be read as "unmanageable."
-
-## 5.7 Alias-map invariants
-
-For one Link Interface:
-
-- every active non-local alias maps to exactly one named Wire;
-- a named Wire normally has at most one active alias on that Link;
-- alias 0 always means the native/local Wire representation;
-- alias reassignment must not reinterpret fragments belonging to an already-started reassembly;
-- the simplest safe update is to flush/expire affected LLL reassembly state before activating the new alias mapping.
-
-## 5.8 Anonymous LocalBus is not spliceable
-
-A splice joins two segments of **one logical Wire** and therefore requires canonical identity on both sides.
-
-An anonymous (unmapped) LocalBus has no canonical identity, no agreed Origin, and no coordinated NodeId space beyond its own Physical Link. Splicing it is not permitted.
-
-```text
-anonymous CAN_A::LocalBus  -> splice -> Wire 42     rejected
-CAN_A alias0 -> Wire 42    -> splice -> Wire 903    permitted
-```
-
-The remedy for wanting the first case is to name the Wire: map alias 0 to a canonical WireNumber, at which point ordinary splicing rules apply. Tooling should reject splice configuration referencing an unmapped alias 0 rather than silently inventing an identity.
+Being commissionable is independent of being routable. Management may assign or update its ParticipantId and Link Binding without requiring gateway behavior. Once configured, the LLL still reconstructs the same complete canonical PDU seen by richer implementations.
 
 ---
 
@@ -775,36 +653,17 @@ The remedy for wanting the first case is to name the Wire: map alias 0 to a cano
 
 ## 6.1 Semantic definition
 
-A **Wire Splice** joins two Wire segments so that they become **one logical Wire**.
-
-The resulting logical Wire must have:
-
-- exactly one Origin across the combined topology;
-- unique NodeIds across all Nodes on both segments;
-- preserved Direction semantics;
-- preserved Endpoint/Service semantics.
+A **Wire Splice** is a configured Wire-scope projection between two canonical WireNumbers. It makes two differently numbered local scopes behave as segments of one intended communication domain while preserving participant identity and all PDU semantics except the deliberate Wire scope change.
 
 ```text
-Segment A                         Segment B
-
-Origin
-  |
-Node 1
-  |                                 Node 3
-Node 2                              Node 4
-
-          <------ splice ------>
-
-Result:
-
-One logical Wire
-    Origin
-    Nodes 1,2,3,4
+Wire X, Participants 0x12 / 0x27
+            <------ configured splice ------>
+Wire Y, Participants 0x12 / 0x27 / 0x41
 ```
 
-The Origin may be on either segment.
+> A splice is **not** participant translation and is not application-level composition. Only Wire scope changes. Source ParticipantId, destination ParticipantId, Endpoint identity, class, extensions, payload, and lineage are preserved.
 
-> A splice is **not** an application-level translator. The two segments are treated as one logical Wire, and only the local Wire *representation* changes.
+The ParticipantId universe must already be coordinated across both sides. A splice does not merge independently assigned identity universes and does not resolve ParticipantId collisions.
 
 ## 6.2 A splice applies before egress
 
@@ -823,21 +682,21 @@ Wire representation becomes Y        <-- splice applied here
     |
 device-private scope check runs on Y  -> passes
     |
-egress LLL maps Y to its local alias
+egress LLL encodes Y under its Link Binding
     |
 transmit
 ```
 
 So internally the traffic is Wire X; what leaves the device is Wire Y. The device-private scope rule in §4.2 is not weakened, because it is evaluated after the splice, on the representation actually emitted.
 
-On the receive path the mapping is applied in the mirror position, after alias canonicalization and before routing:
+On the receive path the mapping is applied in the mirror position, after the ingress LLL has reconstructed the complete canonical PDU and before routing:
 
 ```text
 external frames
     |
 ingress LLL
     |
-WireAlias -> canonical Wire Y
+reconstruct canonical Wire Y, source, destination
     |
 splice applied: Y -> X               <-- before Router
     |
@@ -847,7 +706,7 @@ Router / local delivery on X
 Rules:
 
 - A splice is applied **once** per local routing step. Chained or recursive splices, where the output of one splice is re-resolved through another, are not permitted in the base model. The simplest implementations should not re-enter routing after applying a splice.
-- Alias canonicalization always happens before splicing on ingress, and always after splicing on egress. The LLL deals in aliases; the splice deals in canonical WireNumbers.
+- Complete ingress canonicalization always happens before splicing. Egress Link encoding happens after splicing. The LLL deals in Link representation; the splice deals only in canonical WireNumbers.
 - The scope validity check (device-private vs network-visible) is evaluated on the representation that crosses the boundary, not the one the producer used.
 
 **Open:** whether a splice is best expressed as one bidirectional mapping in the Wire/route entry, or as two directional route entries. A single bidirectional mapping is easier to validate and harder to configure asymmetrically by accident; two entries are more uniform with the rest of the route table. This should be settled by the first gateway implementation.
@@ -867,13 +726,15 @@ This is the implementation mechanism for changing the local Wire representation 
 A splice preserves:
 
 ```text
-Direction
-NodeId
+SrcParticipantId
+DestParticipantId
 Namespace
 EndpointId
 TransportType
 QoS
+header extensions
 payload
+source lineage
 ```
 
 Only the Wire representation changes, as required by the local topology. This is the carve-out named in §3.3.
@@ -888,35 +749,34 @@ populated Wire
 empty/new Wire segment
 ```
 
-which avoids address and role conflicts.
+which minimizes identity and topology conflicts.
 
 Splicing two already-populated segments is not fundamentally impossible, but management policy remains provisional. Conservative tooling may initially reject it unless it can validate:
 
-- exactly one Origin across both segments;
-- no NodeId collision;
-- compatible direction/address expectations;
+- one coordinated ParticipantId universe across both segments;
+- no ParticipantId collision or translation;
+- compatible source/destination and Endpoint expectations;
 - no forwarding loops.
 
 ## 6.6 Validation responsibilities
 
 Host tooling, not the runtime data plane, should establish before installing a splice:
 
-- both sides have canonical identity (§5.8);
-- exactly one Origin across the combined Wire;
-- NodeIds are unique across the combined Wire;
+- both sides have canonical Wire and participant identity;
+- participant identity assignments are coordinated across the combined scope;
 - the combined realization remains acyclic (§12.4);
 - both Links can represent the resulting PDUs (§17);
 - the external side is a network-visible WireNumber, so nothing device-private is emitted.
 
-The NodeId uniqueness requirement has a consequence worth stating explicitly: if several devices each splice their own device-private Wire onto **one shared** external Wire, their internal NodeId assignments must be coordinated, because they are now Nodes on the same logical Wire. Giving each device its own external Wire avoids the coordination entirely and is the recommended default during bring-up.
+If several devices splice device-private Wires onto one shared external Wire, their ParticipantIds must already be deployment-coordinated. Giving each device its own external Wire avoids accidental scope merging and is the recommended default during bring-up.
 
-**Open:** whether tooling should reject same-external-Wire splices from multiple devices by default, or attempt NodeId coordination.
+Tooling should reject a splice that would merge independently assigned ParticipantId universes. Identity coordination or explicit composition must happen before a splice can be valid.
 
 ---
 
 # 7. Default Internal Debug Wire
 
-A conventional use of device-private Wires and splicing is a **default debug/maintenance path**: Services publish to a device-private `InternalDebugWire`; an explicitly configured splice before egress makes selected traffic visible on a host-facing Wire. Without a splice, device-private traffic stays on the device by construction (`SCOPE-1`).
+A conventional use of device-private Wires and splicing is a **default debug/maintenance path**: Services publish to a device-private `InternalDebugWire`; an explicitly configured splice before egress makes selected traffic visible on a host-facing Wire. Without a splice, device-private traffic stays on the device by construction.
 
 The splice is the trust boundary where private traffic becomes externally visible. A remote maintenance link should not blindly splice every internal Wire (§22). Host tooling conventions, default `debug_tx` bindings, and the telemetry path are in `DEPLOY §3.2`–`§3.3`.
 
@@ -926,14 +786,14 @@ The splice is the trust boundary where private traffic becomes externally visibl
 
 # 8. Endpoint Namespaces and Address Allocation
 
-## 8.1 Canonical space
+## 8.1 Preferred provisional partition
 
 ```text
 Namespace       2 bits
-EndpointId     16 bits
+EndpointId     14 bits
 ```
 
-gives four independent 16-bit Endpoint spaces and, with `EndpointId == 0` reserved in each, 262,140 usable Namespace/EID combinations. This is intentionally much larger than the directly representable Classical-CAN subset.
+Under the current preferred candidate these fields share a 16-bit `Endpoint` word. The 2/14 partition and resulting 65,532 usable Namespace/EID combinations are provisional pending topology/headroom evidence; the accepted semantic field is `Endpoint`. `EndpointId == 0` remains invalid in every Namespace.
 
 ## 8.2 Namespace allocation
 
@@ -956,11 +816,11 @@ Namespace 3
 
 Namespaces 0-2 provide deployments with large independent user spaces and room for staged upgrades, migrations, or coexistence between generations. Namespace 3 treats the open-source ecosystem as a first-class audience rather than an afterthought. Its registry *process* is `FUTURE §7`; the allocation above is the working plan.
 
-Optimized Classical-CAN encoding limits and Namespace 0 compact Endpoint allocation are profile and ecosystem policy (`LINK §2.4`, `FUTURE §7`, `FUTURE §8`). `CORE` owns only the canonical widths in §8.1–8.2.
+Constrained-Link encoding limits and Namespace 0 compact Endpoint allocation are profile and ecosystem policy (`LINK`, `FUTURE §7`, `FUTURE §8`). `CORE` records the current preferred provisional partition in §8.1–8.2.
 
 ---
 
-# Part III — Node Runtime
+# Part III — Participant Runtime
 
 # 9. Endpoint Domains and Dispatch
 
@@ -968,6 +828,8 @@ An Endpoint Domain owns a set of local Endpoints and provides their dispatch bou
 
 ```text
 canonical PDU
+    |
+Router selects destination Endpoint Domain(s)
     |
 Endpoint Domain Dispatcher
     |
@@ -980,16 +842,17 @@ Endpoint
 
 The Dispatcher should:
 
+- verify that `DestParticipantId` is this Domain's ParticipantId or broadcast;
 - resolve `(Namespace, EndpointId)` to a registered Endpoint;
 - offer the complete PDU/message to that Endpoint for acceptance;
 - reject or count unknown EIDs;
 - reject malformed/unsupported local delivery;
 - provide diagnostics/status for delivery errors;
-- support `kLocalDomain` fast/local delivery.
+- support `kLocalDomain` and locally bound `kLocalBus` delivery.
 
-A richer implementation may also validate expected TransportType, allowed message sizes, direction, and local Service state.
+A richer implementation may also validate expected TransportType, allowed message sizes, source/destination bindings, and local Service state.
 
-The Dispatcher does **not** decide cross-Link routing, and it does **not** execute Service code (§9.4). Note that `kLocalDomain` delivery being "fast" now means it traverses no Link and no framing, not that it skips the storage boundary.
+The Router selects local destination Domains before dispatch. For an ordinary destination it selects the one local Domain with that ParticipantId. For `DestParticipantId == kBroadcastParticipant`, it performs bounded fan-out to the configured local participant Domains on that Wire. The Dispatcher does **not** decide cross-Link routing, and it does **not** execute Service code (§9.4). Local delivery being "fast" means it may traverse no framing, not that it skips the storage boundary.
 
 ## 9.2 Endpoint registration
 
@@ -997,22 +860,21 @@ The exact API remains implementation-specific. Expected implementations include 
 
 ## 9.3 Delivered metadata
 
-A received message should have enough context to identify its source unambiguously within the Wire model. For a named Wire, logical source identity includes at least:
+A received message should have enough context to identify its author and addressing unambiguously:
 
 ```text
 WireNumber
-Direction / source participant
-Namespace
-EndpointId
+SrcParticipantId
+DestParticipantId
+Namespace + EndpointId
 ```
 
-For an anonymous LocalBus, source identity is scoped by the ingress Link Interface until the Wire is named.
+`kLocalBus` uses the same canonical metadata. There is no anonymous source form: ingress reconstructs a valid source ParticipantId before dispatch.
 
 An Endpoint therefore holds **more than a payload.** The consumer can read, where the Endpoint declares it:
 
 ```text
-source        WireNumber, Direction, NodeId
-              or the ingress Link Interface for an unnamed LocalBus
+address       WireNumber, SrcParticipantId, DestParticipantId
 class         QoS, TransportType
 extensions    presence, and access to recognized extension content
 arrival       the acceptance timestamp or tick (§9.4)
@@ -1022,13 +884,13 @@ arrival       the acceptance timestamp or tick (§9.4)
 
 ### Metadata is copied at acceptance, never viewed
 
-> **A view into ingress storage cannot survive the storage boundary.** The consumer reads later, in its own context, after the LLL buffer is reclaimed. Metadata is copied into the Endpoint at acceptance (`§16.1`).
+> **A view into ingress storage cannot survive the storage boundary.** The consumer reads later, in its own context, after the LLL buffer is reclaimed. Metadata is copied into the Endpoint at acceptance (§9.4).
 
 Opaque read-only accessors are fine; they are backed by copied fields, not pointers into ingress storage.
 
 ### Metadata is declared, because it is not free
 
-The per-message cost is small but not nothing. Everything varying in the base descriptor packs into **3 bytes**, since the Endpoint's own 18 bits of identity are constant, and an acceptance timestamp adds typically four more. Around 8 bytes per slot with alignment is a fair estimate.
+The per-message cost is small but not nothing. The base addressing and class metadata varying at one Endpoint can be represented in **4 bytes** (`Control`, Wire, source, destination), since the Endpoint's own identity is constant, and an acceptance timestamp adds typically four more. Around 8 bytes per slot before extension storage and alignment is a fair estimate.
 
 That is negligible on a 512-byte bootloader segment and roughly a doubling on a queue of 8-byte commands, which is exactly the profile where storage was already the constraint (§9.5). So metadata follows the same rule as everything else here — **declared per Endpoint as an immutable property of the Service definition**, not carried unconditionally:
 
@@ -1044,9 +906,9 @@ One asymmetry is deliberate: **a Snapshot Endpoint always carries arrival time**
 
 ### Reading a source is not permission to answer it
 
-Source metadata is informational. It is not a transmit capability, and conflating the two would quietly reintroduce the hole `DISP-7` closes:
+Source metadata is informational. It is not a transmit capability:
 
-> **Reading source metadata confers no transmit authority.** A reply is authorized by the receiving Endpoint's registration, never by the fact that a message arrived carrying a Wire and NodeId the Service can read.
+> **Reading source metadata confers no transmit authority.** A reply is authorized by the receiving Endpoint's registration, never by the fact that a message arrived carrying a Wire and source ParticipantId the Service can read.
 
 The distinction is between two different objects. Metadata is readable and inert. A reply context is opaque, bounded, single-use, and revalidated at transmit (§10.6). A Service that remembers a peer in order to answer it later (§10.2) retains a reply context, not a copy of the source fields it read — and where both exist, the source fields may only *select* among peers the registration already permits, never widen that set.
 
@@ -1145,7 +1007,7 @@ Storage semantics and concurrency are separate dimensions, and both are immutabl
 | | Writers | Readers |
 |---|---|---|
 | **Receive Endpoint** | framework only: one or several Link drivers and local producers | one Service (Queue) or any number (Snapshot) |
-| **Transmit Endpoint** | exactly one Service, optionally several contexts within it | framework only: the one bound Link |
+| **Transmit Endpoint** | exactly one Service, optionally several contexts within it | framework only: the one bound Wire path |
 
 Stated as invariants:
 
@@ -1153,11 +1015,11 @@ Stated as invariants:
 
 > **For every externally producing `(Endpoint Domain, Namespace, EndpointId)` there is exactly one externally visible producer Endpoint identity.** Configuration must reject two Endpoint implementations in one Domain claiming the same producing identity.
 
-The first rule makes the second enforceable by ownership at configuration time instead of resting on trust in synchronized writers. `WIRE-1` says a bus has one authoritative source; this says an Endpoint address is not a shared mailbox any local component may publish under. Without it, two Services in one Domain can both emit as EndpointId 42 and a receiver cannot tell which produced a value.
+The first rule makes the second enforceable by ownership at configuration time instead of resting on trust in synchronized writers. An Endpoint address is not a shared mailbox any local component may publish under. Without this rule, two Services in one Domain can both emit under the same ParticipantId and Endpoint identity, and a receiver cannot tell which authored a value.
 
 Note that framework producers are not Services. Several Link drivers delivering into one receive Endpoint is normal and is exactly what the multi-writer case exists for — the AMP arrangement in §13.2 relies on it. Similarly, several execution contexts *within* one Service may write a transmit Endpoint under the Domain's serialization (§1.5); they remain one Service and one external producer.
 
-Two rules were deliberately dropped. **Multi-reader Queues are not supported:** draining is destructive, so two consumers silently split the stream, which works in test and loses messages in production. It is a worker-pool construct with no meaning in RTL. And **transmit fan-out does not happen at the Endpoint** — publishing the same state onto two Wires is Wire splicing (§6) or gateway forwarding (§12), both of which already preserve source lineage and neither of which needs per-reader state inside the Endpoint.
+Two rules were deliberately dropped. **Multi-reader Queues are not supported:** draining is destructive, so two consumers silently split the stream, which works in test and loses messages in production. It is a worker-pool construct with no meaning in RTL. And **Link fan-out does not happen at the Endpoint** — the Router realizes one bound Wire across its configured Links. Publishing semantically on several independent Wires uses separate transmit Endpoints or explicit composition; a splice only projects Wire scope (§6).
 
 The reason multi-reader Snapshots are safe where Queues are not is that reading is non-destructive and each reader tracks its own progress. That implies an implementation rule worth stating, because the obvious first attempt gets it wrong:
 
@@ -1205,7 +1067,7 @@ A transmit Endpoint is the same object as a receive Endpoint with the roles reve
 
 ```text
 receive Endpoint    framework writes, Service reads
-transmit Endpoint   Service writes, the bound Link reads
+transmit Endpoint   Service writes, the bound Wire path reads
 ```
 
 ## 10.1 Reply-only Service
@@ -1214,16 +1076,17 @@ A Service that only replies can use the receive context:
 
 ```text
 request:
-    Wire 12
-    Node 7
+    Wire = 12
+    SrcParticipantId  = 0x27
+    DestParticipantId = local ParticipantId
 
 reply:
-    same Wire
-    reverse Direction
-    matching Node semantics
+    Wire = 12
+    SrcParticipantId  = local ParticipantId
+    DestParticipantId = 0x27
 ```
 
-No separate static output Wire is required.
+No separate static output Wire is required. A reply is a newly authored PDU: it uses the responding Endpoint Domain's ParticipantId as source and the validated request source as destination. It does not preserve the request source or reverse a Direction field.
 
 ## 10.2 Remembered peer/session
 
@@ -1243,7 +1106,7 @@ What the Service retains is a reply context, not the source fields it read from 
 
 ## 10.3 Autonomous transmission
 
-A Service that transmits on its own initiative needs a configured destination Wire. Rather than hard-code a WireNumber into reusable Service logic, the preferred architecture is an injected handle:
+A Service that transmits on its own initiative needs a configured destination Wire and destination ParticipantId (or broadcast). Rather than hard-code those into reusable Service logic, the preferred architecture is an injected handle:
 
 ```cpp
 class TemperatureService {
@@ -1277,13 +1140,13 @@ fault_tx
 debug_tx
 ```
 
-The Service's source code names its outputs; the Wiring names the Wire and Endpoint each one becomes.
+The Service's source code names its outputs; the Wiring names the Wire, destination participant, and Endpoint each one becomes. The source is always the ParticipantId of the Endpoint Domain that owns the transmit Endpoint.
 
 ## 10.4 Transmit Endpoint storage semantics
 
 A transmit Endpoint declares Queue or Snapshot storage exactly as a receive Endpoint does, and the choice determines what a send means.
 
-**Queue transmit** is the explicit-acceptance path for events, commands, and requests. The Service submits, the Endpoint accepts or rejects against bounded capacity, and the bound Link drains it later. Acceptance means the transmit path took ownership, never that anything reached the medium (§16.1), and a rejected submission must not advance protocol state (`QOS-9`).
+**Queue transmit** is the explicit-acceptance path for events, commands, and requests. The Service submits, the Endpoint accepts or rejects against bounded capacity, and the bound Wire path drains it later. Acceptance means the transmit path took ownership, never that anything reached the medium (§16.1), and a rejected submission must not advance protocol state (`QOS-9`).
 
 **Snapshot transmit** is the publication path for periodic state. The Service writes current state whenever convenient and the LLL samples it on its own schedule (§1.7). There is no queue, no per-send copy, and no accept/reject — coalescing is the declared semantics rather than a loss, and this is what periodic telemetry on a rate-limited Link actually wants.
 
@@ -1314,15 +1177,15 @@ Queue transmit Endpoints deliberately get no equivalent mechanism, because accep
 
 ### One Wire per transmit Endpoint
 
-> **Every transmit Endpoint has exactly one consuming Wire binding.**
+> **Every transmit Endpoint has exactly one consuming Wire binding, including its allowed destination participant selection.**
 
-For Snapshot this keeps the sampled and sent generations single scalar fields instead of per-reader state. For Queue it follows more strongly, since two readers draining one queue is the same destructive-split problem that rules out multi-reader receive Queues (§9.6). Publishing identical state onto two Wires is done by splicing (§6) or gateway forwarding (§12).
+For Snapshot this keeps the sampled and sent generations single scalar fields instead of per-reader state. For Queue it follows more strongly, since two readers draining one queue is the same destructive-split problem that rules out multi-reader receive Queues (§9.6). One Wire may fan out across several Links through Router forwarding. Publishing onto several independent Wires uses separate transmit Endpoints or explicit composition.
 
 ## 10.5 Defaults and safety
 
 Useful defaults reduce configuration during bring-up:
 
-- single-Link anonymous LocalBus (§5.3);
+- one canonical `kLocalBus` Link Binding (§5.1);
 - the device-private Internal Debug Wire (§7), which is the natural default for `debug_tx`.
 
 Safety- or control-critical application outputs should generally require explicit bindings rather than silently falling back to a development/debug route.
@@ -1345,15 +1208,13 @@ Static, Receive-only, and Transmit-only need nothing further; their authority is
 
 ### Request-scoped replies
 
-WireSpaces makes replying structurally easy, because one Wire carries both Directions: a Node that received `OriginToNode` traffic can answer `NodeToOrigin` on the same Wire. That is a real simplification over a model where every direction is a separate Wire, and §10.1 relies on it.
+WireSpaces makes replying structurally simple because the request already carries a canonical Wire and source ParticipantId. An authorized reply context selects that Wire and source as the reply destination, while transmission writes the local Domain's ParticipantId as the new source.
 
-It is not a licence to skip the authority question, though. The Direction field says which end produced a PDU (§3.1); it does not say who may produce a reply, or as which Endpoint.
-
-> **Reply authority is never inferred purely by reversing Direction.** A reply is authorized because the receiving Endpoint's registration permits it, not because a request arrived.
+> **Reply authority is never inferred purely from received addressing.** A reply is authorized because the receiving Endpoint's registration permits it, not because a request arrived.
 
 The practical requirements on a reply context are that it be:
 
-- **opaque to Service code**, so a handler cannot retarget it at a different Endpoint, Wire, or Node;
+- **opaque to Service code**, so a handler cannot retarget it at a different Endpoint, Wire, or participant;
 - **bounded** in lifetime and storage, with a defined expiry;
 - **revalidated when transmission actually happens**, not only when it was created;
 - **usable for exactly one exchange**, and unusable for a different operation or registration;
@@ -1365,7 +1226,7 @@ One lifetime trap deserves naming. If a response can outlive the handler that re
 
 This mode exists because it is genuinely useful: a Service asked to report progress needs somewhere to report it, and the requester is the obvious answer. But it is the only mode where **traffic influences future transmit behavior**, which makes it the only mode that can be steered by whoever can put a frame on the medium.
 
-> **Learned-from-ingress binding is disabled on unauthenticated multi-access Links.** It may be enabled on a statically single-peer ingress, or under a named authenticated-origin profile, and only within a preconfigured allowlist of permitted Wires, Nodes, Endpoint identities, and Transports.
+> **Learned-from-ingress binding is disabled on unauthenticated multi-access Links.** It may be enabled on a statically single-peer ingress, or under a named authenticated-source profile, and only within a preconfigured allowlist of permitted Wires, participants, Endpoint identities, and Transports.
 
 On a shared CAN bus with no authentication, anything that can transmit can present itself as the peer worth remembering. That is not a bug to be hardened against; it is what an unauthenticated multi-access medium means (§22), so the mode is simply not available there.
 
@@ -1384,11 +1245,11 @@ And four things it must never do, each of which would convert a bounded convenie
 ```text
 create a Wire or a route entry
 broaden Endpoint authority beyond the registration
-change how a Wire or alias is interpreted
+change how a Wire, Link Binding, or participant projection is interpreted
 authorize a Transport the registration does not permit
 ```
 
-This is the same principle as `CFG-7` applied to Endpoints instead of gateways: observed traffic informs, configuration authorizes. A Service that needs richer multi-party sessions keeps explicit bounded session state of its own, and still must not treat recent traffic as permission to transmit.
+Observed traffic informs; the Endpoint binding defines what transmission is permitted. A Service that needs richer multi-party sessions keeps explicit bounded session state of its own, and still must not treat recent traffic as permission to transmit.
 
 ---
 
@@ -1454,21 +1315,27 @@ The architecture does not require one mechanism yet.
 
 ## 11.3 Routing key and egress representation
 
-For a received named-Wire PDU, the simple gateway lookup is:
+The smallest routing key is `WireNumber`. Where the forwarding topology depends on which branch supplied the PDU, use `(WireNumber, ingress_link_interface_index)`:
 
 ```text
+WireNumber
+    or
 (WireNumber, ingress_link_interface_index)
     ->
 {
     egress_link_interface_bitmask
-    local Endpoint Domain delivery
+    local participant-Domain membership set
     optional spliceWire
 }
 ```
 
-The API does not need a generalized `RouterPort` type. Link ingress is identified by Link Interface; local Endpoint-originated routing can use local call context/domain information directly.
+`DestParticipantId` is not an ordinary forwarding key. It controls acceptance. A Router may use destination information for safe early filtering or an equivalent optimization only when the result is behaviorally identical to propagating on the configured Wire and filtering at participants.
 
-`spliceWire`, when present, rewrites the Wire representation as described in §6.2 — after the ingress alias has been canonicalized, or before the egress LLL encodes its own alias.
+For local delivery, the Router compares an ordinary destination with local Domain ParticipantIds, or expands broadcast to the bounded configured set of local participant Domains on that Wire. The Dispatcher then resolves Endpoint identity within each selected Domain.
+
+The API does not need a generalized `RouterPort` type. Link ingress is identified by Link Interface; local Endpoint-originated routing can use local call context/domain information directly. `kLocalBus` is handled by its one local Link Binding and must never produce a generic cross-Link egress.
+
+`spliceWire`, when present, rewrites only Wire scope as described in §6.2 — after ingress has reconstructed the complete canonical PDU and before the egress LLL applies field elision or participant projection.
 
 ## 11.4 Egress bitmask
 
@@ -1527,12 +1394,14 @@ If the table never changes, no lock is needed, no seqlock is needed, and no cent
 
 # 12. Gateway Forwarding
 
-The generic gateway forwarding unit is a **complete canonical PDU**.
+The generic gateway forwarding unit is a **complete canonical PDU**, including canonical Wire, source ParticipantId, destination ParticipantId, and source lineage.
 
 ```text
 Physical-Link-native frames
     |
 ingress LLL
+    |
+reconstruct Wire + source + destination
     |
 complete canonical PDU
     |
@@ -1546,8 +1415,8 @@ Physical-Link-native frames
 Example heterogeneous bridge:
 
 ```text
-3 Classical CAN frames
-    -> CAN PDUA reassembly
+constrained-Link transfer units
+    -> profile reassembly and canonical reconstruction
     -> 1 canonical WS PDU
     -> Router
     -> UART/COBS or Ethernet Link representation
@@ -1570,9 +1439,9 @@ A pure gateway can therefore be nearly: Link drivers, LLLs, a routing table, and
 
 The base gateway behavior is intentionally close to **flood-and-filter within the configured realization of a Wire**.
 
-If Wire 42 spans several branches, the gateway may forward an `OriginToNode` unicast PDU to every branch that can contain Wire 42 and allow non-target Nodes/Endpoint Domains to ignore it.
+If Wire 42 spans several branches, the gateway may forward a directed PDU to every configured branch of Wire 42 and allow non-destination participant Domains to reject it.
 
-A more detailed branch map can later prune based on NodeId if bandwidth pressure justifies the complexity.
+A more detailed participant-location map may prune egresses by destination if bandwidth pressure justifies the complexity. That is an optimization, not a change to the generic forwarding key or Wire semantics.
 
 ## 12.2 Independent egress results
 
@@ -1600,6 +1469,8 @@ A gateway may host Endpoints on the same Wire it forwards. One PDU may therefore
 No fake `LOCAL` Link Interface is needed merely to represent Endpoint Domain delivery.
 
 A Wire may also have a purely observational local tap — a logger or monitor — or no local semantic consumer at all.
+
+Directed local delivery selects the one destination Domain by ParticipantId. Broadcast local delivery is bounded fan-out to the configured local participant Domains on the Wire; each Domain performs its own Endpoint dispatch and acceptance.
 
 ## 12.4 Loop model
 
@@ -1648,25 +1519,25 @@ Flood-and-filter (§12.1) means a gateway may put a PDU onto every branch that c
 Concretely, electrical attachment to a Physical Link does not by itself make a device:
 
 ```text
-a Node on a Wire carried by that Link
+a configured participant on a Wire carried by that Link
 a legitimate recipient of PDUs addressed elsewhere
 entitled to forward what it observed
 entitled to transmit on that Wire
 part of a broadcast recipient set
 ```
 
-Membership comes from configuration — an assigned NodeId on a named Wire, a mapped alias, an installed route — never from wiring or from what happened to arrive. The two ideas separate cleanly by level:
+Membership comes from configuration — an assigned ParticipantId, Wire membership, Link Binding, and installed forwarding entry — never from wiring or from what happened to arrive. The two ideas separate cleanly by level:
 
 ```text
 realization level   a PDU may reach devices that are not its destination
 semantic level      only the addressed participant is a recipient
 ```
 
-This is what makes §12.1 acceptable. Flooding is a bandwidth trade, not a widening of authority, and pruning by NodeId later changes efficiency without changing who was ever a participant.
+This is what makes §12.1 acceptable. Flooding is a bandwidth trade, not a widening of authority, and destination-aware pruning later changes efficiency without changing who may accept the PDU.
 
-Two consequences are worth naming. First, a device that consumes traffic it merely observed is misbehaving, even though nothing on the bus can stop it; `NodeToOrigin` publications observed by other Nodes (§3.1) are usable only where configuration explicitly permits it. Second, observation without configuration is exactly what promiscuous mode (`DEPLOY §3.1`) is for, and that mode is deliberately restricted to host tooling and gateways and never creates Wiring.
+Two consequences are worth naming. First, a Domain that consumes directed traffic addressed to another ParticipantId is misbehaving, even though nothing on a shared bus can stop it. Second, observation without configured membership is exactly what promiscuous mode (`DEPLOY §3.1`) is for, and that mode is deliberately restricted to host tooling and gateways and never creates Wiring.
 
-The same rule applies to broadcast, which deserves its own list because it is the case most often over-read. `NodeId 0` addresses the configured Nodes of one Wire. It does not:
+The same rule applies to broadcast, which deserves its own list because it is the case most often over-read. `DestParticipantId == kBroadcastParticipant` addresses the configured participant Domains of one Wire. It does not:
 
 ```text
 mean every device electrically present on the carrying medium
@@ -1677,15 +1548,16 @@ discover its membership dynamically
 
 Broadcast membership is configuration, established when the Wire is defined and changed only by reconfiguring it. Physical fan-out and semantic broadcast are independent in both directions: a shared medium may carry a Wire with exactly one intended recipient, and a broadcast Wire may be realized over point-to-point Links, several gateway branches, or a splice.
 
-One forward-looking consequence, recorded here because it is cheap now and expensive later: **a point-to-point reliable Transport must not be applied to a broadcast Wire by sharing one acknowledgement state across recipients.** A Transport that serves multiple sinks has to define delivery, sequencing, duplicate, and error behavior for multiple sinks explicitly (§20, `FUTURE §3.2`). Where a Service needs per-recipient confirmation, the natural shape is ordinary `NodeToOrigin` traffic, not a multi-target ACK.
+One forward-looking consequence, recorded here because it is cheap now and expensive later: **a point-to-point reliable Transport must not be applied to a broadcast Wire by sharing one acknowledgement state across recipients.** A Transport that serves multiple sinks has to define delivery, sequencing, duplicate, and error behavior for multiple sinks explicitly (§20, `FUTURE §3.2`). Where a Service needs per-recipient confirmation, use directed PDUs from each participant, not a multi-target ACK.
 
 ## 12.7 Source authority and lineage
 
 A receiver needs to know who produced a PDU, and no forwarding step may blur that. The producing identity of a received PDU is:
 
 ```text
-Wire + Direction + NodeId       which participant produced it
-Namespace + EndpointId          what it is
+SrcParticipantId                which participant Domain authored it
+Wire                            propagation scope
+Namespace + EndpointId          Endpoint semantics
 ```
 
 That identity is established by configuration, not by whatever the PDU passed through on the way. Every mechanism in this document preserves it:
@@ -1701,7 +1573,7 @@ local taps and observers    preserve it; observation changes nothing (§12.6)
 LLL polling or scheduling   preserves it (§1.7)
 ```
 
-The one thing that does not preserve it is **re-origination**. A component that consumes traffic and emits semantically new traffic — transforming, filtering, aggregating, or re-timing it — becomes the authoritative producer of what it emits. That is not forwarding, it needs its own Endpoint identity and its own configured authority, and it must be visible in the Wiring as a producer rather than hidden inside a route. `ROUTE-6` exists so this cannot be done by accident inside a gateway.
+The one thing that does not preserve it is **composition**. A component that consumes traffic and authors semantically new traffic — transforming, filtering, aggregating, re-timing, or translating identity — writes its own Domain ParticipantId as `SrcParticipantId`. That is not forwarding; it needs its own Endpoint identity and configured binding, and it must be visible in the Wiring as a producer rather than hidden inside a forwarding entry.
 
 A related rule that is easy to miss: **communication *with* a gateway is not communication *through* it.** Reading a gateway's Link telemetry, changing its forwarding table, or asking it to enumerate a downstream Link uses a separate Endpoint on a Wire where that gateway is a participant. It does not ride the Wires being forwarded, and a device's presence in a forwarding path grants it no Endpoint on those Wires.
 
@@ -1728,20 +1600,20 @@ CPU1 Link Interface
 Its LLL may be very small because framing/integrity requirements differ from UART/CAN, but it still transports canonical WS PDUs. Device-private Wires provide the logical scope:
 
 ```text
-Core 0 Domain
+Core 0 Domain (ParticipantId 0x12)
     |
-device-private Wire 900
+device-private ControlInternalWire
     |
 shared-memory Link Interface
 ===============================
 shared-memory Link Interface
     |
-device-private Wire 900
+device-private ControlInternalWire
     |
-Core 2 Domain
+Core 2 Domain (ParticipantId 0x27)
 ```
 
-The Router does not need special "core routing" concepts.
+The Router does not need special "core routing" concepts. If either Domain also participates on an external Wire, it uses that same ParticipantId there.
 
 ## 13.2 Multiple Endpoint Domains
 
@@ -1755,7 +1627,7 @@ CPU1 Endpoint Domain ---+--> external Links as configured
 CPU2 Endpoint Domain --/
 ```
 
-Each Domain has its own Dispatcher. Routing tables may be shared across cores and read concurrently.
+Each Domain has its own Dispatcher and one deployment-scoped ParticipantId. Routing tables may be shared across cores and read concurrently.
 
 ## 13.3 Inter-core queue serialization
 
@@ -1884,15 +1756,15 @@ timing      the Link cannot meet the rate, latency, or cadence the Service needs
 transport   the Link or profile cannot provide the required Transport or QoS
 ```
 
-A Service exchanging 40-byte PDUs cannot move onto a Classical CAN Link limited to N <= 4 (`LINK §2.10`), no matter how unchanged its schema is. A control loop that works over shared memory may be unplaceable on a polled SPI Link whose cadence sets the floor on latency (§1.7). A Service that needs Critical QoS is not portable to a QoS-Minimal Link without an explicit decision about what happens to its priority.
+A Service exchanging 40-byte PDUs cannot move onto a constrained Link profile whose reassembled-PDU limit is smaller, no matter how unchanged its schema is. A control loop that works over shared memory may be unplaceable on a polled SPI Link whose cadence sets the floor on latency (§1.7). A Service that needs Critical QoS is not portable to a QoS-Minimal Link without an explicit decision about what happens to its priority.
 
-The machinery to detect all of this already exists — Link capabilities (§17) plus static capacity checking (`DEPLOY §2.2`) — and the required behavior is unambiguous: an unrepresentable placement **fails at configuration or before TX**, never by truncation or silent degradation (`REG PDU-2`).
+The machinery to detect all of this already exists — Link capabilities (§17) plus static capacity checking (`DEPLOY §2.2`) — and the required behavior is unambiguous: an unrepresentable placement **fails at configuration or before TX**, never by truncation or silent degradation.
 
 So the accurate framing is that WireSpaces removes *placement* from the Service's source code, not that every Service runs over every Link. The Service stops naming its Link; it does not stop having requirements.
 
 ## 13.5 No special many-core assumptions
 
-The current 127-device-private-Wire direction is expected to be ample for normal multicore MCUs and FPGAs. A hypothetical very-large-many-core processor can justify an extended profile later rather than consuming canonical header bits now.
+Device-private Wire allocation remains provisional and should be validated against real topology corpora. A hypothetical very-large-many-core processor can justify an extended profile later rather than consuming canonical header bits before the need is demonstrated.
 
 ---
 
@@ -1911,7 +1783,7 @@ The field is just called QoS in ordinary use. The reason `0` is the *highest* pr
 
 > **QoS is the number of classes with strictly higher priority than yours.** Critical has none above it, so it is 0. Background has three above it, so it is 3.
 
-Read that way the numbering is not an arbitrary convention to memorize — it is a count, and "lower number wins" follows from what the number means. It also lines up directly with how several Link technologies arbitrate. CAN is the important case: lower identifier wins, so canonical QoS packs into the arbitration-significant bits unchanged, with no inversion step and nothing to get backwards in an LLL (`LINK §2.2`).
+Read that way the numbering is not an arbitrary convention to memorize — it is a count, and "lower number wins" follows from what the number means. It also lines up directly with how several Link technologies arbitrate. Exact mapping to Link-native priority is a profile concern.
 
 Not every implementation must provide four separate schedulers/queues.
 
@@ -1993,7 +1865,7 @@ There is a real constraint on which traffic a queue may coalesce, and it comes f
 
 Which means **queue exhaustion must never quietly become latest-value replacement.** They are different outcomes and a Service can only be correct about one of them. If an event queue fills, the honest results are to reject, to drop with a counter, or to enter a declared fault state; converting the overflow into a replacement turns a countable loss into a silent one, and the receiver has no way to tell.
 
-**Open detail:** blind replacement of the literal last queue entry can delete an unrelated Service's PDU. A robust latest-value implementation likely needs a stream/logical key such as `(Wire, Direction/Node, Namespace, EndpointId)` plus a per-Endpoint declaration of whether its traffic is replaceable at all. Resolve this in implementation rather than standardizing it accidentally.
+**Open detail:** blind replacement of the literal last queue entry can delete an unrelated Service's PDU. A robust latest-value implementation likely needs a stream/logical key such as `(Wire, SrcParticipantId, DestParticipantId, Namespace, EndpointId)` plus a per-Endpoint declaration of whether its traffic is replaceable at all. Resolve this in implementation rather than standardizing it accidentally.
 
 ## 14.4 Congestion is a normal send outcome
 
@@ -2036,7 +1908,7 @@ Acceptance means ownership transferred and the PDU entered the local path (§16.
 
 > **After acceptance, an implementation eventually reports exactly one of: transmission complete, cancelled by an explicit stop or restart, or a terminal local fault.**
 
-Without that guarantee, buffer reclamation has no defined point and diagnostics cannot balance — every counter discrepancy becomes ambiguous between "still in flight" and "lost track of." The middle outcome is the one worth designing for deliberately, since restart with work in flight is normal (§18.2) and each of those PDUs needs its storage released and its loss counted.
+Without that guarantee, buffer reclamation has no defined point and diagnostics cannot balance — every counter discrepancy becomes ambiguous between "still in flight" and "lost track of." The middle outcome is the one worth designing for deliberately, since restart with work in flight is normal (§23.4) and each of those PDUs needs its storage released and its loss counted.
 
 ---
 
@@ -2087,7 +1959,7 @@ Wiring tooling can project those claims across configured Wires and Links and es
 Some Links benefit strongly from credit-based flow control.
 
 ```text
-PC / Origin
+PC participant
     |
 Ethernet
     |
@@ -2111,7 +1983,7 @@ If pressure propagates through several gateways, each upstream Link can reduce i
 
 **Strong candidates:** UART, RS-485, Ethernet WS links, USB-like streams, FTDI/FIFO links, shared-memory/FIFO links.
 
-**Classical CAN:** see `LINK §2.11` (gateway upstream credit via §15.3).
+**CAN profiles:** any flow-control behavior is defined by the selected `LINK` profile; gateway upstream credit may still use §15.3.
 
 **CAN FD / CAN XL:** may justify richer Link-level flow control in some profiles; still optional.
 
@@ -2244,7 +2116,7 @@ The rejection case is where a caller most often either frees a buffer the callee
 
 Two lifetime consequences are easy to miss:
 
-- **Receive storage retained by application code must outlive a Link restart.** If a Service is holding a received buffer when its Link resets, that buffer must remain valid until the Service releases it — which means the allocator's lifetime is broader than the restartable Link state that filled it (§18.2). An allocator torn down with the Link produces dangling references in correct application code.
+- **Receive storage retained by application code must outlive a Link restart.** If a Service is holding a received buffer when its Link resets, that buffer must remain valid until the Service releases it — which means the allocator's lifetime is broader than the restartable Link state that filled it (§23.7). An allocator torn down with the Link produces dangling references in correct application code.
 - **Reclamation goes through the allocator's defined owner.** Arbitrary contexts do not manipulate a shared free list, and an ISR does not (§13.3).
 
 ## 16.2 Composition for synchronization
@@ -2342,7 +2214,7 @@ QoS profile (Minimal / Full)
 hop-by-hop flow-control support
 fragmentation/reassembly support
 header-extension support
-WireAlias capacity / addressing limits
+Wire elision and participant-projection capabilities
 supported TransportTypes
 nominal/usable link rate
 polling cadence, for master-initiated Links (§1.7)
@@ -2403,10 +2275,10 @@ WireSpaces should make errors and resource pressure highly observable while allo
 TX congestion / queue full
 Link unavailable/down
 Unsupported PDU/profile/capability
-Unknown or unmapped Wire/WireAlias
+Unknown, unbound, or unrepresentable Wire
 Invalid internal/external Wire scope
 Unknown EndpointId
-Invalid NodeId/direction combination
+Invalid source/destination ParticipantId
 PDUA/reassembly timeout
 aggregate integrity failure
 Link-native framing / CRC / bus error
@@ -2434,7 +2306,7 @@ Report upward locally via counters and the telemetry Service (`DEPLOY §3.3`). A
 
 ### Diagnostic containment
 
-A deployment may nonetheless want a node to *report* faults remotely, and that is legitimate — as a deliberately configured Service on its own Wire, not as a reflex. The distinction is that a Service's reports are wired, rate-controlled, and addressed to whoever is meant to receive them, while a reflex is none of those.
+A deployment may nonetheless want a participant to *report* faults remotely, and that is legitimate — as a deliberately configured Service on its own Wire, not as a reflex. The distinction is that a Service's reports are wired, rate-controlled, and addressed to whoever is meant to receive them, while a reflex is none of those.
 
 Any such reporting satisfies the following, and the first is what separates a diagnostic path from a positive feedback loop:
 
@@ -2499,9 +2371,9 @@ A capable gateway may record every congestion-dropped PDU in a circular file/jou
 
 ```text
 uint64 timestamp
-<= 8-byte WS header/descriptor
+<= 9-byte WS header/descriptor
 -----------------------------
-~16 bytes per drop record
+~17 bytes per drop record before local reason/index fields and alignment
 ```
 
 A file can wrap and overwrite old data indefinitely. If one journal is maintained per Link Interface, Link identity can live in file metadata instead of every record; a combined journal can add local Link index and reason code as needed.
@@ -2580,34 +2452,40 @@ A useful line separates checks the implementation must always perform from polic
 **Structural validity** — required for the representation itself to function, and therefore always enforced:
 
 ```text
-exactly one Origin role per Wire
-one externally visible producer per (Domain, Namespace, EndpointId)
-valid NodeId values for the Direction
-no duplicate NodeId where uniqueness is required
+one deployment-scoped ParticipantId per Endpoint Domain
+the same Domain ParticipantId on every Wire
+ordinary and broadcast ParticipantId values valid under the selected allocation
+the broadcast participant sentinel used only as a destination, never as source
+one externally visible producer per (ParticipantId, Endpoint)
+complete canonical Wire/source/destination reconstructed before routing/dispatch
+destination equals the local Domain ParticipantId or broadcast before dispatch
 valid Wire representation for the selected Link profile
 representable Endpoint identity for the selected Link profile
-unambiguous resolution for any given ingress and canonical identity
+deterministic forwarding action set for each Wire or (Wire, ingress)
+loop-free forwarding realization for every Wire
 valid forwarding and splice configuration
+no transparent merge of independent ParticipantId universes
+kLocalBus bound to at most one local Link and never forwarded/spliced as itself
 bounded storage configured for every accepted delivery path
 ```
 
-These are structural protocol/configuration constraints. They are not a contract, they are not optional, and they are the same set enumerated as invariants in `REG §4`.
+These are structural protocol/configuration constraints. They are not a contract and are not optional. Registry invariant identifiers are being updated concurrently, so semantic prose governs where a cross-document identifier is not yet final.
 
-Unambiguous resolution deserves a note because it is the one that fails quietly. If one ingress plus one canonical identity can resolve to two different actions — two Endpoints, two egress Links, or an Endpoint and an egress — then behavior depends on table order rather than on configuration, and the system is not describable. This must be rejected where the configuration is generated (`DEPLOY §2.2`) and detected where a table is built at runtime.
+Deterministic resolution deserves a note because it is the one that fails quietly. One lookup may intentionally produce a set of actions — several egress Links plus local delivery is normal. What is invalid is table-order-dependent interpretation of the same Wire or ingress, conflicting splice projections, duplicate local ParticipantId ownership, or any action set that cannot be described uniquely from configuration.
 
 ### Acceptance is set-valued, and the sets are coupled
 
-A binding does not have to admit exactly one value per field. It may legitimately admit sets or ranges: several Wires, a range of Node identities, more than one Transport, a span of QoS values, a range of message lengths, several Link representations. That flexibility is useful and should be supported.
+A binding does not have to admit exactly one value per field. It may legitimately admit sets or ranges: several Wires, a range of participant identities, more than one Transport, a span of QoS values, a range of message lengths, several Link representations. That flexibility is useful and should be supported.
 
 It also introduces a validation trap that is worth naming, because the obvious implementation gets it wrong:
 
 > **Checking each field against its own permitted set is not sufficient.** Constraints couple across fields, so a tuple can be rejected even when every value in it is individually admitted.
 
-Concretely: a binding may permit Critical QoS, and separately permit PDUs up to 40 bytes, without permitting a 40-byte Critical PDU — because Critical traffic has a stricter fragmentation depth on that Link (`LINK §2.6`). Per-field validation passes; the combination is not admissible. The same shape appears between Transport and length, between Wire and Link representation, and between Endpoint identity and profile (`LINK §2.4`).
+Concretely: a binding may permit Critical QoS, and separately permit PDUs up to 40 bytes, without permitting a 40-byte Critical PDU — because Critical traffic has a stricter PDUA depth on that Link (`LINK §2.9`). Per-field validation passes; the combination is not admissible. The same shape appears between Transport and length, between Wire and Link representation, and between Endpoint identity and profile (`LINK §2.7`).
 
 So validation operates on the **combination**, and a binding representation has to be able to express coupling rather than only a product of independent sets. This applies identically at configuration time in tooling (`DEPLOY §2.3`) and at runtime on the receive path.
 
-The tooling-level checks that go beyond what a Node can verify locally are listed in `DEPLOY §2.2`.
+The tooling-level checks that go beyond what one participant can verify locally are listed in `DEPLOY §2.3`.
 
 **Contract-level policy** — optional, additive, and never implied:
 
@@ -2633,7 +2511,9 @@ Patterns above the bare Wire will eventually be wanted — request/response corr
 
 So a request/response pair flattens into two directed exchanges on existing Wires plus correlation state held by the requesting Service. A redundancy group flattens into several ordinary member Wires plus the coordination state described in §23.11. In both cases the data plane sees nothing new: the same canonical PDUs, the same forwarding table, the same dispatch.
 
-What this buys is specific. It keeps the forwarding path from accumulating cases, so a gateway written today still forwards correctly for patterns invented later, and it keeps a tiny Node from paying for abstractions it never uses. It is the mechanism behind `REG PDU-1` — the complete PDU stays the generic forwarding unit — extended upward instead of downward.
+What this buys is specific. It keeps the forwarding path from accumulating cases, so a gateway written today still forwards correctly for patterns invented later, and it keeps a tiny participant from paying for abstractions it never uses. The complete PDU stays the generic forwarding unit.
+
+Composition that emits a new PDU always authors it with the composition Endpoint Domain's ParticipantId. Preserving an upstream source through a semantic transformation would falsely claim lineage and is not permitted.
 
 Two boundaries follow:
 
@@ -2657,7 +2537,7 @@ The baseline Transport is an **Unreliable Datagram** style:
 
 Other Transports may provide reliable segmented transfer, receiver windows/credits, request/response retry behavior, sequence/E2E integrity, or specialized command-source selection. None is designed yet; see `FUTURE §3`. The most likely second Transport is the sequenced / end-to-end-protected datagram in `FUTURE §3.1`, which should be designed before anything reliable.
 
-One boundary is firm regardless: firmware images, files, logs, and similar bulk data belong to a segmenting Transport, **not** to a constrained LLL. Growing Classical CAN PDUA into a large transport protocol is the wrong direction (`LINK §2.6`).
+One boundary is firm regardless: firmware images, files, logs, and similar bulk data belong to a segmenting Transport, **not** to a constrained LLL. Growing a constrained-Link reassembly mechanism into a large transport protocol is the wrong direction.
 
 ### Hop integrity and end-to-end integrity are different claims
 
@@ -2671,26 +2551,24 @@ E2E integrity    detects corruption between the producing Endpoint
                  and the consuming Endpoint, across every hop
 ```
 
-The gap is at a gateway. A gateway validates the CRC on ingress, reassembles, re-encodes, and computes a **fresh** CRC on egress (§12.3) — so the egress CRC attests to the bytes the gateway produced, not to the bytes the source produced. Anything that corrupted the PDU inside the gateway, in its buffers, or during its re-encoding is then covered by a valid checksum. Each hop is verified; the path is not.
+The gap is at a gateway. A gateway validates the CRC on ingress, reassembles, re-encodes, and computes a **fresh** CRC on egress (§12.5) — so the egress CRC attests to the bytes the gateway produced, not to the bytes the source produced. Anything that corrupted the PDU inside the gateway, in its buffers, or during its re-encoding is then covered by a valid checksum. Each hop is verified; the path is not.
 
 For a single-Link deployment this is a distinction without a difference, which is why it is easy to lose. It becomes real as soon as traffic crosses a gateway, and the check must be computed by the producing Endpoint and verified by the consuming one to close it — hence the Transport above.
 
 Neither mechanism is authentication. A CRC detects accidental corruption and is trivially recomputed by anyone modifying the data deliberately (§22).
 
-## 20.1 Origin failover is not a base Wire feature
+## 20.1 Producer failover is not a base Wire feature
 
-If the Origin of a Wire goes down, that Wire becomes only marginally useful for many command/control functions. Node publications may still exist, but Origin-driven behavior is absent.
+A Wire has no distinguished central participant, and the Router does not elect or replace a producer. If a command or state producer fails, the Wire continues to propagate other participants' traffic; only the Service behavior that depended on that source is absent.
 
-Base WS does not define automatic Origin election or failover. Redundancy can be built by composition:
+Redundant producers are explicit composition, commonly across separate Wires or separate Endpoint identities:
 
 ```text
-Origin A ---- Wire A ---- Nodes
-Origin B ---- Wire B ---- Nodes
+Producer A ---- Wire A ---- consuming composition
+Producer B ---- Wire B ---- consuming composition
 ```
 
-Application or Transport policy decides when commands from one source are accepted instead of another.
-
-A future Transport could explicitly support command reception from multiple Origins and switch source based on health/timeouts, but that is higher-level policy rather than Wire routing.
+Application or Transport policy decides which source is authoritative, how health is measured, and when selection changes. Any selected or combined output is a newly authored PDU whose source is the composition Domain's ParticipantId. Producer selection is higher-level policy, not Wire routing.
 
 ## 20.2 Transport is chosen by Service semantics
 
@@ -2746,7 +2624,7 @@ The single most consequential Service-level rule concerns what defines the messa
 
 > **A Service protocol is defined by a canonical schema over bytes, never by a C or C++ ABI.** Generated structs and classes are *views* or codecs derived from that schema. Native padding, enum width, field alignment, and host endianness define nothing.
 
-The temptation is obvious and the failure is quiet. Casting a received buffer to a `struct` works perfectly between two builds of the same firmware with the same compiler and the same flags, and then produces subtly wrong values against the Python host tool, the RTL node, or the same firmware built for a different target. Since WireSpaces expects exactly that heterogeneity (§1.1), the schema has to be the contract.
+The temptation is obvious and the failure is quiet. Casting a received buffer to a `struct` works perfectly between two builds of the same firmware with the same compiler and the same flags, and then produces subtly wrong values against the Python host tool, the RTL participant, or the same firmware built for a different target. Since WireSpaces expects exactly that heterogeneity (§1.1), the schema has to be the contract.
 
 A Service specification that is ready to implement states:
 
@@ -2825,9 +2703,9 @@ WireSpaces does not currently define a complete general security architecture. T
 
 Configuration operations must be treated as trusted/privileged:
 
-- assigning NodeIds;
+- assigning ParticipantIds;
 - naming Wires;
-- changing alias maps;
+- changing Link Bindings or participant-projection maps;
 - changing forwarding tables;
 - installing or changing splices;
 - privileged device management.
@@ -2972,7 +2850,7 @@ resources shared with other restart units
 storage backing buffers already transferred to application ownership
 ```
 
-Buffers transferred to application ownership must survive the Link restart that filled them (§16.1, `OWN-3`).
+Buffers transferred to application ownership must survive the Link restart that filled them (§23.7, `OWN-3`).
 
 > **"Persistent" here means surviving a restart unit's reconstruction. It does not mean surviving power loss** — each counter declares which boundary applies.
 
@@ -3007,7 +2885,7 @@ A healthy sibling Link or debug path can carry latched fault records and unavail
 
 ## 23.11 Redundancy by composition
 
-The base Wire is not multipath and has exactly one Origin. Redundancy is composed from multiple Wires with explicit coordination of the six responsibilities below — not hidden failover on one Wire.
+The base Wire has one loop-free propagation topology and no hidden redundant-path behavior. Redundancy is composed from multiple Wires with explicit coordination of the six responsibilities below — not hidden failover inside one Wire.
 
 ```text
 message-instance correlation   recognizing that two arrivals are one update
@@ -3020,8 +2898,10 @@ per-sink coverage              which sinks are actually covered by which members
 
 Router forwarding has no duplicate-suppression state (§12.4); coordination is Service- or composition-level (§19.2).
 
-- **Path redundancy ≠ replicated sources** — member Wires normally share one semantic producer identity.
+- **Path redundancy ≠ replicated sources** — one Endpoint Domain may author copies on member Wires with the same ParticipantId, while independently implemented producers necessarily have distinct ParticipantIds and need explicit source-selection composition.
 - **Observation is not coverage** — promiscuous observers (`DEPLOY §3.1`) are not failover paths.
+
+When composition selects, combines, or otherwise creates an output from redundant inputs, that output is newly authored with the composition Domain's ParticipantId. Forwarding alone preserves each input's original source and destination.
 
 Cyclic/redundant *routing* profiles remain deferred; acyclic realization (§12.4) still holds for composed redundancy.
 
@@ -3045,9 +2925,11 @@ RTL Endpoint ---+
 The central routing operation is hardware-friendly:
 
 ```text
-WireNumber lookup
-    -> ingress Link Interface index
+(WireNumber)
+    or
+(WireNumber, ingress Link Interface index)
     -> egress bitmask
+    -> bounded local participant-Domain set
     -> optional spliceWire
 ```
 
@@ -3066,13 +2948,13 @@ one Physical Link, one Endpoint Domain, few Services
 copies everywhere; no dynamic allocation; no Router/network task; no locks
 ```
 
-Receive: frame RX → decode → dispatch on EID → copy into Endpoint storage. Transmit: Service → transmit Endpoint → LLL drains or samples. The storage boundary applies (§9.4) — typically one slot per Endpoint; cost is one copy and a loop iteration.
+Receive: frame RX → reconstruct canonical Wire/source/destination → select the destination Domain → dispatch on Endpoint identity → copy into Endpoint storage. Transmit: Service → transmit Endpoint → author with the local Domain ParticipantId → LLL drains or samples. The storage boundary applies (§9.4) — typically one slot per Endpoint; cost is one copy and a loop iteration.
 
-A constrained CAN node may use only `kLocalBus`, optimized N=1, NS0, and EIDs 1..127 (`LINK §2.4`) and still interoperate with richer hosts.
+A constrained CAN11 participant may use one `kLocalBus` Link Binding and generated direct dispatch. The Link profile may elide Wire identity and directly encode or project participant identity, but ingress still presents a complete canonical PDU. One CAN11 Link Binding/profile instance carries one Wire; separately suitable bindings or Guest allocations may coexist, while CAN29 or another richer profile is preferred when the required overlap or topology does not fit cleanly (§5.3).
 
 A conforming implementation need not instantiate runtime Link/LLL/Router objects if generated static equivalents preserve semantics, bounds, ownership, diagnostics, and compatibility fingerprint (`DEPLOY §2.4`).
 
-Collapsing to a `switch` and constants is fine, but **semantic and authority distinctions must survive the fold** — one Origin, configured Endpoint acceptance only, bindings grant only declared transmit rights.
+Collapsing to a `switch` and constants is fine, but **semantic and authority distinctions must survive the fold** — one ParticipantId for the Domain on every Wire, destination-controlled acceptance, configured Endpoint acceptance only, and bindings that grant only declared transmit rights.
 
 Scaling profiles for other targets are in `IMPL`.
 

@@ -1,7 +1,7 @@
 # WireSpaces — Core Library Architecture Sketch
 
-**Status:** Private first draft; provisional throughout; structure and API shape only, no internals  
-**Purpose:** How the prototype core library is organized, where its seams are, and what its public surface looks like  
+**Status:** Private first draft; provisional throughout; structure and API shape only, no internals<br>
+**Purpose:** How the prototype core library is organized, where its seams are, and what its public surface looks like<br>
 **Authority:** Software structure only. Protocol behavior belongs to `CORE`, byte layout to `BITS` and `LINK`, test policy to `CONFORM`
 
 Cross-references use the document code plus a section number, for example `LIB §3`. A bare `§x` always means the current document.
@@ -77,7 +77,7 @@ Seven modules, with a strictly downward dependency direction. An arrow means "ma
 `core` holds two kinds of thing, and conflating them is what produced the cycle described below:
 
 - **canonical types** — what `BITS` and `LINK` define byte layouts for. These headers stay clean of anything Link-scoped or delivery-scoped.
-- **dependency-root runtime types** — the one-method seam interfaces, `ReceivedPdu`, `LinkIndex`, `WireAlias`, and the result enumerations. These are not canonical protocol types and never appear on a wire, but every module above needs them, so the root is where they belong.
+- **dependency-root runtime types** — the one-method seam interfaces, `ReceivedPdu`, `LinkIndex`, and the result enumerations. These are not canonical protocol types and never appear on a wire, but every module above needs them, so the root is where they belong.
 
 The earlier formulation — "a Link-scoped concept in `core` means a type is in the wrong module" — was too strong and this document violated it immediately, since `ReceivedPdu` carries a `LinkIndex`. The rule that actually holds is per *header*, not per target: `pdu.h` contains nothing Link-scoped, and `runtime_interfaces.h` is allowed to.
 
@@ -125,20 +125,20 @@ Two layers maximum, per the project style. Headers follow declarations-first wit
 | `hal/clock.h` — `hal::PlatformClock` | arrival timestamps and cadence (§9) |
 | `util/static_string.h` — `util::StaticString<N>` | Wire and Link names in diagnostics, not on any wire |
 | `interfaces/stream_interface.h` — `Stream::StreamInterface` | the byte-stream Link driver case (§8.1) |
-| `crc/crc_algorithm.h` | the CAN aggregate CRC (see below) |
+| `crc/crc_algorithm.h` | implemented candidates for the retained provisional CAN aggregate-CRC direction in `LINK §2.11` (see below) |
 
 `RingBuffer` is a better fit than it first appears, and for a reason worth recording. It documents itself as safe for **one producer and one consumer**, which is exactly the multiplicity `DISP-10` fixes for a receive Queue: the framework writes, one Service reads. It also allocates `Capacity + 1` slots rather than sacrificing one, so its logical capacity is its usable capacity — which is what `CORE §9.5` asks for. Where a Queue Endpoint declares multiple writers, the producer-lock policy of §9 wraps the enqueue side and the ring's own guarantee covers the rest.
 
 Its single-producer/single-consumer guarantee is also worth reading as a limit rather than only a feature: it says nothing about a Snapshot's read coherence, which is a different problem with a different solution (§9.2). A `RingBuffer` is not the storage for a Snapshot Endpoint.
 
-**The CRC finding is the most useful one.** `LINK-6` needs CRC-8 at `N = 2..4` and CRC-16 at `N = 5..8`, and `REG §6.8` lists the parameters as open. `crc/crc_algorithm.h` already provides tested candidates:
+**The CRC finding is the most useful one.** Current `LINK §2.11` retains aggregate CRC as a provisional direction for multi-frame PDUA, while the schedule, algorithms, parameters, protected range, placement, and byte order all remain unsettled. `crc/crc_algorithm.h` already provides tested implementations worth evaluating as candidates:
 
 ```text
 crc::algorithm::AutosarCrc8       poly 0x2F, init 0xFF, xorout 0xFF
 crc::algorithm::Crc16CcittFalse   poly 0x1021, init 0xFFFF, xorout 0x0000
 ```
 
-Both are non-reflected, which matters because `crcBitwise` has a `static_assert` against reflection — so these two work today and a reflected polynomial would not. That does not close `REG §6.8`; it means the choice can be made from implemented, vector-tested options rather than from a table in a datasheet.
+Both are non-reflected, which matters because `crcBitwise` has a `static_assert` against reflection — so these two work today and a reflected polynomial would not. Their availability does not select either algorithm or close `REG §6.8`; it means evaluation can include implemented, vector-tested options rather than only a table in a datasheet.
 
 One real gap: the implementation has no incremental `update`/`finalize`, only a whole-buffer `compute`, and its own TODO says so. A PDUA CRC covering a PDU that arrives as up to eight separate frames wants to accumulate across them rather than reassemble first and then checksum. Reassembling first works and is the right phase-1 behavior; incremental CRC is a later optimization with a clear trigger.
 
@@ -147,7 +147,7 @@ One real gap: the implementation has no incremental `update`/`finalize`, only a 
 - `data_structures/memory_pool.h` does not currently compile — a missing brace after the namespace, a `.data()` call on a pointer, and an assignment to a reference member. It is also not needed in phase 1, since nothing pools. Worth knowing before someone reaches for it.
 - `RingBuffer` is declared at global scope rather than in `data_structures`, against the project's own namespace rule. A one-line fix, but it touches its existing users.
 - `can/can_frame.h` is not the right base for the CAN profile. `Can::CanFrame` carries a `crc_` member and HDLC payload framing because it was built for the bootloader's CAN-over-HDLC transport, and its identifier is a template parameter constrained to an enum. WireSpaces needs a plain 11-bit identifier, a DLC, and eight bytes. Either a minimal frame type here or a refactor there — not a direct reuse.
-- `util/integer.h` is worth knowing about but **not** worth acting on first. `util::Uint24_s` is the same shape the identity types want — a narrow value in a wider container whose serialization fails rather than truncating — and its TODO asks for the general form. An earlier draft made resolving that TODO a precondition for §4.1; §4.1 now explains why that was wrong on both the technical claim and the sequencing. The stopping condition lives there.
+- `util/integer.h` is worth knowing about but **not** worth acting on first. `util::Uint24_s` demonstrates checked serialization of a narrow value in a wider container, and its TODO asks for a general form. The current preferred Participant and Wire values already use their full provisional container widths, while packed `Endpoint` has its own validity rule. An earlier draft made resolving that TODO a precondition for §4.1; §4.1 now explains why that was wrong on both the technical claim and the sequencing. The stopping condition lives there.
 
 **Not reusable, and mentioned only so nobody looks twice:** `bootloader/`, `hdlc/protocol.h`, and `hdlc/network_management.h` are application protocols. `Firmware/wirespaces/host_demo/` is an earlier C prototype of an unrelated generation.
 
@@ -187,38 +187,50 @@ Snapshot read coherence is a different problem and gets a fixed answer rather th
 
 ## 4.1 Identity
 
-Raw `uint16_t` for four different identity spaces is how a WireNumber ends up in an EndpointId parameter. Two things are wanted here: distinct types, and a range check that rejects rather than truncates. `BITS §2` allocates 10 bits to a WireNumber and 5 to a NodeId, so a value that does not fit is a real and reachable error, and `PDU-2` says the answer is rejection.
+Raw integers for distinct identity spaces make accidental substitutions easy. The canonical API therefore names Participant, Wire, and Endpoint values separately. The current preferred widths below are **provisional pending the topology corpus in §14**; code must not treat their appearance here as an interoperability freeze.
 
 ```cpp
-struct WireNumber {
-    static constexpr uint16_t kMax{1023U};      ///< BITS §2, 10 bits
-    uint16_t value{0U};
-    bool isValid() const { return value <= kMax; }
-};
-
-struct NodeId {
-    static constexpr uint8_t kMax{31U};         ///< BITS §2, 5 bits
+struct ParticipantId {
+    static constexpr uint8_t kBroadcast{0xFFU};
     uint8_t value{0U};
-    bool isValid() const { return value <= kMax; }
+
+    bool isValidSource() const { return value != kBroadcast; }
+    bool isBroadcast() const { return value == kBroadcast; }
 };
 
-struct EndpointId { uint16_t value{0U}; };   ///< full width, no narrowing
-struct WireAlias  { uint8_t  value{0U}; };   ///< Link-scoped, never on the canonical wire
+struct WireNumber {
+    uint8_t value{0U};  ///< Current preferred provisional width.
+};
+
+enum class Namespace : uint8_t { kNs0 = 0U, kNs1, kNs2, kNs3 };
+
+/// Canonical packed Endpoint value: Namespace[2] + Id[14].
+struct Endpoint {
+    static constexpr uint16_t kIdMask{0x3FFFU};
+    uint16_t value{0U};
+
+    Namespace nameSpace() const;
+    uint16_t id() const;
+    bool isValid() const { return id() != 0U; }
+};
+
 struct LinkIndex  { uint8_t  value{0U}; };   ///< local array index, never transmitted
 
-enum class Direction     : uint8_t { kOriginToNode = 0U, kNodeToOrigin = 1U };
-enum class Namespace     : uint8_t { kNs0 = 0U, kNs1, kNs2, kNs3 };
 enum class TransportType : uint8_t { kUnreliableDatagram = 0U /* ... */ };
 enum class Qos           : uint8_t { kCritical = 0U, kHigh, kNormal, kBackground };
 ```
 
-An earlier draft of this section proposed building these on a generalized `util::UintN<Bits, Container>`, extracted from `util::Uint24_s`'s TODO, and argued that doing so would make range validity "a property of the type rather than a rule the codec must remember." **That argument was wrong**, and it is worth recording why, because the mistake is an appealing one.
+`ParticipantId{0xFF}` is the one canonical broadcast destination and is never a valid source. Every independently routed/dispatchable Endpoint Domain has one ordinary `ParticipantId`, and uses that same identity on every Wire it joins. Physical-device identity is separate.
 
-A type carrying an integer and an `isValid()` does not prevent invalid objects from existing — it only gives them a name. The codec still has to *call* `isValid()` at each field boundary, so the number of places to forget the check is unchanged. Getting the property actually claimed requires controlled construction: a private constructor with a `static std::optional<WireNumber> tryMake(uint16_t)` factory, so that no invalid instance can be formed at all. That is a real and defensible design, but it is a substantially larger utility exercise than resolving a TODO, and it constrains aggregate initialization everywhere the type appears.
+`kLocalBus` is a reserved canonical `WireNumber` with local-only scope. It is valid for local dispatch and may be bound to at most one Link Interface in a Router/Endpoint Domain, but it is never transparently forwarded or spliced as itself.
+
+An earlier draft of this section proposed building bounded values on a generalized `util::UintN<Bits, Container>`, extracted from `util::Uint24_s`'s TODO, and argued that doing so would make range validity "a property of the type rather than a rule the codec must remember." **That argument was wrong**, and it is worth recording why, because the mistake is an appealing one.
+
+A type carrying an integer and an `isValid()` does not prevent invalid objects from existing — it only gives them a name. The codec still has to *call* the check at each field boundary. Getting the property actually claimed requires controlled construction, which is a real and defensible design but a substantially larger utility exercise that constrains aggregate initialization everywhere the type appears.
 
 The sequencing was also backwards. Blocking WireSpaces prototyping on a generalization inside another repository inverts the dependency, and it contradicts the rule this same document cites approvingly elsewhere: `INTRO §9` says an abstraction waits for the second demand. One descriptor codec is the first demand.
 
-So the plain wrappers above are the plan, not a fallback, with an explicit stopping condition: **do not generalize the bounded-integer utility until the descriptor codec works and the duplication is visible in it.** If the codec then shows the same range-check paragraph eight times, that is evidence, and the factory-based form is what to extract — not the `isValid()` form, which would not have helped.
+So the plain wrappers above are the plan, not a fallback, with an explicit stopping condition: **do not generalize the bounded-integer utility until the descriptor codec works and the duplication is visible in it.** If the codec then shows repeated checked-construction logic, that is evidence, and a factory-based form is what to extract.
 
 `Qos` values are written out because the numbering is the one place where a plausible-looking mistake is silent: `kCritical = 0` follows `CORE §14`, and the old ascending order produces a system running with its priorities exactly inverted (`REG §5`). Naming the enumerators rather than using bare integers makes the inversion a compile-time visible thing.
 
@@ -229,28 +241,34 @@ The decoded form is a plain container; the codec is free functions. No bitfields
 ```cpp
 /// Decoded canonical base descriptor. Host representation only - never overlaid on wire bytes.
 struct PduDescriptor {
-    static constexpr size_t kEncodedSize{5U};
+    static constexpr size_t kEncodedSize{6U};
 
     Qos           qos{Qos::kNormal};
-    Namespace     name_space{Namespace::kNs0};
     bool          has_header_extensions{false};
     TransportType transport{TransportType::kUnreliableDatagram};
-    NodeId        node_id{};
-    Direction     direction{Direction::kOriginToNode};
     WireNumber    wire{};
-    EndpointId    endpoint_id{};
+    ParticipantId src{};
+    ParticipantId dest{};
+    Endpoint      endpoint{};
 
     bool isValid() const;
 };
 
-enum class EncodeResult : uint8_t { kOk = 0U, kOutputTooSmall, kFieldOutOfRange };
+enum class EncodeResult : uint8_t {
+    kOk = 0U,
+    kOutputTooSmall,
+    kInvalidQos,
+    kInvalidSourceParticipant,
+    kInvalidEndpoint,
+    kUnknownTransport,
+};
 
 enum class DecodeResult : uint8_t {
     kOk = 0U,
     kInputTooShort,
-    kReservedValue,       ///< a reserved encoding was used
-    kWireOutOfRange,
-    kNodeIdOutOfRange,
+    kReservedBitsSet,
+    kInvalidSourceParticipant,
+    kInvalidEndpoint,
     kUnknownTransport,
 };
 
@@ -261,6 +279,18 @@ EncodeResult encode(const PduDescriptor& in, util::Span<uint8_t> out);
 /// unmodified: PDU-2 rejects rather than masks.
 DecodeResult decode(util::Span<const uint8_t> in, PduDescriptor& out);
 ```
+
+The current preferred provisional serialized layout is byte-oriented:
+
+```text
+Byte 0      QoS[2] | Reserved[2] | H[1] | Transport[3]
+Byte 1      WireNumber
+Byte 2      SrcParticipantId
+Byte 3      DestParticipantId
+Bytes 4-5   Endpoint = Namespace[2] + Id[14], little-endian
+```
+
+`H` is `has_header_extensions`. Reserved control bits encode as zero; decode rejects and counts any nonzero reserved value. Encode and `isValid()` reject host-side QoS values outside the four defined enumerators, a broadcast source, Endpoint Id zero, and unknown Transport values. Decode rejects a broadcast source, Endpoint Id zero, reserved control bits, and unknown Transport encodings rather than masking them. All four two-bit QoS encodings are defined. Multi-byte values are serialized explicitly; compiler bitfields and native object layout are never the wire format.
 
 An earlier draft returned plain `bool` here. That sat badly beside `CONFORM §4`, which requires tests to assert *why* something was rejected rather than only that it was — a `bool` makes that assertion impossible to write, so the conformance requirement and the API were in conflict from the start.
 
@@ -281,7 +311,7 @@ struct Pdu {
 /// A PDU that arrived, with the local context acceptance needs.
 struct ReceivedPdu {
     Pdu       pdu{};
-    LinkIndex ingress{};       ///< kLocalDomain for domain-internal delivery
+    LinkIndex ingress{};       ///< local-only ingress identity
     Timestamp arrival{};       ///< captured by the LLL, not by the Endpoint (CORE §9.4)
 };
 ```
@@ -328,6 +358,7 @@ enum class SendResult : uint8_t {
 enum class Reason : uint16_t { /* ... */ };
 
 Reason toReason(SendResult result);
+Reason toReason(EncodeResult result);
 Reason toReason(DecodeResult result);
 ```
 
@@ -396,15 +427,15 @@ template <MetadataLevel Level> struct DeliveredMetadata;   // specialized per le
 template <> struct DeliveredMetadata<MetadataLevel::kPayloadOnly> {};  // empty; see below
 
 template <> struct DeliveredMetadata<MetadataLevel::kWithSource> {
-    WireNumber wire{};
-    Direction  direction{Direction::kOriginToNode};
-    NodeId     node_id{};
-    LinkIndex  ingress{};
+    WireNumber    wire{};
+    ParticipantId src{};
+    LinkIndex     ingress{};
 };
-// kFull adds Qos, TransportType, extension presence, and arrival.
+// kFull adds destination, Endpoint, Qos, TransportType, extension presence,
+// and arrival.
 ```
 
-A Service written against `kPayloadOnly` that tries to read `.wire` fails to build, which is the right outcome and is not achievable with a runtime "unavailable" flag. Snapshot Endpoints force at least arrival time regardless of declared level, per `CORE §9.3`.
+A Service written against `kPayloadOnly` that tries to read `.src` fails to build, which is the right outcome and is not achievable with a runtime "unavailable" flag. Source metadata is always the canonical `descriptor.src` reconstructed by ingress; it is not a Link-local code. Full metadata exposes canonical destination as well, including the broadcast sentinel. Snapshot Endpoints force at least arrival time regardless of declared level, per `CORE §9.3`.
 
 One implementation detail that an earlier draft got wrong by calling the empty specialization "costs nothing": an empty class used as a **data member** still occupies at least one byte, and with alignment padding a `Message` can lose more than that. `[[no_unique_address]]` would fix it but is C++20, and this codebase is C++17. If the byte matters — on a Queue of 64 slots it is 64 bytes plus padding — the fix is to specialize the slot type so that `kPayloadOnly` has no metadata member at all, or to inherit from `DeliveredMetadata<Level>` and let empty base optimization apply. Whether it matters is a measurement against the frozen budget (`CONFORM §3.2`), not an assumption.
 
@@ -477,6 +508,22 @@ public:
     SendResult submit(util::Span<const uint8_t> payload);
 };
 
+/// Bounded opaque context created from one validated ingress PDU.
+/// It retains only the canonical Wire, remote Participant, and registered
+/// Endpoint/Transport constraints needed to form a reply.
+class ReplyContext {
+public:
+    bool isValid() const;
+};
+
+/// Explicit-acceptance reply path. Service correlation remains in the payload
+/// or Transport; it is not inferred from canonical descriptor fields.
+class ReplyEndpoint {
+public:
+    SendResult reply(const ReplyContext& context,
+                     util::Span<const uint8_t> payload);
+};
+
 /// Publication path for periodic state. The LLL samples on its own cadence.
 class SnapshotTransmitEndpoint {
 public:
@@ -500,7 +547,9 @@ public:
 int32_t generationDelta(Generation newer, Generation older);
 ```
 
-Both transmit forms are constructed with a `PduSink&` and a static binding, per `CORE §10.3`: a Service names its outputs, the deployment names the Wires.
+The ordinary transmit and Snapshot publication forms are constructed with a `PduSink&` and static binding, per `CORE §10.3`: a Service names its outputs, the deployment names the Wires. A `ReplyEndpoint` instead consumes the bounded context created by validated ingress.
+
+The useful binding contexts remain static, transmit-only, receive-only, request-scoped, and learned-from-ingress. Request-scoped acceptance constructs a bounded `ReplyContext` so a reply uses the local `ParticipantId` as source, the received canonical source as destination, and the received Wire, subject to the registered Endpoint and Transport constraints. Learned selections are likewise bounded and validated against profile/deployment rules. Neither mechanism gives Link-local codes canonical meaning, and merely reading source metadata does not create a transmit binding.
 
 ---
 
@@ -535,12 +584,12 @@ The class shape is worth one note because it reads oddly: `QueueEndpoint` public
 
 ```cpp
 struct EndpointBinding {
-    Namespace    name_space{Namespace::kNs0};
-    EndpointId   endpoint_id{};
+    ParticipantId participant{};
+    Endpoint      endpoint{};
     EndpointSink* sink{nullptr};
 };
 
-/// Maps (Namespace, EndpointId) to a local Endpoint within one Endpoint Domain.
+/// Selects local Participant and Endpoint bindings from canonical destination.
 class EndpointDispatcher {
 public:
     /// @param[in] table  Caller-owned, stable for the dispatcher's lifetime.
@@ -553,9 +602,11 @@ public:
 };
 ```
 
-The table is caller-owned and built at init, which keeps the dispatcher free of storage policy and lets a generated projection supply a `constexpr` table. A tiny target that collapses this to a `switch` (`CORE §25`) replaces the class rather than configuring it — the collapse is a different implementation of the same contract, not a mode.
+For a directed PDU, the dispatcher offers only the binding matching `(dest, endpoint)`. For canonical broadcast it fans out to every locally hosted Participant binding for that Endpoint. Broadcast fanout is bounded by the static table and still performs no Service work; each sink independently accepts, fills, or rejects. Configuration rejects duplicate `(participant, endpoint)` bindings, and `0xFF` is never a configured local Participant.
 
-Ordered lookup with binary search is the likely default; a small linear scan wins below roughly a dozen Endpoints. Neither is a contract.
+The table is caller-owned and built at init, which keeps the dispatcher free of storage policy and lets generated configuration supply a `constexpr` table. A one-Participant target naturally has that same Participant value in every row. A tiny target that collapses this to a `switch` (`CORE §25`) replaces the class rather than configuring it — the collapse is a different implementation of the same contract, not a mode.
+
+Ordered lookup with binary search is the likely directed default; broadcast requires a bounded range scan or equivalent generated fanout. A small linear scan wins below roughly a dozen Endpoints. Neither is a contract.
 
 ---
 
@@ -566,13 +617,13 @@ Ordered lookup with binary search is the likely default; a small linear scan win
 ```cpp
 struct RouteEntry {
     WireNumber wire{};
-    LinkIndex  ingress{};          ///< matched ingress, or a wildcard
-    uint32_t   egress_mask{0U};    ///< bit per Link Interface
+    LinkIndex  ingress{};          ///< matched ingress, or wildcard in matrix form
+    uint32_t   egress_mask{0U};    ///< Wire-member Links, excluding ingress on use
     bool       deliver_locally{false};
 
-    /// Splice is an explicit action, not a sentinel. WireNumber 0 is a legitimate
-    /// Wire - CORE reserves a high range and one top value, not zero - so
-    /// "splice_to == 0 means none" would silently disable a valid splice.
+    /// Splice is an explicit action, not a sentinel. No provisional WireNumber
+    /// allocation is overloaded to mean "none", so a later numeric-allocation
+    /// change cannot silently enable or disable a splice.
     bool       splices{false};
     WireNumber splice_to{};        ///< meaningful only when splices; applied before egress (SPLICE-1)
 };
@@ -585,6 +636,10 @@ public:
     bool lookup(WireNumber wire, LinkIndex ingress, RouteDecision& out) const;
 };
 ```
+
+The Router makes propagation decisions from canonical Wire identity and ingress topology, never from destination Participant. A dense `Wire -> LinkBitmask` with the ingress bit removed is the minimal form; `(Wire, ingress) -> EgressLinkBitmask` is available where the local topology needs an explicit matrix. `kLocalBus` yields no transparent egress and cannot be a splice source.
+
+The Router is deliberately unaware of CAN VCNs, compact/general participant codes, and participant projection. Those are Link-representation details: ingress has already reconstructed canonical values, and egress receives only canonical values.
 
 Phase 1 has no runtime reconfiguration, therefore no table versioning and no pointer swap. The seqlock a Snapshot Endpoint uses (§9.2) is a different mechanism for a different problem and does not appear here; an immutable table needs no reader protocol at all. This is not a simplification to be apologized for: `IMPL §1` says advanced table synchronization arrives after measurement, and an immutable table is the correct starting point precisely because it makes the reader path deterministic. The interface is shaped so a mutable implementation can appear behind it without touching callers.
 
@@ -603,7 +658,7 @@ private:
 };
 ```
 
-This is where flood-and-filter, splice application, and local delivery live, and it is the only place that knows about both Endpoints and Links. Keeping it small is the point; if it starts accumulating policy, that policy probably belongs in configuration.
+This is where Wire-mask propagation, splice application, and local delivery live, and it is the only place that knows about both Endpoints and Links. For each ingress PDU it preserves canonical source, destination, Endpoint, control metadata, extensions, and payload; applies any explicit Wire splice; offers local delivery to the Dispatcher; and submits to each selected egress Link. The Dispatcher, not the Router, performs directed Participant selection and broadcast fanout. Keeping the engine small is the point; if it starts accumulating policy, that policy probably belongs in configuration.
 
 ---
 
@@ -613,7 +668,7 @@ This is where flood-and-filter, splice application, and local delivery live, and
 
 The previous draft had a single `LinkDriver` with `sendUnit(util::Span<const uint8_t>)` and `receiveUnit(util::Span<uint8_t>)`, on the theory that a "transfer unit" is carrier-neutral. That was wrong, and it is the most expensive error in the draft because it would have been discovered only after a CAN driver existed.
 
-A CAN transfer unit is an identifier, a length, and up to eight bytes. In WireSpaces the identifier is not incidental framing — `LINK §2` packs QoS, WireAlias, NodeId, and Direction into those 11 bits, so it carries descriptor content the LLL produced and the peer's LLL must recover. A byte-span signature cannot express it. The only way to force it through would be to serialize identifier, length, and payload into a private byte format purely to cross a C++ interface, and then deserialize on the other side — inventing a wire format to talk to ourselves, at a cost in both code and confusion that buys nothing.
+A CAN transfer unit is an identifier, a length, and up to eight bytes. In WireSpaces the identifier is not incidental framing: a CAN profile uses it for profile-local QoS and addressing codes from which the LLL reconstructs canonical source and destination. A byte-span signature cannot express it. The only way to force it through would be to serialize identifier, length, and payload into a private byte format purely to cross a C++ interface, and then deserialize on the other side — inventing a wire format to talk to ourselves, at a cost in both code and confusion that buys nothing.
 
 The `TransferUnitKind` field already in `LinkCapabilities` was the tell: a seam that needs a runtime enumeration describing what shape its own arguments really are is a seam with the wrong signature.
 
@@ -621,7 +676,7 @@ So the driver contract is typed per carrier shape, and there are only ever a few
 
 ```cpp
 struct CanFrame {
-    uint16_t id{0U};        ///< 11-bit; LINK §2 defines what the bits mean
+    uint16_t id{0U};        ///< 11-bit carrier ID; the selected CAN profile defines it
     uint8_t  length{0U};    ///< 0..8
     uint8_t  data[8]{};
 };
@@ -663,6 +718,8 @@ A datagram driver gets added when a datagram Link is actually implemented, not i
 
 Interrupt- and DMA-driven drivers implement the same interfaces with the queueing behind them, which is a per-target concern and the reason these seams are virtual.
 
+The CAN driver does not label identifier bits as canonical fields. Names such as `Can11Direction`, `VirtualCircuitNumber`, `CompactParticipantCode`, and `GeneralParticipantCode` exist only in `wirespaces::can` profile implementation/configuration. In particular, a profile-local direction bit selects how local codes reconstruct canonical source and destination; it has no canonical request/reply or authority meaning.
+
 `start()` and `stop()` are **driver control, not WireSpaces lifecycle**. They enable and disable a peripheral; they say nothing about restart units, runtime generations, or bounded quiesce, all of which `CORE §23` specifies and §13 defers. The distinction is worth keeping in the naming so that a later lifecycle API is not mistaken for already existing:
 
 ```cpp
@@ -691,7 +748,9 @@ public:
 
 The cadence sampling goes through `PduSource&` (§4.6), not through a `SnapshotTransmitEndpoint&`. The previous draft named the Endpoint type here, which would have made `link` depend on `endpoint` and made every LLL test drag in the Endpoint layer. The concrete driver is held by the concrete LLL — a CAN LLL holds a `CanDriver&` — so the driver type appears in the profile implementation and nowhere above it.
 
-The LLL is also where arrival timestamping and profile decode happen, which is what allows an offloaded or RTL implementation to satisfy the same contract (`CORE §1.7`).
+The LLL is also where arrival timestamping and profile decode happen, which is what allows an offloaded or RTL implementation to satisfy the same contract (`CORE §1.7`). Before calling `IngressSink`, every LLL reconstructs an unambiguous canonical Wire, source Participant, and destination Participant. A CAN11 binding, for example, supplies its one Wire while a VCN or participant-code profile reconstructs the two canonical Participants.
+
+The reverse boundary is equally strict: `submit()` receives canonical values and either represents them according to that Link instance's profile and binding or returns `SendResult::kUnrepresentable`. It never truncates a Participant, substitutes an unmapped code, or silently sends a PDU on a different Wire. This is where Wire elision and projection end; Router and Endpoint code never see them.
 
 ## 8.3 Capabilities, at two levels
 
@@ -718,6 +777,7 @@ struct LinkCapabilities {
     QosProfile  qos_profile{QosProfile::kMinimal};
     FlowControl flow_control{FlowControl::kNone};
     bool        supports_fragmentation{false};
+    bool        supports_broadcast{false};
     // ... grows with each profile; see CORE §17 for the intended field set
 };
 ```
@@ -728,7 +788,7 @@ The dividing line is whether the field survives a change of controller. A CAN Li
 
 Unsupported features are stated rather than omitted in both, since an absent field reads as an unmade decision while an explicit "none" is information (`ERR-5` applied to configuration).
 
-`LinkCapabilities`' first real job is static validation: refusing to bind a Wire whose PDUs cannot be represented on the selected Link, before anything is emitted (`LINK §2.3`).
+`LinkCapabilities`' first real job is static validation: refusing to bind traffic whose maximum PDU, QoS, broadcast use, or canonical address set cannot be represented on the selected Link, before anything is emitted (`LINK §2.13`). Profile-specific limits such as VCN entry count, direct participant-code ranges, projection capacity, Guest CAN-ID allocation, and hardware filter count remain profile/driver capability records below the canonical interface rather than fields the Router interprets.
 
 ---
 
@@ -809,20 +869,45 @@ Three consequences worth stating, because each is a place a correct-looking impl
 Configuration is data, produced by hand for the prototype and by the Organizer later (`DEPLOY §2`). The library consumes it; it does not parse files.
 
 ```cpp
-struct NodeConfig {
+struct ParticipantConfig {
+    ParticipantId participant{};
+};
+
+struct LibraryConfig {
+    util::Span<const ParticipantConfig> participants;
     util::Span<const RouteEntry>      routes;
     util::Span<const EndpointBinding> endpoints;
     util::Span<const LinkConfig>      links;
     util::Span<const TransmitBinding> transmit_bindings;
 };
 
-/// @brief Check everything a Node can verify locally before it runs.
-/// @note  Structural validity only (CFG-3, CORE §19.1). Cross-node checks belong
-///        to tooling, which sees the whole deployment.
-ValidationResult validate(const NodeConfig& config);
+/// @brief Check everything this local deployment slice can verify before it runs.
+/// @note  Structural validity only (CFG-3, CORE §19.1). Cross-device checks
+///        belong to tooling, which sees the whole deployment.
+ValidationResult validate(const LibraryConfig& config);
 ```
 
-`validate` returning a result rather than asserting matters for the host and tooling cases, where reporting every problem beats stopping at the first. The check worth building first is unambiguous resolution (`CORE §19.1`) — one ingress plus one canonical identity resolving to two actions is the failure that otherwise depends on table order and is invisible until it is not.
+Each `LinkConfig` binds a Link Interface to canonical Wire membership and a concrete profile configuration. The first CAN11 profile concepts are:
+
+```text
+common CAN11 binding:
+    exactly one WireNumber, possibly kLocalBus
+    addressing model = Guest VCN | Native VCN | Native Participant-Compressed
+
+VCN model:
+    bounded VCN -> {ParticipantA, ParticipantB}
+
+Participant-Compressed model:
+    direct canonical codes, or optional bounded local-code <-> ParticipantId projection
+
+Guest VCN additions:
+    allocated aligned CAN-ID base/range
+    fixed canonical QoS interpretation
+```
+
+These are configuration concepts, not a premature map ABI. The current sketch intentionally does not choose VCN/projection table storage, a map fingerprint protocol, or an atomic activation mechanism. Direct participant-compressed mode needs no projection table. Dynamic setup may build immutable/read-mostly profile state before activation without changing the canonical Router contract.
+
+`validate` returning a result rather than asserting matters for the host and tooling cases, where reporting every problem beats stopping at the first. Initial checks include unique ordinary Participant IDs; valid source/destination and packed Endpoints; no duplicate `(participant, endpoint)` bindings; unambiguous routes; loop-free ordinary Wire topology; at most one local `kLocalBus` Link binding; no `kLocalBus` forwarding/splice action; and egress representability under every selected profile. CAN11 validation additionally checks one Wire per profile instance, VCN entry semantics, Guest allocation shape, and direct/projected participant representability.
 
 Set-valued and coupled acceptance (`CORE §19.1`) is a phase-2 concern, but the representation should not actively prevent it: a binding that stores single values everywhere is harder to widen than one storing ranges from the start.
 
@@ -936,6 +1021,8 @@ Per `CONFORM §1.1`, choices made to let code exist are listed rather than left 
 
 | Choice here | Open item |
 |---|---|
+| 8-bit `ParticipantId` and provisional 8-bit `WireNumber` | pre-freeze topology-corpus evidence and allocation margin |
+| current preferred 6-byte descriptor/control/Endpoint layout | interoperability remains unfrozen; validate against topology and profile evidence |
 | bytes in Endpoints, decode on read | `REG §6.12` — `T` and the decoded representation |
 | `Timestamp` narrower than the platform clock | `REG §6.7` — resolution, epoch, wrap comparison |
 | `AutosarCrc8` and `Crc16CcittFalse` as candidates | `REG §6.8` — CRC parameters unchosen |
@@ -950,7 +1037,9 @@ Per `CONFORM §1.1`, choices made to let code exist are listed rather than left 
 
 None of these is settled by appearing in working code, and a test pinning one is pinning current behavior for regression purposes rather than ratifying it.
 
-Two things that were provisional in an earlier draft are **not** on this list, because they are now decisions rather than placeholders: Snapshot read coherence is a seqlock (§9.2), and the identity types are plain range-checked wrappers with a stated stopping condition rather than a pending utility generalization (§4.1).
+Before freezing identity widths or the descriptor layout, run a representative topology corpus covering multicore/internal Endpoint Domains, redundant controllers, gateways, several CAN buses, overlapping broad/narrow Wires, device-private and debug Wires, local/sentinel reservations, and plausible product growth. Record peak Participant and Wire consumption, reservation cost, and remaining margin. The purpose is useful headroom, not merely proving one sketch fits.
+
+Snapshot read coherence is no longer provisional: it is a seqlock (§9.2). The use of distinct plain wrapper types, rather than a generalized bounded-integer utility, also has the stated stopping condition in §4.1; their numeric widths remain provisional as listed above.
 
 ---
 
@@ -960,7 +1049,7 @@ Six things need a decision before or during the first increment, and none is min
 
 1. **Where the core library lives.** The project's C++ rules point reusable platform-independent libraries at `Design/Firmware`, and this qualifies. Against that, the core is defined by this document set and validated by its conformance vectors, so keeping it in `WireSpaces/code/core/` keeps spec, code, and vectors in one place. The recommendation is to keep it here until a second real target consumes it, then promote — which is the same "wait for the second demand" rule the rest of the project uses. Note that §2.3's dependency on `Design/Firmware` weakens the case for separation somewhat: a core that already includes six `Firmware` headers is not meaningfully standalone.
 
-2. **Whether `Namespace` and `EndpointId` should be one composite type.** They are always used together for dispatch, and a combined 18-bit `EndpointKey` would make the dispatch table and its comparison obvious. Against it: they have different allocation policies and appear separately in the descriptor.
+2. **How strictly `Endpoint` construction should be controlled.** The canonical value is already one packed Namespace[2] + Id[14] type. Aggregate construction is compact, while a checked factory could make Id zero unrepresentable at the cost of a less convenient static-configuration surface.
 
 3. **Whether the descriptor codec should be `constexpr`.** It would allow compile-time vector construction and generated tables in ROM, at the cost of constraining how the implementation is written. Cheap now, awkward to retrofit.
 
@@ -968,7 +1057,7 @@ Six things need a decision before or during the first increment, and none is min
 
    **First:** `core` — descriptor codec with `DecodeResult` — plus one `QueueEndpoint`, one `SnapshotEndpoint`, an `EndpointDispatcher`, and **one `TransmitEndpoint` feeding a recording `PduSink`**. No Router, no Link, entirely host-testable. Adding the transmit side costs almost nothing and exercises both faces of the Endpoint model, which is where §5 puts the most weight; a receive-only slice would leave `SendResult`, ownership-on-rejection, and the `PduSink` seam entirely untested.
 
-   **Second: a fake Classical CAN driver and the simplest CAN LLL path**, before any byte-stream work. This is deliberately the adversarial choice. CAN immediately forces the driver seam to represent an arbitration identifier and DLC correctly, which is the exact thing the old single-`Span` seam could not do and the thing §8.1 was rewritten for — so it tests whether the new seams are genuinely carrier-neutral instead of only claimed to be. Even without aggregation or fragmentation, a single-frame CAN path exercises identifier packing (`LINK §2`), the descriptor round trip, and the `IngressSink` boundary. A byte-stream Link would exercise none of those and would let a wrong abstraction survive longer.
+   **Second: a fake Classical CAN driver and the simplest CAN LLL path**, before any byte-stream work. This is deliberately the adversarial choice. CAN immediately forces the driver seam to represent an arbitration identifier and DLC correctly, which is the exact thing the old single-`Span` seam could not do and the thing §8.1 was rewritten for — so it tests whether the new seams are genuinely carrier-neutral instead of only claimed to be. Even without aggregation or fragmentation, a direct Native Participant-Compressed path exercises profile-local identifier packing, canonical Wire/source/destination reconstruction, egress representability rejection, and the `IngressSink` boundary. A byte-stream Link would exercise none of those and would let a wrong abstraction survive longer.
 
 5. **How the `Firmware` utilities are depended upon** (§12.1). These are separate repositories, so the recommendation is a vendored extraction with the upstream commit recorded, rather than an include path into an unpinned sibling checkout. Question 1 above may dissolve this one entirely.
 

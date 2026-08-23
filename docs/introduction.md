@@ -1,7 +1,9 @@
 # WireSpaces — Introduction
 
-**Status:** Private first draft; provisional throughout; not polished  
-**Purpose:** Orientation — what WireSpaces is, why it exists, and where it is going  
+**Status:** Private first draft; provisional throughout; not polished
+
+**Purpose:** Orientation — what WireSpaces is, why it exists, and where it is going
+
 **Detail lives elsewhere:** see the document map in §10
 
 ---
@@ -23,7 +25,9 @@ WireSpaces (WS) is a lightweight embedded communication fabric intended to span:
 
 The central idea is deliberately **bus-oriented**, not socket-oriented and not arbitrary-graph-routing-oriented:
 
-> A **Wire** is a logical bus with exactly one **Origin** and zero or more **Nodes**.
+> A **Wire** is a loop-free **Logical Bus**: a connected propagation domain realized by one or more configured Links. Multiple Participants may independently source traffic onto it.
+
+Each Endpoint Domain has exactly one deployment-scoped `ParticipantId`, and uses that identity on every Wire it joins. A canonical addressed PDU names its `SrcParticipantId` and `DestParticipantId`. The PDU propagates over the configured Link topology of its Wire; destination identity controls Participant acceptance rather than ordinary next-hop selection.
 
 WireSpaces should be useful in the smallest possible configuration:
 
@@ -42,10 +46,10 @@ Main SoC / FPGA
  |       |        |
 CAN     RS-485   shared memory
  |       |        |
-ECUs    Nodes    CPU domains / RTL
+ECUs    devices  CPU domains / RTL
 ```
 
-The same Endpoint and Service model should survive these changes in realization.
+The same Endpoint and Service model should survive these changes in realization. A Wire may coincide with one Link, span several heterogeneous Links, exist entirely inside one device, or overlap other Wires on some of the same Links.
 
 ---
 
@@ -58,7 +62,7 @@ Two further observations shape the design:
 1. Traditional stacks often insert a central execution layer between producers and consumers even when the topology is statically known.
 2. Embedded systems are usually **centrally engineered**. Their communication relationships are not arbitrary Internet routes discovered at runtime; they are largely fixed relationships between known components.
 
-WireSpaces therefore treats the system as a set of **logical Wires** whose placement onto execution contexts and Physical Links is configurable. The same Service interaction can be realized as a direct callback, an inter-core shared-memory Link, a CAN bus, or an FPGA datapath without redesigning the Service-facing message model.
+WireSpaces therefore treats the system as a set of **logical Wires** whose placement onto execution contexts and Physical Links is configurable. Ordinary forwarding uses static/read-mostly Wire membership, not destination routes. The same Service interaction can be realized as a direct local submission into bounded Endpoint storage, an inter-core shared-memory Link, a CAN bus, or an FPGA datapath without redesigning the Service-facing message model.
 
 ---
 
@@ -74,6 +78,8 @@ WireSpaces intentionally favors:
 - **software/RTL symmetry** where it is natural;
 - **zero-configuration bring-up** until topology becomes genuinely ambiguous;
 - **implementation-driven standardization** rather than speculative completeness.
+
+Wire scope should remain purposeful. Prefer the smallest Wire that usefully represents the required communication or broadcast scope; a broad Wire is valid, but its traffic may consume capacity on every member Link.
 
 A useful summary is:
 
@@ -97,7 +103,7 @@ The base architecture is not trying to provide:
 - mandatory distributed discovery on every target;
 - a general end-to-end congestion-control algorithm;
 - a universal security layer;
-- automatic Origin election;
+- automatic controller or leader election;
 - mandatory full static system modeling before first communication;
 - a general byte-stream abstraction;
 - a requirement to use dynamic memory, an RTOS, or lock-free algorithms;
@@ -141,10 +147,11 @@ WireSpaces should be useful long before a user is ready to model, constrain, and
 ```text
 Level 0
     Connect devices. Send messages.
-    Minimal or no authored topology.
+    Use a valid ParticipantId and kLocalBus on one Link.
+    Minimal or no authored named topology.
 
 Level 1
-    Discover devices. Assign identities and Wires.
+    Discover devices. Assign Participant identities and named Wires.
     Use host auto-Wiring.
 
 Level 2
@@ -172,47 +179,53 @@ Three consequences are worth stating directly:
 - dynamic host-side configuration can still produce a fixed data plane (`DEPLOY §1.4`);
 - advanced analysis is **additive** — WireContracts, authority restrictions, schedulability and redundancy analysis build on the Wire model rather than defining the minimum viable user experience.
 
+Level 0 is still canonical: `kLocalBus` supplies a reserved local-only WireNumber, while every ordinary PDU still has a valid source `ParticipantId`. As a deployment matures, it can replace a broad or local bring-up Wire with named narrow and overlapping Wires when measured bandwidth, failure scope, or locality gives that extra configuration a purpose.
+
 ---
 
 # 7. The Model at a Glance
 
 ```text
-                         Endpoint Domain
-                              |
-                           Dispatcher
-                              |
-                         Endpoint/Service
-                              |
-                              v
-                            Router
-                     shared read-mostly state
-                    /          |          \
-                   /           |           \
-              Link IF      Link IF      Link IF
-                 |             |            |
-                LLL           LLL          LLL
-                 |             |            |
-               CAN        shared memory   Ethernet
+                 Endpoint Domain
+          one deployment-scoped ParticipantId
+                        |
+             Endpoint/Service Dispatcher
+                        |
+                      Router
+          static/read-mostly Wire topology
+              /          |          \
+         Link IF      Link IF      Link IF
+            |             |            |
+           LLL           LLL          LLL
+            |             |            |
+          CAN        shared memory   Ethernet
+              \          |          /
+               configured Logical Wires
 ```
 
-The PDU carries:
+The preferred provisional ordinary canonical descriptor is **48 bits / 6 bytes**:
 
 ```text
-Namespace
-TransportType
-QoS
-Header-extension flag
+Control
+    QoS
+    Reserved
+    Header-extension flag
+    TransportType
 WireNumber
-Direction
-NodeId
-EndpointId
+SrcParticipantId
+DestParticipantId
+Endpoint
 ```
 
-A Wire provides the logical bus: one Origin, zero or more Nodes.
+A Wire provides the loop-free Logical Bus. Every PDU on it has canonical source and destination identity. Multiple Participants may initiate traffic; a directed PDU still propagates over the Wire but is accepted only by its destination, while a Wire-wide broadcast may be accepted by all Participants implementing the Endpoint.
 
-A constrained Link may encode a Wire using a local alias. `kLocalBus` makes one-Link prototypes work before a canonical WireNumber exists. Device-private Wires and `kLocalDomain` reuse the same model for multicore/internal communication, and a splice is the one explicit place where an internal Wire becomes externally visible.
+A constrained Link does not need to transmit every canonical field literally. Its Link Binding may elide a WireNumber or project canonical Participant IDs into Link-local codes, but ingress must reconstruct unambiguous canonical Wire, source, and destination values before generic forwarding or dispatch.
 
-The Router forwards complete PDUs through bounded local tables. Link queues expose congestion rather than hiding it. Optional hop-by-hop credits can backpressure fast aggregation Links. Static configuration/tooling should prevent normal steady-state saturation. Richer systems add diagnostics and host tooling without forcing that complexity onto tiny Nodes.
+`kLocalBus` is the reserved canonical local-only WireNumber for one-Link bring-up. It still requires a valid source `ParticipantId`; it may be dispatched locally but is not transparently forwarded or spliced as itself.
+
+Wires may overlap. A broad command Wire and narrower subsystem Wires can share some Links while preserving distinct propagation scopes. Prefer the smallest useful scope because traffic on a broad Wire consumes resources across all of its member Links.
+
+The Router propagates complete canonical PDUs through bounded local tables. Link queues expose congestion rather than hiding it. Optional hop-by-hop credits can backpressure fast aggregation Links. Configuration and tooling should prevent normal steady-state saturation without making static configuration a prerequisite for first communication. Richer systems add diagnostics and host tooling without forcing that complexity onto tiny Participants.
 
 > **WireSpaces is intended to make embedded communication look like a small set of logical buses carried by interchangeable Links, with host-side intelligence building simple local forwarding state that can be executed efficiently in MCU software, multicore systems, Linux gateways, and RTL.**
 
@@ -234,6 +247,7 @@ MCU:
 
 ```text
 one Endpoint Domain
+one valid ParticipantId
 one Link
 Identity Service
 Health Service
@@ -243,21 +257,47 @@ Firmware Update Service
 
 Behavior:
 
-- anonymous `kLocalBus`;
-- no WireNumber configuration;
+- canonical `kLocalBus`, bound to the one local Link;
+- no named WireNumber configuration;
 - direct/linear dispatch;
 - copy-based send;
 - PC tool immediately shows identity, health, logs, and update capability.
 
-This is not a demo subset that violates the architecture. It is the architecture at its smallest useful scale.
+The Link still reconstructs canonical Wire, source, and destination values. `kLocalBus` removes named-Wire setup, not Participant identity, and it cannot be transparently extended onto another Link.
 
 ## 8.2 Multicore MCU with telemetry
 
-See `CORE §13` (multicore Links), `CORE §7` and `DEPLOY §3.2` (Internal Debug Wire and splice), and `INTRO §6` Level 1–2 for discovery and commissioning.
+```text
+Control CPU -------- shared-memory Link -------- I/O CPU
+      \                        |                    /
+       \---------------- W_Telemetry -------------/
+                            |
+                         FPGA RTL
+```
+
+Each CPU Endpoint Domain and the RTL Endpoint Domain has one deployment-scoped `ParticipantId`. All are Participants on `W_Telemetry`, and any of them may publish status or direct a PDU to another Participant. This is a multi-initiator Logical Bus, not a controller with permanent subordinate roles. A directed PDU propagates over the configured Wire topology and only the destination accepts it; a broadcast can be accepted by every Participant implementing the Endpoint.
+
+See `CORE §13` for multicore Links and `INTRO §6` Level 1–2 for discovery and commissioning.
 
 ## 8.3 CAN-to-Ethernet gateway
 
-See `CORE §12` (gateway forwarding) and `DEPLOY §1.3` (recursive discovery through gateways).
+```text
+                     Main controller
+                      /            \
+                 Left Link      Right Link
+                    |                |
+                 Left ECUs        Right ECUs
+
+W_Left     = Left Link
+W_Right    = Right Link
+W_Command  = Left Link + Right Link
+```
+
+`W_Left` and `W_Right` keep status local to each branch. The overlapping `W_Command` Wire propagates commands across both branches when that broad scope is useful. The gateway forwards by Wire topology while preserving canonical source, destination, Endpoint, control metadata, and payload; application composition creates a new PDU instead.
+
+This overlap is part of the general Wire model, but each CAN11 Link Binding/profile instance carries exactly one WS Wire, with its `WireNumber` supplied by the binding. A physical CAN bus may host multiple separately classifiable suitable bindings, including disjoint Guest allocations. Use CAN29 or another richer profile when the required Wires cannot be accommodated by separate suitable bindings, when CAN11 mapping constraints are awkward, or when richer identity or payload efficiency is needed.
+
+See `CORE §12` for gateway forwarding and `DEPLOY §1.3` for recursive discovery through gateways.
 
 ---
 
@@ -268,31 +308,40 @@ The architecture should now be tested by building, not expanded indefinitely on 
 A strong first implementation sequence:
 
 ```text
- 1. Canonical PDU type + 40-bit descriptor helpers
+ 1. Canonical PDU type + preferred provisional 48-bit / 6-byte descriptor codec
  2. Queue and Snapshot Endpoints + Domain Dispatcher
- 3. read-mostly Router + static forwarding table
- 4. copy-based transmit Endpoints, Queue and Snapshot
- 5. one simple host/serial or UDP Link
- 6. one Classical CAN/vcan Link with PDUA + aggregate CRC
- 7. LocalBus configured/unconfigured behavior
- 8. gateway forwarding between unlike Links
- 9. device-private Wires + splice to an external Wire
-10. multicore/shared-memory Link simulation
-11. Link counters/telemetry + queue-pressure reporting
-12. host discovery/config tooling
+ 3. read-mostly Router + static Wire forwarding tables
+ 4. simulator evidence: canonical dispatch and directed/broadcast acceptance
+ 5. simulator evidence: loop-free propagation and broad/narrow overlapping Wires
+ 6. simulator evidence: source/destination preservation, forwarding vs composition,
+    and Wire->LinkMask versus (Wire, ingress)->egress-mask representations
+ 7. copy-based transmit Endpoints, Queue and Snapshot
+ 8. one simple host/serial or UDP Link
+ 9. canonical kLocalBus behavior, including valid Participant identity
+10. gateway forwarding between unlike Links
+11. device-private Wires + splice to an external Wire
+12. multicore/shared-memory Link simulation
+13. CAN11 Guest VCN profile for an explicitly allocated identifier block
+14. CAN11 Native VCN profile for configured participant relationships
+15. CAN11 Native Participant-Compressed profile, direct then projected
+16. CAN29/richer-profile path when separate suitable CAN11 bindings do not fit
+17. Link counters/telemetry + queue-pressure reporting
+18. host discovery/config tooling
 ```
 
 Early concurrency should use mutexes, critical sections, bounded queues, and copies. More advanced routing tables, seqlocks, lock-free MPSC queues, per-Link pools, and zero-copy should be added after measurements demonstrate a need.
 
 Note that step 2 now lands on the least-settled part of the architecture rather than a well-worn one. The Endpoint API is a portability contract (`SVC-9`), so its shape is worth deciding deliberately before Services are written against it — the open items are in `REG §6.12`.
 
-This is a build order, not a decision order. What has to be settled before each stage, and what is safe to leave provisional as long as it is labeled, is in `CONFORM §5`; the discipline that keeps a provisional choice from quietly becoming a decision is in `CONFORM §1.1`. The two interact, because steps 1 and 2 sit directly on the stages where rework is cheapest to avoid and most expensive to perform afterwards.
+This is a build order, not a decision order. What has to be settled before each stage, and what is safe to leave provisional as long as it is labeled, is in `CONFORM §5`; the discipline that keeps a provisional choice from quietly becoming a decision is in `CONFORM §1.1`. The preferred 48-bit descriptor remains provisional until its conformance evidence and freeze criteria are satisfied.
+
+Guest VCN, Native VCN, and Native Participant-Compressed are the selected static CAN11 profile families. Their exact identifier packing, framing, detailed profile rules, and registry status remain provisional and are owned by `LINK` and `REG`; the introduction does not freeze them. Each CAN11 Link Binding carries one WS Wire and reconstructs its canonical WireNumber, while a physical CAN bus may host separately suitable bindings or Guest allocations. Use CAN29 or another richer Link profile when multiple Wires cannot be accommodated that way or when CAN11 mapping constraints are awkward.
 
 Only after the above exist should the project freeze more advanced details such as UART framing, Link credits, richer Transport behavior, or static Manifest traffic analysis.
 
 Agents should produce **small concrete reference implementations and tests**, not generalized framework hierarchies, unless the same abstraction is already demanded by more than one real Link/target.
 
-The current implementation state lives in `sim/`, which is at step 0: a process shell with a no-op network seam.
+The current implementation state lives in `code/sim/`, which is at step 0: a process shell with a no-op network seam.
 
 ---
 
@@ -301,7 +350,7 @@ The current implementation state lives in `sim/`, which is at step 0: a process 
 | Document | Code | Contents |
 |---|---|---|
 | `introduction.md` | `INTRO` | This document: intent, non-goals, maturity ladder, examples, roadmap |
-| `core_architecture.md` | `CORE` | The buildable protocol and node runtime. The main document |
+| `core_architecture.md` | `CORE` | The buildable protocol and Participant runtime. The main document |
 | `bit_layout.md` | `BITS` | Byte and bit ordering conventions; canonical descriptor packing |
 | `link_profiles.md` | `LINK` | Per-carrier encodings: Classical CAN, UART, Ethernet, I2C/SPI, others |
 | `deployment.md` | `DEPLOY` | Discovery, commissioning, Wiring, host tooling |

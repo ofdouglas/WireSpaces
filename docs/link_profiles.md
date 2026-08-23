@@ -1,8 +1,8 @@
 # WireSpaces — Link Profiles
 
-**Status:** Private first draft; Classical CAN is the most developed profile and is still not byte-exact  
-**Scope:** How canonical WS PDUs are carried on specific Physical Links  
-**Authority:** This document owns per-carrier encodings only. Wire, Endpoint, Direction, NodeId, Transport, and routing semantics belong to `CORE`. A conflict means the profile here is unfinished, not that `CORE` is wrong
+**Status:** Draft; CAN11 addressing direction selected, PDUA control/CRC details still provisional
+**Scope:** How canonical WS PDUs are carried on specific Physical Links
+**Authority:** This document owns per-carrier encodings and profile-local reconstruction metadata. Canonical Wire, participant, Endpoint, Transport, and routing semantics belong to `CORE`. A conflict means the profile here is unfinished, not that `CORE` is wrong
 
 ---
 
@@ -14,7 +14,7 @@ Current profile maturity:
 
 | Profile | Status |
 |---|---|
-| Classical CAN, 11-bit | Most developed; layouts selected, not byte-exact |
+| Classical CAN, 11-bit | Three static addressing profiles selected; PDUA details require revalidation |
 | Byte-stream / UART | Direction chosen; framing and CRC unresolved |
 | CAN FD, CAN XL | In scope; approach undecided |
 | USB | Start with CDC/serial; native bulk and FTDI FIFO attractive |
@@ -24,191 +24,257 @@ Current profile maturity:
 
 ---
 
-# 2. Classical CAN — 11-bit Profile
+# 2. Classical CAN — 11-bit Profiles
 
-Classical CAN remains an important constrained compatibility profile and stress test, but it does not define WireSpaces as a whole.
+Classical CAN11 is a constrained compatibility floor, not the definition or ceiling of WireSpaces. It does not carry the preferred 48-bit canonical descriptor literally. The CAN LLL reconstructs a complete canonical descriptor from one statically selected profile, its Link Binding, the complete 11-bit identifier, and the PDU data.
 
-The goal is not to force every Service to fit one CAN frame. The goal is to make small WS messages genuinely useful on standard 11-bit CAN and to provide a lightweight bounded adaptation when they do not.
-
-The 11-bit identifier is a deliberately constrained **compatibility floor**, not the ceiling of Classical CAN support; the planned escape hatch is `FUTURE §11`.
-
-## 2.1 Committed and Guest profile families
-
-The layout in §2.2 spends all 11 identifier bits on WireSpaces semantics. That is the right choice for a bus WS owns, and it has an unavoidable consequence: **there is no identifier left over for anyone else.** A bus cannot be half-committed. Two families therefore exist, and a Link is statically one or the other.
-
-**Committed CAN** is the developed case and the subject of the rest of §2. Every one of the 11 identifier bits carries WS meaning, and any frame on the bus is a WS frame. There is no per-frame protocol discriminator, and — importantly — **no identifier bit selects the payload encoding**; that is decided by data byte 0 (§2.4). A committed bus carries no legacy CAN traffic.
-
-**Guest CAN** shares a legacy-governed bus; WS occupies an allocated identifier range disjoint from all legacy owners. Routing, framing, Transports, QoS, and capacity are undesigned (`FUTURE §11.2`). Guest needs its own encoding — not a subset reinterpretation of §2.2. Profile family is static per Link (§9 rule 3).
-
-## 2.2 11-bit CAN identifier direction
+There are three selected CAN11 profiles:
 
 ```text
-QoS        2      most arbitration-significant
-Direction  1
-WireAlias  3
-NodeId     5
-----------------
-           11
+Guest VCN
+Native VCN
+Native Participant-Compressed
 ```
 
-This gives 4 QoS values, 2 directions, 8 WireAlias codes, and 31 Nodes plus broadcast semantics.
+They expose two addressing models: VCN names a configured participant relation; Participant-Compressed names participant codes directly. The former committed/`WireAlias`/`NodeId` model is retired.
 
-The important semantics:
+## 2.1 Link Binding and canonical reconstruction
+
+> **Each CAN11 Link Binding carries exactly one WS Wire.**
+
+This is a property of the Link Binding, not a claim that an entire physical CAN bus equals one Wire. In particular, a Guest binding owns only its allocated identifier block on a legacy-governed bus; frames outside that block may belong to other protocols or bindings.
+
+`WireNumber` is never represented in a baseline CAN11 frame. It is always reconstructed from the binding:
 
 ```text
-WireAlias 0      kLocalBus
-WireAlias 1..7   configured named-Wire aliases
+ingress:
+    classify frame to exactly one active CAN11 Link Binding
+    canonical.WireNumber = binding.WireNumber
+    canonical.SrcParticipantId,
+    canonical.DestParticipantId = profile identifier reconstruction
+    canonical.QoS = identifier field or binding-fixed QoS
+    canonical.Endpoint and remaining control = PDUA reconstruction
 
-NodeId 0         broadcast in OriginToNode; invalid in NodeToOrigin
-NodeId 1..31     individual Node
+egress:
+    require canonical.WireNumber == binding.WireNumber
+    resolve canonical source, destination, and QoS to exactly one CAN ID
+    encode Endpoint and remaining control through the binding's PDUA codec
 ```
 
-### QoS occupies the top bits, unchanged
+Ingress classification must be unique. A frame matching no Guest allocation is non-WS for that binding, not a malformed WS frame. Overlapping active Guest allocations or any other configuration that makes classification ambiguous are invalid.
 
-CAN arbitration is lower-identifier-wins, and canonical QoS already counts upward from the highest priority (`CORE §14`). The two agree, so the profile places the QoS value in the **most arbitration-significant** bits and packs it **as-is**:
+The addressing profile and its exact version are selected statically in generated configuration. They are never negotiated, inferred from traffic, or auto-detected at runtime. Payload byte 0 may distinguish optimized from General PDUA within that selected profile; it does not select the addressing profile.
 
-| QoS | Class | Arbitration |
+## 2.2 Common identifier and arbitration rules
+
+Where a profile carries QoS, canonical QoS occupies the most arbitration-significant identifier bits and is packed unchanged:
+
+| QoS | Class | Arbitration among WS identifiers |
 |---:|---|---|
 | `0` | Critical | highest |
 | `1` | High | next |
 | `2` | Normal | next |
 | `3` | Background / bulk | lowest |
 
-Canonical QoS comparison and CAN arbitration are the same comparison — no inversion or lookup table. WireAlias and NodeId carry no arbitration meaning below QoS.
+CAN arbitration is lower-identifier-wins, matching canonical QoS ordering. Fields below QoS also affect arbitration and therefore require visible, deterministic allocation rules.
 
-## 2.3 CAN Endpoint representation
+`Direction` is Link-local reconstruction metadata. It is not part of the canonical descriptor.
 
-Canonical EndpointId remains 16 bits per Namespace.
+## 2.3 VCN semantics
 
-General PDUA directly represents:
+A `VirtualCircuitNumber` is a Link-local configured name for an **unordered participant relation**:
 
 ```text
-Namespace     0..3
-EndpointId    1..1023
+VCN -> {ParticipantA, ParticipantB}
 ```
 
-The optimized tiny single-frame form supports:
+For an ordinary pair:
 
 ```text
-Namespace 0
-EndpointId 1..127
-small UnreliableDatagram payload
+Direction = AToB -> SrcParticipantId = A, DestParticipantId = B
+Direction = BToA -> SrcParticipantId = B, DestParticipantId = A
 ```
 
-EndpointIds above 1023 remain valid canonically; the constrained 11-bit Classical CAN profile simply cannot directly represent them without another profile/aliasing mechanism. There is no Endpoint truncation, implicit alias, or fallback: an unrepresentable value must fail placement or TX before any frame is emitted.
+The Direction bit uses `0` for `AToB` and `1` for `BToA`. Swapping the stored A/B order without also updating the Direction interpretation is therefore a configuration change.
 
-## 2.4 Optimized N=1 encoding
+A VCN names participants, not an Endpoint. Multiple Endpoints and Transports between the same participant pair reuse the same VCN. The Endpoint is reconstructed from PDUA data.
 
-For the smallest ordinary WS datagrams:
+VCN configuration shall satisfy all of the following:
+
+- self-pairs `{A,A}` are prohibited;
+- an unordered ordinary pair may appear under at most one ordinary VCN;
+- a broadcast relation is stored as `{A,kBroadcast}` and permits only `A -> kBroadcast`; the reverse Direction is invalid for ordinary traffic;
+- a participant may have at most one broadcast-source VCN;
+- reserved Link-control VCNs are not ordinary mappings;
+- egress lookup for `(source, destination)` within a binding is unique.
+
+An egress lookup that finds zero or more than one legal VCN is rejected before any frame is emitted. These rules make canonical reconstruction and reverse egress resolution one-to-one without making VCNs Service-specific.
+
+## 2.4 Guest VCN
+
+Guest VCN is the CAN11 coexistence profile. The physical bus owner shall allocate WireSpaces one **aligned contiguous block of 16 standard identifiers**:
 
 ```text
-byte 0
-+---+-------------------------+
-| 0 | EndpointId [6:0]        |
-+---+-------------------------+
-  ^ optimized discriminator
+CAN ID bits 10..4   fixed GuestBase prefix
+CAN ID bits  3..1   VirtualCircuitNumber[2:0]
+CAN ID bit       0  Direction
+```
 
-bytes 1..7
+Equivalently:
+
+```text
+CAN ID = GuestBase | (VCN << 1) | Direction
+GuestBase & 0x00F = 0
+allocated range = [GuestBase, GuestBase + 15]
+```
+
+The high bits are fixed by the allocation; the low four bits are owned by this profile. The bus owner determines where the block sits relative to legacy arbitration priorities.
+
+Guest VCN carries no per-frame QoS. The binding supplies one fixed canonical QoS. Egress of a canonical PDU with any different QoS shall be rejected before a frame is emitted; QoS is not silently rewritten.
+
+`VCN = 7` (the all-ones VCN) is reserved for future Link control. This leaves ordinary VCN values `0..6`: **7 ordinary configured relations and 14 ordinary directional CAN identifiers**. Both Direction values under the reserved VCN remain non-ordinary.
+
+A frame outside the allocated 16-ID block is non-WS for this binding and shall not enter WS parsing or error handling. A frame inside the block with reserved or semantically invalid VCN/Direction is classified as WS and rejected according to the profile's malformed/reserved-value rules.
+
+Larger Guest blocks may be defined by future, separately named profile versions. They are not runtime options of this 16-ID profile.
+
+## 2.5 Native VCN
+
+Native VCN uses the full relevant CAN11 identifier space:
+
+```text
+bits 10..9   QoS                     2
+bits  8..1   VirtualCircuitNumber    8
+bit       0  Direction               1
+--------------------------------------
+             total                  11
+```
+
+`VCN = 255` (the all-ones VCN) is reserved for future Link control, leaving ordinary VCN values `0..254`: **255 ordinary configured relations**. The reservation applies at every QoS; reserved combinations do not reconstruct ordinary canonical PDUs.
+
+The same VCN relation is used across QoS values. The frame's QoS bits reconstruct canonical QoS, while VCN and Direction reconstruct source and destination according to §2.3. Arbitrary canonical ParticipantIds are representable through the VCN map.
+
+Within a QoS class, VCN numeric allocation affects CAN arbitration. Deployment tooling shall expose that ordering. The exact VCN allocation policy remains open.
+
+## 2.6 Native Participant-Compressed
+
+Native Participant-Compressed uses:
+
+```text
+bits 10..9   QoS                     2
+bits  8..6   CompactCode             3
+bits  5..1   GeneralCode             5
+bit       0  Direction               1
+--------------------------------------
+             total                  11
+```
+
+Direction uses:
+
+```text
+0 = CompactToGeneral
+1 = GeneralToCompact
+```
+
+The default is direct canonical ParticipantId mapping:
+
+```text
+CompactCode 0..7   -> canonical ParticipantId 0..7
+GeneralCode 0..30  -> canonical ParticipantId 0..30
+```
+
+A Link Binding may instead enable a Link-local projection from code `0..30` to arbitrary canonical ParticipantIds. Compact codes use the same mapping entries `0..7`. Projection changes only Link representation; it does not create another canonical identity namespace. The active projection shall assign each represented canonical participant one unique code so ingress reconstruction and egress selection remain unambiguous.
+
+Every ordinary unicast pair must have at least one participant represented by a compact code:
+
+- if exactly one endpoint is compact, place it in `CompactCode`, place the other in `GeneralCode`, and set Direction from the canonical source;
+- if both endpoints are compact, encode `CompactCode = min(src_code,dest_code)` and `GeneralCode = max(src_code,dest_code)`;
+- in the both-compact case use `CompactToGeneral` when `src_code <= dest_code`, otherwise use `GeneralToCompact`;
+- a pair in which neither endpoint has a compact code is unrepresentable and is rejected before transmission.
+
+The min/max rule gives a deterministic encoding when both participants fit the compact set. Code ordering is the Link-local code ordering, including when projection is enabled.
+
+`GeneralCode = 31` is reserved:
+
+```text
+GeneralCode = 31, Direction = CompactToGeneral
+    ordinary broadcast
+    SrcParticipantId  = mapping[CompactCode]
+    DestParticipantId = kBroadcast
+
+GeneralCode = 31, Direction = GeneralToCompact
+    reserved for future CAN11 Link control
+    not an ordinary canonical PDU
+```
+
+Every ordinary broadcast source must therefore have a compact code. There is no Guest Participant-Compressed profile.
+
+## 2.7 Endpoint representation and PDUA status
+
+All three addressing profiles reuse a common CAN11 PDU adaptation (PDUA) where possible. The identifier reconstructs Wire, participants, and QoS; PDUA reconstructs Endpoint, `HasExtensions`, `TransportType`, and the PDU bytes.
+
+The canonical Endpoint is now a 16-bit `Namespace[2] + Id[14]` value (`BITS §2`). Consequently, the former 10-bit General Endpoint packing and former `PduControl` mask relationship are not valid as committed layouts. Exact `PduControl`, Endpoint packing, optimized N=1, General N=1, and aggregate CRC details are provisional and require joint redesign, capacity recalculation, and golden-vector revalidation.
+
+An exact profile version must state its directly representable Endpoint range. An unrepresentable Endpoint fails placement or TX before any frame is emitted; it is never truncated, implicitly aliased, or substituted.
+
+## 2.8 Optimized N=1 candidate
+
+The retained optimization direction is a one-frame form for small ordinary datagrams:
+
+```text
+candidate byte 0
++---+-------------------------+
+| 0 | Endpoint Id [6:0]       |
++---+-------------------------+
+
+candidate bytes 1..7
 +-----------------------------------------------+
 | Service payload, 0..7 bytes                   |
 +-----------------------------------------------+
 ```
 
-Eligibility:
+Candidate eligibility remains:
 
 ```text
 Namespace               0
 TransportType           UnreliableDatagram
-HasHeaderExtensions     0
-EndpointId              1..127
+HasExtensions           0
+Endpoint Id             1..127
 Service payload         0..7 bytes
-routing                 representable by CAN ID
+canonical addressing    uniquely representable by selected CAN11 binding
 ```
 
-CAN DLC gives the actual payload length; the Service payload length is `DLC - 1`. There is no aggregate CRC in this form — native CAN frame integrity is sufficient.
+If retained, DLC gives payload length as `DLC - 1`, and native CAN frame integrity is sufficient without an aggregate PDUA CRC. A small N=1-only implementation remains a desired capability.
 
-An N=1-only node (optimized form, NS0 EIDs 32–127) is a valid WS device without General PDUA.
+These byte positions and eligibility details are **not frozen**. They must be revalidated against the redesigned General discriminator and canonical Endpoint/Control model before interoperability use.
 
-### Namespace 0 compact EID allocation
-
-The optimized Classical-CAN N=1 form can directly represent `Namespace 0, EndpointId 1..127`. The current preferred split of that scarce space is:
+The provisional Namespace-0 compact allocation remains:
 
 ```text
-EID 0         invalid/reserved
-
-EID 1..31     Core/Common FOSS services
-              scarce optimized allocations
-
-EID 32..127   user/deployment services
-              96 optimized N=1 IDs
-
-EID 128..65535
-              normal Namespace-0 user space
-              not representable by optimized N=1 CAN
+Id 0          invalid/reserved
+Id 1..31      scarce Core/Common optimized allocations
+Id 32..127    user/deployment optimized allocations
+Id 128..16383 normal Namespace-0 space, not represented by this candidate
 ```
 
-The `1..31` Common region should be allocated **slowly and cautiously**. It is a reserved ceiling, not a quota to fill. If the ecosystem eventually needs fewer optimized Common IDs and users need more compact IDs, the boundary may move downward while unallocated IDs remain available.
+The `1..31` region is a ceiling to allocate cautiously, not a quota.
 
-Broader ecosystem allocation hierarchy for Namespace 3 and compact Common Services is in `FUTURE §8.1`.
+## 2.9 General PDUA skeleton
 
-## 2.5 General PDUA frame layout
+The reusable General PDUA direction is:
 
+```text
 START frame:
-
-```text
-byte 0      FrameControl
-byte 1      PduControl
-byte 2      EndpointId[7:0]
-bytes 3..7  first 0..5 PDU bytes
-```
+    byte 0      FrameControl
+    following bytes carry provisional PduControl/Endpoint metadata
+    remaining bytes begin the PDU stream
 
 Continuation frame:
-
-```text
-byte 0      FrameControl
-bytes 1..7  next 0..7 PDU bytes
+    byte 0      FrameControl
+    bytes 1..7  next 0..7 PDU bytes
 ```
 
-`PduControl`:
-
-```text
-EndpointId[9:8]         2   // bits 7..6
-Namespace               2   // bits 5..4
-HasHeaderExtensions     1   // bit  3
-TransportType           3   // bits 2..0
---------------------------
-                        8
-```
-
-`EndpointId[9:8]` and byte 2 form one direct 10-bit value.
-
-Field order matches canonical `Control` except QoS (in CAN ID, §2.2); see `BITS §4` for packing.
-
-Encoding selection on TX is mandatory rather than free:
-
-```text
-if optimized eligibility is satisfied:
-    use optimized N=1
-else if General PDUA can represent the complete canonical PDU within bounds:
-    use General PDUA, including N=1 when it fits
-else:
-    reject placement or local TX before emitting a frame
-```
-
-## 2.6 PDUA maximum and normal range
-
-```text
-Maximum PDUA aggregation depth: N = 8 CAN frames
-Normal design target:           N <= 4
-```
-
-Services for broad small-node compatibility should usually fit within `N <= 4` (CRC-8 only, §2.9). `N = 5..8` exists for selective cases such as bootloader/bulk-ish messages. Anything routinely needing more than eight Classical CAN frames should be segmented at the Transport/Service layer (`CORE §20`). Fragmentation multiplies loss (`CONFORM §3`).
-
-Because QoS occupies the top identifier bits (§2.2), each frame of a Critical PDU wins arbitration against essentially everything else on the bus. **Deployment tooling should default Critical-QoS PDUA depth to about `N = 4`** — a Wiring policy, not a protocol maximum (the encoding permits `N = 8` at any QoS). Larger values need explicit justification against bus load, lower-class latency, and reassembly cost; local scheduling cannot fix this (`CORE §14.2`).
-
-## 2.7 FrameControl byte
-
-Reducing MaxN from 16 to 8 frees a third generation bit.
+The preferred provisional `FrameControl` remains:
 
 ```text
 bit 7       General-PDUA discriminator
@@ -219,36 +285,51 @@ bits 2:0    FramesRemaining[2:0]
             8 bits
 ```
 
-`FramesRemaining` supports 0..7, corresponding to N = 1..8, and decrements by exactly one per frame so the final frame carries 0. `MessageGeneration` wraps modulo 8.
+`FramesRemaining` values `0..7` represent `N = 1..8` and decrement by one per constituent frame; the final frame carries zero. `MessageGeneration` wraps modulo 8.
 
-## 2.8 Reassembly safety model
+The preferred bounds remain:
 
-MessageGeneration is not a globally unique PDU identifier. After wrap, a continuation from a later PDU can theoretically alias an old incomplete reassembly if enough intervening traffic is completely lost. The design relies on several independent checks:
+```text
+Maximum PDUA aggregation depth: N = 8 CAN frames
+Normal small-node target:       N <= 4
+```
 
-- explicit START resets/creates reassembly state;
-- FramesRemaining must match the expected sequence;
-- continuation generation must match the active generation;
-- constituent frames for one PDU are transmitted in order and non-interleaved for that CAN ID (START mid-sequence is a fault);
-- reassembly state has a bounded timeout/lifetime;
-- an aggregate PDU CRC validates the completed reconstruction.
+Anything routinely requiring more than eight Classical CAN frames should use Transport/Service segmentation or a richer Link profile. Fragmentation multiplies loss (`CONFORM §3`). Critical-QoS PDUA depth should normally remain around `N <= 4`; larger values require explicit bus-load and latency analysis.
 
-This is sufficient for the intended small CAN PDUA without spending more header bits on a larger sequence number.
+The exact bytes following `FrameControl`, including `PduControl`, full Endpoint representation, length derivation, and General N=1 capacity, remain open.
 
-**Reassembly key:** `(ingress Link, complete CAN identifier)` — **at most one active context per key**, drawn from a **fixed global pool**. A context holds bounded state: accumulated bytes (MaxN capacity), active MessageGeneration, expected FramesRemaining, exact accumulated length, integrity state, and timeout deadline. Different identifiers interleave freely; contexts must never assemble across keys or ingress Links. A START with no free context is **rejected and counted** — no allocation, no eviction (`CORE §15.7`).
+## 2.10 Complete-PDU serialization and reassembly
 
-Every constituent frame of one PDU carries the same complete CAN arbitration ID, and exactly one physical transmitter owns each CAN ID in every configured state, including commissioning (§2.13).
+VCN and Participant-Compressed identifiers do not contain Endpoint. Multiple Endpoints with the same participant relation and QoS therefore share one complete CAN identifier.
 
-### Delivery boundary
+> **For each complete CAN identifier, a transmitter shall serialize whole PDUs and shall not interleave constituent frames from different PDUs.**
 
-Classical CAN ACK and controller retransmission are below this adapter and do not constitute WS delivery:
+All constituent frames of one General PDU carry the same complete identifier, are emitted in order, and complete or abort before another PDU using that identifier starts. Frames using different identifiers may interleave through normal CAN arbitration.
 
-- CAN ACK means at least one controller received the *frame*, not that any Endpoint received the *PDU*;
-- controller retransmission recovers frame-level errors, not a dropped PDU, full queue, or rejected authority check;
-- transmitting `N-1` frames then aborting ACKs every frame sent and delivers nothing.
+The reassembly key is:
 
-No adapter-level PDU acknowledgment, retry, or duplicate suppression — those belong to a selected Transport (`CORE §20`, `CORE §21.1`).
+```text
+(ingress Link Binding/interface, complete 11-bit CAN identifier)
+```
 
-## 2.9 Aggregate CRC policy
+There is **at most one active reassembly context per key**, drawn from a fixed global pool. A context holds bounded accumulated bytes, active `MessageGeneration`, expected `FramesRemaining`, exact accumulated length, integrity state, and timeout deadline. Contexts never assemble across identifiers or ingress interfaces. A START with no free context is rejected and counted; there is no dynamic allocation or eviction (`CORE §15.7`).
+
+Reassembly safety relies on:
+
+- explicit START creating or resetting the key's context;
+- exact `FramesRemaining` progression;
+- matching `MessageGeneration`;
+- complete-PDU noninterleaving for the identifier;
+- a bounded context lifetime;
+- the finalized aggregate PDU integrity check for multi-frame reconstruction.
+
+A START arriving mid-sequence for an active key is a fault and resets or rejects according to the finalized error rule. No partial PDU becomes visible above the LLL.
+
+For every active ordinary identifier mapping, exactly one physical transmitter shall be the reconstructed canonical source. This prevents two controllers from attempting different frame data under the same CAN identifier.
+
+## 2.11 Provisional CRC policy and conditional capacity
+
+The retained candidate aggregate CRC policy is:
 
 ```text
 N = 1       no aggregate PDUA CRC
@@ -256,104 +337,121 @@ N = 2..4    CRC-8
 N = 5..8    CRC-16
 ```
 
-The CRC is primarily additional protection for **multi-frame composition/reassembly**; each constituent CAN frame already has CAN's native frame-level integrity.
+Its purpose is protection of multi-frame composition/reassembly in addition to native CAN frame integrity. The policy, algorithms, parameters, protected range, placement, byte order, DLC/padding interaction, and golden vectors are all provisional and require revalidation after `PduControl` and Endpoint packing are selected.
 
-A useful consequence:
+SAE J1850 remains a CRC-8 candidate. No CRC-16 choice is selected.
 
-```text
-Small CAN implementation:
-    MaxN = 4
-    needs only one standardized CRC-8 implementation
-
-Larger CAN implementation:
-    MaxN = 8
-    adds CRC-16
-```
-
-This avoids forcing tiny nodes to implement two aggregate CRC algorithms merely because the full profile supports longer PDUs.
-
-**CRC-8 algorithm:** SAE J1850 is currently implemented and is a viable candidate, but this document does not declare its polynomial/parameters formally frozen.  
-**CRC-16 algorithm:** not yet frozen; the profile must choose and specify the full parameter set and golden vectors before any interoperability claim.
-
-## 2.10 General PDUA capacity
-
-Gross bytes available to the PDU stream, before any aggregate CRC, are:
+The prior General capacity facts are retained only as a **conditional calculation**. If the redesigned START frame still leaves five PDU-stream bytes after `FrameControl` and metadata, then:
 
 ```text
 B(N) = 5 + 7 * (N - 1) = 7N - 2
 ```
 
-which follows from 8 CAN data bytes per frame, minus one FrameControl byte per frame, minus the START frame's PduControl and EndpointId bytes.
+and, if the candidate CRC schedule above is also retained:
 
-Applying the §2.9 CRC policy gives the **net** PDU capacity:
+| `N` | Gross `B(N)` | Candidate CRC | Conditional net PDU bytes |
+|---:|---:|---|---:|
+| 1 | 5 | none | **5** |
+| 2 | 12 | CRC-8 | **11** |
+| 3 | 19 | CRC-8 | **18** |
+| 4 | 26 | CRC-8 | **25** |
+| 5 | 33 | CRC-16 | **31** |
+| 6 | 40 | CRC-16 | **38** |
+| 7 | 47 | CRC-16 | **45** |
+| 8 | 54 | CRC-16 | **52** |
 
-| `N` | CAN frames | Gross `B(N)` | Aggregate CRC | Net PDU bytes |
-|---:|---:|---:|---|---:|
-| 1 | 1 | 5 | none | **5** |
-| 2 | 2 | 12 | CRC-8 (1 B) | **11** |
-| 3 | 3 | 19 | CRC-8 (1 B) | **18** |
-| 4 | 4 | 26 | CRC-8 (1 B) | **25** |
-| 5 | 5 | 33 | CRC-16 (2 B) | **31** |
-| 6 | 6 | 40 | CRC-16 (2 B) | **38** |
-| 7 | 7 | 47 | CRC-16 (2 B) | **45** |
-| 8 | 8 | 54 | CRC-16 (2 B) | **52** |
-
-Net PDU bytes must still cover canonical header extensions (`H`) and the selected transport's overhead (`T`) before Service payload:
+These numbers are not promises of the redesigned profile. If START metadata consumes a different number of bytes or the CRC schedule changes, the formula and table shall be replaced. Net PDU capacity must cover header extensions (`H`) and Transport overhead (`T`) before Service payload:
 
 ```text
 maximum Service bytes = NetPdu(N) - H - T
 ```
 
-For comparison, optimized N=1 carries 0..7 Service bytes with no in-payload WS header — EndpointId shares byte 0 and routing fields live in the CAN ID — buying 2 payload bytes over General N=1.
+The optimized candidate's 0..7 Service bytes and General N=1's conditional 5 PDU bytes are therefore useful design targets, not frozen facts.
 
-> **Note:** earlier overviews used gross `B(N)` as usable capacity; use the Net column for N ≥ 2.
+## 2.12 Delivery and flow-control boundary
 
-## 2.11 CAN and Link-level flow control
+Classical CAN ACK and controller retransmission are below this adapter and do not constitute WS PDU delivery:
 
-Generic CAN Nodes are not expected to participate in WS Link credit flow control.
+- CAN ACK means at least one controller received the frame, not that an Endpoint received the PDU;
+- controller retransmission recovers frame-level errors, not a dropped PDU or exhausted reassembly pool;
+- transmitting `N-1` frames then aborting may ACK every transmitted frame while delivering no PDU.
 
-A gateway can still use CAN queue pressure to reduce upstream Ethernet/UART/other-Link credit, so slow CAN egress can cause backpressure without changing the CAN wire protocol (`CORE §15.3`).
+The CAN11 adapter adds no PDU acknowledgment, retry, or duplicate suppression; those belong to a selected Transport (`CORE §20`, `CORE §21.1`).
 
-Reliable file/image transfer over CAN should use Transport-level receiver control rather than generic CAN-node LLL credits.
+Generic CAN participants are not expected to implement WS Link-credit flow control. A gateway may still translate CAN queue pressure into reduced upstream credit on richer Links (`CORE §15.3`). Reliable bulk transfer over CAN should use Transport-level receiver control.
 
-## 2.12 Transmit procedure
+## 2.13 Transmit procedure
 
-The ordering of transmit-side checks is itself a requirement, because several of them are only meaningful *before* the first frame reaches the bus. Once a START has been emitted, a rejection is no longer a rejection — it is a partial PDU somebody has to clean up.
+All rejectable conditions shall be checked before the first frame is emitted:
 
-Before emitting any frame, transmit:
+1. select the statically configured egress Link Binding and require an exact canonical `WireNumber` match;
+2. validate canonical reserved bits, participant identities, Endpoint, extensions, `TransportType`, and QoS;
+3. reconstruct the selected profile's egress mapping and require exactly one legal complete CAN identifier;
+4. for Guest VCN, require canonical QoS to equal the binding's fixed QoS;
+5. reject every unrepresentable value with no truncation, aliasing, remapping, or substitution;
+6. select optimized or General PDUA according to the finalized mandatory encoding rule;
+7. select the smallest legal `N` using finalized net capacity and CRC rules;
+8. reserve bounded queue, controller, and buffer capacity for the complete PDU;
+9. serialize the complete PDU against other traffic using the same CAN identifier and hold a stable byte/metadata view through completion or abort.
 
-1. resolves the Wire and confirms the caller's authority to produce on it;
-2. validates the canonical descriptor — Wire representation, Direction, NodeId, Namespace, EndpointId, extensions, TransportType, QoS;
-3. applies the encoding selection of §2.5, which is mandatory rather than advisory;
-4. **rejects anything unrepresentable, with no aliasing, truncation, or substitution** (`CORE §2.2`);
-5. confirms this interface owns the complete CAN identifier in the currently active state (§2.8);
-6. selects the **smallest legal `N`**, counting the aggregate CRC the resulting `N` requires;
-7. reserves the bounded queue, controller, and buffer capacity the whole PDU will need;
-8. holds a stable view of the bytes and metadata until the attempt completes or aborts.
+Once START has been emitted, later failure is an aborted partial transmission, not a pre-transmit rejection. It is counted, and receiver state is left to the finalized reset/timeout rule. Local transmit completion is not delivery.
 
-Steps 6–7: choose smallest legal `N` using **net** capacity (§2.10), not gross `B(N)` — e.g. 26 bytes needs `N = 5`, not `N = 4`. Reserve whole-PDU capacity before START; mid-PDU failure aborts, counts, and leaves reassembly to timeout (`CORE §18.1`). Local "complete" ≠ delivery (`CORE §21.1`).
+## 2.14 Active-map consistency and update TODO
 
-## 2.13 Commissioning control space
+All participants interpreting the same active CAN11 binding shall use consistent VCN relations, participant projection, reserved values, fixed Guest QoS, Guest range, and exact PDUA profile version. Mixed active maps can reconstruct the same identifier as different canonical sources or destinations and are invalid.
 
-`DEPLOY §1.2` describes commissioning generically. Committed CAN has a specific, currently unresolved problem with it, recorded here so the profile is not frozen in a way that makes commissioning impossible.
+The following mechanism remains an explicit TODO and is not designed here:
 
-The difficulty is structural. §2.2 allocates all 11 identifier bits to WS routing semantics, and §2.4 spends both data-byte-0 encodings on ordinary Endpoint traffic. **An unconfigured node has no NodeId, so it cannot form a valid identifier** — yet it has to exchange something to acquire one.
+- exact configuration fingerprint contents and comparison;
+- map/version distribution;
+- atomic activation or cutover of a replacement map;
+- handling of in-flight TX at activation;
+- exact reassembly-context flush timing and signaling.
 
-Two rules bound whatever mechanism eventually resolves this:
+The eventual activation mechanism must prevent mixed-map operation and must ensure that reassembly begun under one map cannot complete under another. Until that mechanism is specified, consistency is a deployment/configuration invariant, not an on-bus negotiation protocol.
 
-- **Transmit ownership holds in every phase.** The one-transmitter-per-identifier invariant is a physical arbitration property, and a commissioning exchange that lets two unconfigured nodes answer under one identifier can corrupt frames rather than merely confuse software. This must hold while nodes are being discovered, which is precisely when the configuration that would guarantee it does not exist yet.
-- **An unconfigured node emits no ordinary Service traffic.** Before commitment it has no Endpoint authority, so it participates only in commissioning control. It does not publish telemetry, announce Endpoints, or answer ordinary Wire traffic.
+## 2.15 Reserved Link-control space
 
-The profile must therefore **reserve enough identifier or control space to keep a commissioning exchange feasible** before its layout is frozen. What that reservation costs — one WireAlias code, a reserved NodeId, a distinguished QoS/Direction combination, or something outside the committed allocation — is open, and it is a real cost against an already exhausted field.
+Space is reserved for future CAN11 Link control:
 
-Scan algorithms, identity, persistence, and factory reset are out of scope (`FUTURE §11`, `REG §6`).
+```text
+Guest VCN:                   VCN = 7
+Native VCN:                  VCN = 255
+Native Participant-Compressed:
+    GeneralCode = 31, Direction = GeneralToCompact
+```
 
-## 2.14 Open items (CAN)
+This reservation keeps future Link control, including possible commissioning use, structurally possible. It does **not** define commissioning payloads, opcodes, identity rules, ownership procedure, retries, persistence, or a state machine. Ordinary PDU decoders shall not interpret reserved Link-control identifiers as canonical Service traffic.
 
-- Physical placement and significance order of Direction, WireAlias, and NodeId; Direction bit value for `OriginToNode`; controller filter rules (§2.11).
-- CRC placement (trailing bytes of final frame assumed above), DLC/short-frame/padding rules, length from DLC vs explicit field.
-- CRC-8 polynomial/parameters (SAE J1850 is a candidate, not frozen); CRC-16 algorithm and golden vectors.
-- Commissioning identifier/control reservation before §2.2/§2.4 layout is frozen (§2.13).
+## 2.16 Profile selection and CAN29 escalation
+
+Select one profile statically per CAN11 Link Binding:
+
+```text
+legacy-governed bus with an explicit allocated 16-ID block
+    -> Guest VCN
+
+WS-native identifier space, arbitrary participant relations,
+and a per-relation map is acceptable
+    -> Native VCN
+
+WS-native identifier space and every ordinary relation has
+at least one participant in the compact code set
+    -> Native Participant-Compressed
+```
+
+Use CAN29 or another richer Link profile when several WS Wires must share one physical CAN interface without separate suitable bindings, when CAN11 map/configuration limits are awkward, when participant-compressed topology constraints do not fit, or when richer routing identity and payload efficiency justify it. Do not accumulate additional runtime-detected CAN11 modes to avoid that escalation.
+
+## 2.17 Open items (CAN)
+
+- Final `PduControl`, full Endpoint packing, optimized N=1, General N=1, and mandatory encoding-selection rules.
+- General START metadata size and resulting capacity table.
+- CRC schedule, algorithms and complete parameters, protected range, placement, byte order, DLC/short-frame/padding rules, and golden vectors.
+- Controller filter rules for multiple explicit Link Bindings and Guest allocations.
+- Native VCN allocation policy and tooling presentation of within-QoS arbitration.
+- Exact configuration fingerprint, atomic map activation, and reassembly-flush mechanism (§2.14).
+- Link-control and commissioning payload/state design; only identifier space is reserved here.
+- Final CAN29 representation and migration guidance.
 
 ---
 
@@ -433,7 +531,7 @@ Ethernet is the primary case for **aggregation** rather than fragmentation: an E
 
 # 7. I2C and SPI
 
-I2C and SPI are architecturally in scope as ordinary Physical Links, and are the main reason `CORE §1.7` exists. Both are **master-initiated**: the master's LLL drives the cadence at which a Node's `NodeToOrigin` traffic can appear, and the LLL may poll or schedule autonomously without becoming the semantic producer.
+I2C and SPI are architecturally in scope as ordinary Physical Links, and are the main reason `CORE §1.7` exists. Both are **master-initiated**: a non-master Participant's traffic can appear only when the master's LLL polls or otherwise provides transfer cadence, and that polling or autonomous scheduling does not make the master the canonical source or semantic producer.
 
 A profile for either must specify:
 
@@ -467,37 +565,43 @@ The concurrency shape matters more than the encoding. If the primitive is SPSC, 
 A checklist, so a new profile does not silently omit something another profile had to answer:
 
 ```text
-canonical field mapping     which fields go in native metadata vs payload
-Wire representation         alias scheme, or direct WireNumber, and its width
+profile identity/version    static selection unit; incompatible-version behavior
+binding and classification  carrier scope owned by one binding; unique ingress match
+canonical reconstruction    every transmitted, elided, compressed, or fixed field
+Wire reconstruction         direct value or the exact Link-Binding rule
+participant representation  ranges, maps, Direction semantics, and uniqueness
 Endpoint representation     directly representable range; behavior above it
 byte and bit order          field significance and packing, exactly
+arbitration/priority        relationship between native ordering and canonical QoS
 framing                     delimiting, escaping, padding, and resynchronization
 length interpretation       what a length covers, and every minimum and maximum
 reserved values             what a transmitter writes and a receiver does
 integrity                   CRC or native; polynomial, parameters, protected range,
                             field order, serialized form, residue convention,
                             validation order relative to parsing
-fragmentation               whether needed, and the reassembly safety model
+fragmentation               whether needed, complete-PDU serialization, and the
+                            reassembly key/safety model
 aggregation                 whether several PDUs may share one transfer
 maximum PDU                 the MTU reported in Link capabilities
-QoS profile                 Minimal or Full, and how unsupported QoS behaves
+QoS profile                 Minimal or Full, fixed/dynamic reconstruction, rejection
 flow control                supported or not; extension encoding if so
 initiation                  who may transmit when; polling cadence if applicable
 idle behavior               how "nothing to send" is expressed
 error reporting             which native errors map to which WS categories
-transmit ownership          who may drive the medium, in every configured state
+transmit ownership          who may drive each native identifier/configured state
 coexistence                 whether non-WS traffic can share the medium, and how
-commissioning space         what an unconfigured node may send, and where it fits
+map consistency/update      consistency invariant; version/activation/flush behavior
+Link-control reservation    reserved carrier space and exclusion from ordinary PDUs
 resource bounds             context/queue/buffer limits and exhaustion behavior
-golden vectors              encode/decode cases for cross-implementation checks
+golden vectors              encode/decode and malformed/configuration-boundary cases
 ```
 
 Six rules apply to every profile:
 
 - An unrepresentable canonical value **fails before a frame is emitted**, never by truncation or silent remapping.
 - **No partial PDU** may ever become visible above the LLL.
-- **The profile is selected statically per Link** in generated configuration; nothing auto-detects or negotiates framing at runtime.
-- **Malformed or unauthorized traffic is counted and dropped, with no response emitted** (`CORE §18.1`). A Link profile does not introduce a protocol-level error reply.
+- **The profile and exact version are selected statically per Link Binding** in generated configuration; nothing auto-detects or negotiates framing at runtime.
+- **Malformed traffic is counted and dropped, with no response emitted** (`CORE §18.1`). A Link profile does not introduce a protocol-level error reply.
 - **Validation precedes parsing.** Framing, length, and integrity are checked before any untrusted PDU field is interpreted.
 - **A stabilized profile is immutable.** Incompatible changes take a new name or version.
 

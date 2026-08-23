@@ -2,9 +2,13 @@
 
 Network and messaging stack for hierarchical embedded systems.
 
-A **Wire** is a logical bus with exactly one **Origin** and zero or more **Nodes**. The same Endpoint and Service model is meant to survive whether that bus is realized inside one device, as a shared-memory channel between cores, a CAN bus, an Ethernet link, or an FPGA datapath.
+A **Wire** is a loop-free **Logical Bus** and propagation domain realized by one or more configured Links. One or more **Participants** may independently source traffic onto it; traffic propagates over the Wire's configured Link topology, and canonical source/destination identity controls who authored and who accepts a PDU rather than selecting an ordinary forwarding path.
 
-**Status: private first draft.** The architecture is provisional, no Link profile is byte-exact, and no wire interoperability is claimed. Implementation is at an early stage in `sim/`.
+Each Endpoint Domain has one deployment-scoped `ParticipantId`, used on every Wire it joins. The canonical PDU carries `SrcParticipantId` and `DestParticipantId`; forwarding is driven by static/read-mostly Wire membership. Constrained Links may elide or project fields when their Link Binding and frame context reconstruct the same canonical Wire, source, and destination.
+
+The same Endpoint and Service model is meant to survive whether a Wire is realized inside one device, as a shared-memory channel between cores, across a CAN bus, over Ethernet, or through an FPGA datapath.
+
+**Status: private first draft.** The architecture is provisional, no Link profile is byte-exact, and no wire interoperability is claimed. Implementation is at an early stage in `code/sim/`.
 
 ---
 
@@ -15,7 +19,7 @@ Read in this order if you are new to the project:
 | Document | What it covers |
 |---|---|
 | [introduction.md](introduction.md) | What WireSpaces is and why. Non-goals, maturity ladder, worked examples, roadmap |
-| [core_architecture.md](core_architecture.md) | **The main document.** The protocol model and node runtime — everything meant to be buildable now |
+| [core_architecture.md](core_architecture.md) | **The main document.** The protocol model and Participant runtime — everything meant to be buildable now |
 | [bit_layout.md](bit_layout.md) | Byte and bit ordering conventions, and canonical descriptor packing |
 | [link_profiles.md](link_profiles.md) | Per-carrier encodings: Classical CAN, UART, Ethernet, I2C/SPI, and others |
 | [deployment.md](deployment.md) | Discovery, commissioning, Wiring, host tooling |
@@ -61,4 +65,4 @@ If you are generating code or designs from these documents:
 4. Use `conformance.md` for test vectors and boundary cases; use `implementation.md` for language and scaling choices.
 5. Prefer small concrete implementations and tests over generalized framework hierarchies. Do not introduce an abstraction until two real Links or targets need it.
 6. Nothing in `archive/` is current.
-7. `library_architecture.md` assumes a sibling `Design/Firmware` checkout on the include path when building the core library (`LIB §12.1`).
+7. `LIB §12.1` rejects ambient sibling `Design/Firmware` include paths and recommends a reproducible vendored extraction with recorded provenance for phase 1; the final core-library location remains open.

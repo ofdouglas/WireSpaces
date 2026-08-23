@@ -1,8 +1,8 @@
 # WireSpaces — Bit and Byte Layout Conventions
 
-**Status:** Settled for the canonical descriptor; profile identifier layouts remain open  
-**Purpose:** Fix how fields are ordered within bytes and words, so independent implementations agree  
-**Authority:** Layout conventions and canonical descriptor packing. Field widths and meaning belong to `CORE §2`; profile encodings belong to `LINK`
+**Status:** Preferred provisional canonical encoding; exact allocation widths are not frozen
+**Purpose:** Define the candidate canonical descriptor serialization and the rules independent implementations must follow
+**Authority:** Canonical byte and bit packing. Field semantics belong to `CORE`; Link-profile encodings belong to `LINK`
 
 Cross-references use the document code plus a section number, for example `BITS §2`. A bare `§x` always means the current document.
 
@@ -12,98 +12,130 @@ Cross-references use the document code plus a section number, for example `BITS 
 
 **Byte order is little-endian** wherever a representation serializes a literal multi-byte numeric value, unless a profile explicitly specifies otherwise (`PDU-4`).
 
-**Bit order within a byte or word is MSB to LSB.** The first field in a layout listing occupies the most significant bits, the last occupies the least significant.
+**Bit order within a byte or word is MSB to LSB.** The first field in a layout listing occupies the most significant bits, and the last occupies the least significant.
 
-**Prefer aligning larger bitfields to natural byte boundaries**, and prefer grouping related fields. Where these two preferences conflict, alignment wins — see the `RoutingWord` case in §3.
+**Prefer byte-oriented fields and natural byte alignment.** A constrained Link profile may elide or compress canonical fields, but that profile representation does not redefine the canonical descriptor.
 
-**Priority occupies the most significant available bits.** QoS is the count of strictly-higher-priority classes, so Critical is 0 (`CORE §14`); placing it at the top means a **numerically lower value always wins**, in the canonical descriptor and in a profile identifier alike. Anyone who inverts it produces a visibly wrong value rather than a subtly inverted priority order.
+**Priority occupies the most significant available bits.** QoS is the count of strictly higher-priority classes, so Critical is 0 (`CORE §14`). A numerically lower canonical QoS therefore has higher priority.
 
-## 1.1 Language bitfields must not define these layouts
+## 1.1 Language bitfields and native object layout are not encodings
 
-> **A C or C++ bitfield declaration is not a specification of any layout in this document.** Bit-field allocation order within a storage unit is implementation-defined, as is straddling, padding, and the signedness of a plain `int` field.
+> **A C or C++ bitfield declaration is not a specification of any layout in this document.**
 
-So this:
+Bit-field allocation order within a storage unit is implementation-defined, as are straddling, padding, and the signedness of a plain `int` field. Structure padding and host byte order are also not serialization rules.
+
+For example, this does not portably encode §2:
 
 ```cpp
-struct Control {          // does NOT portably mean §2
+struct Control {          // not a portable encoding
     uint8_t qos : 2;
-    uint8_t namespace_ : 2;
-    uint8_t has_header_extensions : 1;
+    uint8_t reserved : 2;
+    uint8_t has_extensions : 1;
     uint8_t transport_type : 3;
 };
 ```
 
-is not an encoding of the `Control` byte, however much it resembles one. Encode and decode with explicit shifts and masks, and test against golden vectors on both a little-endian and a big-endian implementation model (`CONFORM §2`). This is the concrete form of `PDU-4` and `SVC-7`: native object layout is never a wire representation.
+Implementations shall serialize and parse with explicit bytes, shifts, and masks. They shall not transmit or persist a native structure image. Conformance vectors shall exercise both little-endian and big-endian implementation models (`CONFORM §2`).
+
+## 1.2 Reserved fields
+
+A transmitter shall write every reserved bit as zero. A receiver shall reject a descriptor whose reserved bits are nonzero before interpreting extensions, Transport metadata, or payload. Reserved values are not an extension-discovery mechanism.
 
 ---
 
-# 2. `Control` byte
+# 2. Preferred provisional canonical descriptor
+
+The preferred ordinary canonical descriptor is **48 bits / 6 bytes**:
+
+```text
+byte 0      Control
+byte 1      WireNumber
+byte 2      SrcParticipantId
+byte 3      DestParticipantId
+bytes 4..5  Endpoint, little-endian
+```
+
+The candidate allocation is:
 
 ```text
 Control: 8 bits
-    QoS                   2   // bits 7..6, MSB of QoS is MSB of Control
-    Namespace             2   // bits 5..4
-    HasHeaderExtensions   1   // bit  3
-    TransportType         3   // bits 2..0, LSB is LSB of Control
+    QoS                   2   // bits 7..6
+    Reserved              2   // bits 5..4, transmit zero; reject nonzero
+    HasExtensions         1   // bit  3
+    TransportType         3   // bits 2..0
+
+WireNumber                8   // byte 1
+SrcParticipantId          8   // byte 2
+DestParticipantId         8   // byte 3
+
+Endpoint: 16 bits, serialized little-endian in bytes 4..5
+    Namespace             2   // bits 15..14
+    Id                   14   // bits 13..0
 ```
 
-`TransportType` sits at the bottom because it is checked on every ingress for support (`CORE §19.1`) and `control & 0x07` is the cheapest possible extraction. `HasHeaderExtensions` is a single-bit test at `control & 0x08`, which a parser needs before it can locate the payload.
+Equivalently:
 
-**`Control` is fully allocated.** Two plus two plus one plus three leaves no reserved bits and no growth room, so `PDU-5`'s reserved-field rule has nothing to enforce here, and any future global flag must go in a header extension (`PDU-6`) rather than into spare space that does not exist.
+```text
+control =
+    ((qos & 0x03) << 6) |
+    ((has_extensions & 0x01) << 3) |
+    (transport_type & 0x07)
+
+endpoint =
+    ((namespace & 0x03) << 14) |
+    (endpoint_id & 0x3FFF)
+
+byte[4] = endpoint & 0xFF
+byte[5] = (endpoint >> 8) & 0xFF
+```
+
+On decode:
+
+```text
+qos            = (byte[0] >> 6) & 0x03
+reserved       = (byte[0] >> 4) & 0x03
+has_extensions = (byte[0] >> 3) & 0x01
+transport_type = byte[0] & 0x07
+
+endpoint              = byte[4] | (byte[5] << 8)
+namespace             = (endpoint >> 14) & 0x03
+endpoint_id           = endpoint & 0x3FFF
+```
+
+The reserved-field check from §1.2 applies to `reserved` before further descriptor interpretation.
+
+This byte-oriented form replaces the former `RoutingWord`. Canonical routing is represented explicitly by `WireNumber`, `SrcParticipantId`, and `DestParticipantId`; there is no canonical `NodeId`, `Direction`, `WireAlias`, or `RoutingWord`.
+
+## 2.1 Provisional width status
+
+The six-byte shape is the preferred implementation direction, not a frozen interoperability allocation. In particular, the 8-bit `WireNumber`, 8-bit participant identifiers, and resulting 14-bit Endpoint Id require validation against a representative topology corpus before freeze.
+
+That corpus must include multicore Endpoint Domains, redundant controllers, gateways, multiple constrained buses, overlapping Wires, device-private and debug/platform Wires, local/sentinel reservations, and plausible product growth. The review must record peak consumption, reservation cost, and remaining headroom. Poor headroom reopens the allocation widths; it does not silently introduce aliases or truncation.
 
 ---
 
-# 3. `RoutingWord`
+# 3. Relationship to CAN `PduControl`
 
-```text
-RoutingWord: 16 bits
-    NodeId                5   // bits 15..11
-    Direction             1   // bit  10
-    WireNumber           10   // bits  9..0
-```
+The relationship between canonical `Control` and a Classical CAN `PduControl` is **open and provisional**.
 
-This is the case where the alignment preference and the "largest field first" instinct pull in opposite directions, and alignment should win. With `WireNumber` in the low ten bits, little-endian serialization makes the first byte **exactly `WireNumber[7:0]`**, and extraction is a single mask:
+The previous mask-and-OR correspondence is no longer valid: canonical bits 5..4 are now reserved, while `Namespace` is part of the 16-bit Endpoint. CAN11 also reconstructs canonical QoS, Wire, and participant identity from the selected Link Binding and CAN identifier rather than necessarily carrying the canonical descriptor verbatim.
 
-```text
-wire      = word & 0x03FF
-direction = (word >> 10) & 0x01
-node_id   = (word >> 11) & 0x1F
-```
+`LINK §2` retains reusable PDUA framing and capacity work, but the following require redesign and revalidation together:
 
-Placing `WireNumber` at the top instead would split it 2/8 across the byte boundary. That costs nothing computationally, but it leaves no field occupying a whole byte and makes the serialized form harder to read in a trace.
+- the exact `PduControl` fields and bit positions;
+- representation of the 16-bit `Endpoint`;
+- optimized N=1 eligibility and byte layout;
+- General N=1 metadata size and capacity;
+- aggregate CRC placement, protected range, and exact algorithms.
 
-Note that a profile identifier is a separate question with different pressures. The Classical CAN identifier packs `WireAlias` rather than `WireNumber` and is driven by arbitration rather than extraction cost; its layout is still open (`REG §6.8`).
+Until that work is complete, no implementation shall infer a CAN `PduControl` layout by copying canonical `Control`, and no document shall claim a byte-exact conversion between them. A finalized CAN profile must provide explicit encode/decode rules and golden vectors.
 
 ---
 
-# 4. Relationship to CAN `PduControl`
+# 4. What Is Still Open
 
-The canonical `Control` byte is **never transmitted verbatim on Classical CAN.** QoS travels in the CAN identifier, and the General PDUA START frame carries a `PduControl` byte for the rest (`LINK §2.5`). Optimized N=1 carries no control byte at all.
-
-The two bytes are deliberately aligned on the six bits they share, differing only in the top two:
-
-```text
-Control                       PduControl
-    QoS                  2        EndpointId[9:8]      2   bits 7..6
-    Namespace            2        Namespace            2   bits 5..4
-    HasHeaderExtensions  1        HasHeaderExtensions  1   bit  3
-    TransportType        3        TransportType        3   bits 2..0
-```
-
-Conversion is therefore a mask and an OR in each direction:
-
-```text
-control    = (qos    << 6) | (pdu_control & 0x3F)
-pdu_control = (eid_hi << 6) | (control     & 0x3F)
-```
-
-The alternative — letting each byte order its fields independently — costs three shifts per PDU in each direction and, more importantly, is easy to get subtly wrong in one direction only. Because the two bytes cannot both appear in one frame, they can never disagree, so no cross-validation rule is needed.
-
----
-
-# 5. What Is Still Open
-
-- Physical placement and significance order of `Direction`, `WireAlias`, and `NodeId` within the Classical CAN identifier, and which Direction value means `OriginToNode` (`REG §6.8`, `LINK §2.2`).
-- Commissioning control space, which must be reserved before that identifier layout freezes (`LINK §2.13`).
-- Header extension length encoding and internal field placement (`REG §6.1`).
-- Byte order and placement of the CAN aggregate CRC (`REG §6.8`).
+- Exact canonical allocation widths, pending the topology-corpus validation in §2.1.
+- Header-extension length encoding and internal field placement (`REG §6.1`).
+- CAN `PduControl`, Endpoint packing, optimized and General N=1 details (`LINK §2`).
+- CAN aggregate CRC algorithms, protected range, placement, and byte order (`LINK §2`).
+- Final CAN29 canonical-field representation.

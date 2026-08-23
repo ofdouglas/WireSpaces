@@ -8,6 +8,28 @@ Cross-references use document codes. Section numbers in older entries refer to l
 
 ---
 
+# Revision 0.14 — Participant identity, Logical Buses, and revised CAN11 profiles
+
+Revision 6 and its accepted CAN11 refinement replaced the canonical Origin/Node architecture. Every independently routed Endpoint Domain now has one deployment-scoped `ParticipantId`, used on every Wire it joins. Canonical `Origin`, `Node`, `NodeId`, and `Direction` are retired; the ordinary PDU instead carries canonical source and destination Participant identity, and multiple Participants may independently source traffic on one Wire. `Direction` survives only where a constrained Link profile uses it to reconstruct source and destination and has no canonical request/reply or authority meaning.
+
+A Wire is now explicitly a **Logical Bus**: a configured loop-free propagation domain realized by one or more Links. Destination Participant identity controls acceptance rather than ordinary next-hop routing, and several broad or narrow Wires may overlap on the same Physical Links. Plain forwarding preserves canonical Wire, source, destination, Endpoint, control metadata/extensions, and payload while changing only Link-local representation. Consuming one interaction and authoring another is composition, so the composing Participant becomes the new canonical source.
+
+The preferred ordinary descriptor became a provisional 48-bit / 6-byte form: one Control byte, 8-bit `WireNumber`, 8-bit `SrcParticipantId`, 8-bit `DestParticipantId`, and a 16-bit Endpoint. The 8-bit Wire and Participant allocations remain subject to representative topology/headroom validation before freeze.
+
+`kLocalBus` is now a reserved canonical local-only Wire number rather than an anonymous alias. It may be bound to at most one local Link Interface in a Router/Endpoint Domain, produces fully canonical ingress, and is locally dispatchable but not transparently forwardable or spliceable as itself. Transparent forwarding does not merge independently assigned Participant identity universes. A splice is the explicit configured Wire-scope projection boundary: it preserves canonical Participant identity and lineage while deliberately changing Wire scope, and it does not resolve collisions between independent identity universes.
+
+Link representation was generalized into two independent mechanisms. **Elision** omits a canonical field uniquely implied by the Link Binding or carrier context; **projection** maps a bounded Link-local participant code to canonical `ParticipantId` without changing identity. Every ingress representation reconstructs canonical Wire/source/destination before generic routing or dispatch.
+
+CAN11 now has three profiles over two addressing models:
+
+- **Guest VCN:** an aligned 16-identifier block allocated by the legacy-bus owner, 3-bit VCN plus Link-local Direction, and one fixed QoS reconstructed from the Link Binding;
+- **Native VCN:** 2-bit QoS, 8-bit VCN, and Link-local Direction;
+- **Native Participant-Compressed:** 2-bit QoS, 3-bit compact participant code, 5-bit general participant code, and Link-local Direction, with direct mapping by default and optional projection.
+
+Every CAN11 Link-profile binding carries exactly one WS Wire and elides its Wire number. The all-ones VCN values are reserved for Link control rather than ordinary configured circuits. Guest fixed-QoS behavior is accepted, while the exact fixed-QoS policy, VCN allocation policy, map-fingerprint coverage, atomic map activation and interaction with in-progress reassembly, and commissioning protocol remain deferred. CAN29 remains the richer escalation path; its final identifier and byte layout are not frozen.
+
+---
+
 # 1. Revision 0.13 — `LIB` corrected after review
 
 `LIB` was reviewed and several of its choices were wrong. This entry records the corrections, because three of them were errors rather than preferences and the reasoning is worth keeping.

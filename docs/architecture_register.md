@@ -517,6 +517,7 @@ If an implementation task appears to require one of these, first verify that the
 - Exact per-Wire top-talker/drop-report format.
 - How the five value states of `ERR-5` are encoded: per-section validity, reserved codes, an explicit validity map, or a mix. That they are distinguishable is settled; the mechanism is not, and it is the choice that determines whether Compact stays small.
 - Field widths and quantization for each of Compact, Standard, and Extended, and whether schema evolution preserves any byte-prefix compatibility (the working assumption is that it does not need to).
+- When rejection-reason **numeric** values are frozen. Semantic names are stable from the start; numbers are not, until a reason is serialized into a telemetry schema or crosses a wire. `LIB §4.5` withdrew an earlier "stable numbering, append only" promise as premature, on the grounds that the registry will be reorganized during prototyping and an early freeze buys nothing. The freeze should be an explicit act taken with this schema, not something inherited from a comment.
 - Whether the counter registry and the rejection-reason registry (`CONFORM §4`) are one enumeration or two. They serve different consumers but must not drift, and merging them is the cheap way to guarantee that. `LIB §4.5` proposes a third option — one wide registry plus a narrow API result type with a documented mapping — which keeps a call-site `switch` exhaustive without allowing two tables.
 - Detail pagination and cursor behavior for Extended, including what happens to a cursor across a restart.
 - Resolution, epoch, and wrap-comparison rules for the arrival timestamp stored in an Endpoint slot. `LIB §4.3` fixes only that the stored form is narrower than the platform clock's 64-bit nanosecond time point and that the reduction happens once on the ingress path; the width and what a wrap means for a staleness test are open.
@@ -559,6 +560,8 @@ If an implementation task appears to require one of these, first verify that the
 - Scope and build-time removal rules for promiscuous/bring-up mode.
 - What the `Staged` phase persists, and how an abandoned commissioning attempt is rolled back.
 - The configuration compatibility-check mechanism: what it covers, how it is computed, whether it is per-Link or per-deployment, and whether a mismatch blocks traffic or only raises a diagnostic (`DEPLOY §2.4`).
+- Whether `CORE §17`'s capability set is one descriptor or two. `LIB §8.3` splits it: properties that survive a change of controller (max PDU size, fragmentation, QoS mapping) describe the Logical Link and are what configuration validates against, while queue depth, DMA use, and ISR involvement describe the driver and are diagnostic only. The dividing line is proposed, not settled, and it matters because mixing them makes configuration validation depend on a peripheral.
+- Whether a Link's transfer-unit kind remains a described capability. It is still useful as a *description*, but `LIB §8.1` removed it as a runtime discriminator: hardware driver contracts are typed per carrier shape there, because a WireSpaces CAN identifier carries descriptor content (`LINK §2`) that a byte-span signature cannot express. Carrier-neutrality is asserted at the Logical Link, not at the driver.
 
 ## 6.11 Freshness and transport semantics
 
@@ -576,7 +579,9 @@ If an implementation task appears to require one of these, first verify that the
 - Whether a small documented default Queue capacity is offered, or every Queue Endpoint declares its depth. A default in general builds with profiles able to require explicit capacity is the likely compromise; prototype experience should decide.
 - Whether a narrowly scoped synchronous hook is ever permitted for instrumentation, tracing, or platform scheduling notifications. Framework arrival-timestamping at acceptance is settled (`DISP-2`); **application-supplied hooks are not in prospect**, since an unrestricted user callback recreates what `Inline` was withdrawn for. If one is ever considered it must answer: who may supply it, before or after acceptance, may it inspect payload, may it transmit, may it block, what bound applies, and whether a dedicated observation Endpoint consumed asynchronously would do instead.
 - Whether transmit direction keeps its own vocabulary. `TxBinding` became a transmit Endpoint, but it still carries authority that receive storage does not, which may justify a distinct name.
-- Exact Snapshot memory ordering: atomics, barriers, seqlock retry rules, and the interaction between the value generation and the sampled/sent echo.
+- Exact Snapshot memory ordering. The **mechanism is now decided: a seqlock** (`LIB §9.2`), so a concurrent read is safe by construction and this is no longer a question about whether multi-reader Snapshots work. What remains open is the detail — which atomics or barriers, whether a retry bound is declared, and the interaction between the value generation and the sampled/sent echo. `LIB §9.2` also fixes two consequences worth carrying: writers still need exclusion from each other, and the seqlock sequence is kept distinct from the `DISP-12` generation so that an implementation detail is not exported as a Service-facing contract.
+- Whether the seqlock's priority constraint should be a stated invariant rather than a note. A reader spinning at higher priority than a preempted mid-write writer livelocks on a single core; the natural arrangement (framework RX writer at or above the reading Service) is safe, but nothing in the type system enforces it.
+- Concurrency beyond Snapshot reads: several writers into one Endpoint, and concurrent access to one Logical Link, are undesigned. `LIB §9.1` states a narrow phase-1 contract that requires the application to serialize them.
 - The first composition pattern to attempt under `SVC-5`, and whether it genuinely flattens.
 
 ## 6.13 Master-initiated Links
@@ -644,6 +649,6 @@ The mining method that has worked so far: read for concepts that were *dropped* 
 
 # 8. Revision History
 
-Current revision: **0.12** (`LIB` reworked to build on the existing `Design/Firmware` utility layer; narrows `REG §6.8` to implemented CRC candidates; no architectural change — see `HIST §1`).
+Current revision: **0.13** (`LIB` corrected after review: dependency cycle removed, driver seams typed per carrier, Snapshot coherence decided as a seqlock; no change to `CORE` behavior — see `HIST §1`).
 
 Full revision narrative and superseded-source provenance live in [history.md](history.md). `REG` keeps only status; `HIST` is archival and is not part of the control surface.

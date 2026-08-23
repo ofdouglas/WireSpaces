@@ -183,6 +183,9 @@ Phase 2: independent agents sketch the same system from the same neutral descrip
 |---|---|---|---|---|---|---|
 | `01_dev_board` | `01_dev_board.md` | `sketches_b/01_dev_board.md` | | | | |
 | `02_peer_can` | `02_peer_can.md` | `sketches_b/02_peer_can.md` | | | | |
+| `07_amr` | `07_amr.md` | `sketches_b/07_amr.md` | Yes | 7 application Wires in both; variant adds one supporting Platform Wire | Platform reach; observer membership; Bumper route scope | Strong convergence on Participants, seven production scopes, gateway boundaries, and earned multi-Origin |
+| `08_excavator` | `08_excavator.md` | `sketches_b/08_excavator.md` | Yes | 6 in both | Split versus spanning Hydraulic control scope | Strong convergence on all-multi-Origin topology, operation-level authorization, Platform scope, and degraded behavior |
+| `09_bess` | `09_bess.md` | — | — | 12 | No independent variant yet | — |
 
 ### `01_dev_board` — comparison notes
 
@@ -192,9 +195,41 @@ Phase 2: independent agents sketch the same system from the same neutral descrip
 
 <!-- e.g. one-Wire+observation vs four authority-Wires; friction rating differences -->
 
+### `07_amr` — comparison notes
+
+- Both agents derived the same seven production relationships: controller coordination, Safety, Power, Bumper/discrete sensing, Navigation sensing, Payload actuation, and Charge.
+- `sketches_b/07` is the stronger consolidation base because its supporting Platform Wire preserves one canonical identity for firmware update, telemetry, logs, and time across Motion, Payload, and BMS forwarding. The primary's update paths otherwise cross application Wires without one preserved Wire identity.
+- Normalize Bumper as Chassis-local unless the frozen machine explicitly gives Autonomy an observer path. Optional observation must not silently widen physical realization.
+- Request-scoped replies from Motion/Payload on Safety remain `ParticipantToOrigin`; they do not add permitted Origins. Safety has one Origin, P3.
+- Forwarding tax is **None** where Motion/BMS merely implement frozen native cross-link reach; generated route tables belong under configuration burden and carrier cost.
+
+### `08_excavator` — comparison notes
+
+- Both agents independently reached six Wires and found that all six legitimately need multiple Origins, including Platform and Safety I/O. This is evidence that multi-Origin is useful beyond peer networks.
+- The primary split — high-level hydraulic requests on Chassis Control, local actuator/protection on Hydraulic Local Control — makes the frozen composition boundary clearest.
+- The variant's spanning Hydraulic Wire is defensible only where unchanged leaf traffic or a genuinely common protective broadcast crosses the Hydraulic Gateway. Its duplicate `HydraulicFunction.highLevelRequest` authorization on both W2 and W4 must not survive consolidation.
+- Normalize Configuration burden to **Mild** when compact authored service-family rules generate the large flattened safety-relevant matrix. Normalize global Identity awkwardness to **None**.
+
+### `09_bess` — review notes
+
+- Multi-Origin earns its cost on PlantControl and PlantPartner while preserving fixed membership and Participant identity through active-term failover.
+- Static permitted-Origin capability and runtime accepted-Origin state are distinct. Organizer can audit the former; receiving Services enforce the latter.
+- `PlatformTelemetry` and `FirmwareUpdate` have identical membership and realization. Their separation is mild Artificial-Wire pressure; a single Platform Wire with Endpoint-level update admission appears sufficient and should be tested before consolidation.
+- Origin-count accounting must remain numeric: PlatformTelemetry needs 25 Origins even when authored as one all-members declaration.
+- Normalize the standard friction scale to None/Mild/Significant. Runtime Plant term transfer is native Service policy, not Wire-role instability.
+
 ### Underspecified guidance
 
 <!-- Items where agents diverged because README/CORE does not prescribe a unique mapping -->
+
+### Remap experiment notes
+
+- **05 multicore:** normalize the result as **Candidate 1 modestly simpler; Candidate 2 neutral**. Both remaps retain 2 Wires, require 0 multi-Origin Wires, add no authored authorization state, and leave forwarding, polling, observation, composition, and failure behavior unchanged.
+- **05 open questions (do not score until brief clarifies):** (a) `SF-028` — one Domain = one `ParticipantId` may collapse multiple network identities (Cell Nodes 20/21) and push distinction into Endpoint policy; (b) whether forwarding Domains (P11) must be Wire members; (c) whether configured observers (P31) are members or explicit non-members.
+- **02 peer CAN:** normalize the result as a clear **Candidate 2 simplification** on the primary interaction path. The Wire count remains one; Interaction awkwardness improves Significant→None and Failure mismatch Mild→None. Wire proliferation stays None→None (four-Wire alt was rejected escape hatch). Role instability stays None→None. Candidate 1 contributes only minor naming/tooling value here. Direct peer commands are primarily multi-Origin, not global-identity. Authored policy count: 1 compact symmetric-peer rule.
+- **02 broadcast caveat:** all-member Wire broadcast must not imply every Endpoint broadcast is semantically required by every member — Endpoint/binding interest still needed (`SF-027`).
+- **Candidate separability:** 05 shows global Endpoint-Domain identity can help when multi-Origin is useless; 02 shows multi-Origin can materially help where global identity is not central. Meta: 02 = 1/1 Wire needs multi-Origin; 05 = 0/2.
+- **Provenance caveat:** the 05 remaps are useful convergence but not pristine blinded replications because their authors had prior exposure to the authority-shaped-Wire, multicore-identity, and forward-vs-compose conclusions. Treat 05 as good non-regression evidence, not an independent adoption vote. A third 05 remap is lower priority than fresh-agent checks of 01, 04, and 06.
 
 ---
 
@@ -213,6 +248,9 @@ Phase 2: independent agents sketch the same system from the same neutral descrip
 | Coordinator absent / degraded | 04-C | | |
 | Multicore + heterogeneous fieldbuses | 05 | | |
 | Redundant gateway | 06 | | |
+| Distributed mobile robot authority | 07 | | |
+| Concurrent normal/safety/protective authority | 08 | | |
+| Redundant plant + safety/local autonomy | 09 | | |
 
 ---
 
@@ -247,6 +285,19 @@ One row per finding. Link the sketch(s) that surfaced it. Do not resolve here �
 | SF-021 | 2026-08-22 | 06 | **Partner connectivity ≠ redundancy** | Partner link provides reachability to healthy partner's buses; exclusive 2+2 split provides fault isolation, not redundant fieldbus attachment or Origin failover | `CORE §23.11` | **Strong negative boundary** — A loss removes drives/sensors/Origin; B loss removes aux/cell; promoting B does not recover A's buses | Do not label partitioned pairs "redundant" without §23.11 composition |
 | SF-022 | 2026-08-22 | 06 | **Exclusive bus ownership bounds failover** | Logical Wire reachability via partner forward ≠ physical bus redundancy when each bus has one exclusive gateway attachment | `CORE §23.11`; `README` sketch 06 | Whole loss of gateway removes its buses even if partner survives | Per-sink coverage matrix in tooling; Config D for true redundancy |
 | SF-023 | 2026-08-22 | 06 | **Service Wire multipath on dual EthPlant** | Dual gateway EthPlant + PartnerLink creates a cycle; nominal Service must use **branch-owned ingress** (A Eth for A-local Nodes, B Eth for B-local) — PartnerLink not on baseline Service tables | `CORE §12.4`, `§23.11` | **Issue caught in review** — ambiguous "laptop → A or B" causes duplicate delivery if both paths installed | Branch map in `DEPLOY` Wiring; alternate Service via PartnerLink only under §23.11 failover |
+| SF-024 | 2026-08-22 | [remap] 05 | **Multi-Origin does not collapse distinct authority planes** | Plant vs maintenance Wires remain separate when route scope, failure meaning, and Service bindings differ — collapsing would move boundary to authored Endpoint restrictions | `remap_brief` §4.4, §7.1 | **05 remap:** 2 Wires → 2 Wires; 0 multi-Origin Wires; plant (P10) vs maintenance (P30) | Do not count Wire removal without wire-accounting rows |
+| SF-025 | 2026-08-22 | [remap] 05 | **Global identity resolves cross-Domain Service addressing** | Deployment-global `ParticipantId` gives each Endpoint Domain a stable network identity; multi-Origin did not independently contribute | `remap_brief` §8.5; SF-018, SF-019 | Distinct Core0/Core1 Participants resolve the cross-Domain Link Telemetry case. This does **not** resolve multiple independently addressed same-type Service instances inside one Domain | Adopt ParticipantId-per-Domain as provisional SF-019 resolution only for cross-Domain instances; keep same-Domain instance semantics open |
+| SF-026 | 2026-08-22 | [remap] 02 | **Multi-Origin enables symmetric peer CAN** | Four peer ECUs on one CAN bus: all permitted Origins replaces nominated FL + observation + app-addressed commands | `remap_brief` §8.2; SF-014 | **02 remap:** 1 Wire before and after, 4 permitted Origins; Interaction awkwardness Significant→None and Failure mismatch Mild→None. Wire proliferation is **None→None** because the four-Wire design was only a rejected alternative. Direct peer addressing is a multi-Origin benefit; global identity contributes only minor naming/tooling value in this one-Wire case | Peer-cell Organizer profile; do not use single-Origin + observation as peer happy path if multi-Origin adopted |
+| SF-027 | 2026-08-22 | [remap] 02 | **Observation bridge removable under multi-Origin** | Peer telemetry via observe-`NodeToOrigin` was single-Origin workaround; each peer `OriginToParticipant` broadcast replaces it on primary path | `remap_brief` §5.4; SF-001 | Observation still valid where broadcast is not the intended relation; not required for sketch-02 primary remap. Wire-level broadcast reach must not imply that every Endpoint is semantically required by every member; Endpoint/binding interest remains necessary | Document when observation remains necessary vs optional, and how Endpoint interest refines Wire broadcast reach |
+| SF-028 | 2026-08-22 | [remap] 05 | **Multiple participant identities inside one Endpoint Domain** | Candidate 1 fixes one `ParticipantId` per Endpoint Domain, while source 05 used two Wire-local identities (Cell Nodes 20/21) in one Cell gateway Domain. Collapsing them to one Participant is safe only if the distinction is purely Endpoint-local | `remap_brief` §2.1, §8.5; SF-019 | Potential Candidate-1 expressive cost: separate broadcast membership, authority, routing, or failure identity may be lost or pushed into Endpoint policy unless the implementation splits one dispatch/ownership Domain into two | Decide whether one Domain may expose multiple participant identities; otherwise document the required Endpoint-level replacement and when a Domain must split |
+| SF-029 | 2026-08-22 | 07 | **Canonical Platform reach across gateway chains** | Firmware update, telemetry, logs, and time that cross Motion, Payload, and BMS need one preserved Wire identity if the gateways are forwarding rather than composing | Accepted forwarding premise; `CORE §12` | AMR comparison: seven application Wires converge, but only the variant's supporting Platform Wire gives P1→P7/P8/P9 a complete same-Wire forwarding path | Document a supporting Platform-Wire pattern for bounded on-machine management; reject cross-application-Wire pseudo-forwarding |
+| SF-030 | 2026-08-22 | 07–09 | **Spanning Wire partitions require per-path reachability** | A configured Wire can remain valid while gateway or segment loss partitions its members into connected components; one Wire-up/down flag is insufficient | `CORE §12`; multi-Origin degraded-state premise | AMR Motion loss partitions Safety/Power/Nav/Platform; excavator VCU loss partitions Powertrain/Platform; BESS rack isolation removes one branch of three spanning Wires | Organizer should compute and display per-Wire connected components and interaction-specific required-sink reach |
+| SF-031 | 2026-08-22 | 08–09 | **Operation-level Origin authorization is load-bearing** | Per-Wire permitted-Origin sets are too coarse when VCU/Plant, Safety, BMS/capability, gateway protection, and leaves share a Wire but may originate disjoint operations | Accepted multi-Origin premise; Endpoint/Service authorization | Compact service-family/class declarations remain auditable; flattened per-Endpoint matrices are large but generated. Wire allow-sets restrict only a subset of cases | Name and specify Endpoint-level Origin admission classes; require generated-rule provenance |
+| SF-032 | 2026-08-22 | 08 | **Composition boundary does not automatically require a Wire boundary** | A gateway may terminate one interaction and originate another on the same Wire, but only when route, broadcast, and failure scope remain genuinely common | Forward-vs-compose premise; `CORE §12` | Excavator agents diverged on split Hydraulic Local versus one spanning Hydraulic Wire. Split is clearer unless unchanged leaf traffic/common protection really crosses the Gateway | Add guidance for deciding same-Wire composition versus separate semantic scopes; prohibit duplicate authorization on both decompositions |
+| SF-033 | 2026-08-22 | 09 | **Static permitted capability vs runtime accepted Origin** | Redundant Plant A/B are both statically permitted, while active term/epoch determines which is presently accepted. Organizer can audit capability but cannot evaluate the runtime predicate | Accepted multi-Origin premise; redundancy composition | BESS failover changes no Wire, membership, or Participant identity; stale old-term commands are rejected at receiving Services | Name runtime Origin-admission predicates and require tooling to disclose when authority is not statically decidable |
+| SF-034 | 2026-08-22 | 07–09 | **No native live-Origin-population state** | “No currently live permitted Origin” is reconstructed from health plus authored Origin sets, not represented directly by Wire state | Multi-Origin degraded-state premise | Needed for Safety-unavailable, no active Plant, update-orchestrator unavailable, and multi-Origin gateway partitions | Add Organizer/runtime view of live permitted Origins per Wire and per authorized capability without implying automatic reassignment |
+| SF-035 | 2026-08-22 | 09 | **Identical Platform Wire split is likely moved authority** | PlatformTelemetry and FirmwareUpdate have identical members, realization, and broadcast reach; separate failure wording alone may not justify two Wires when update authority is already Endpoint- and term-restricted | Minimum-machinery rule; Endpoint authorization premise | BESS W5/W6 split is the only acknowledged Artificial-Wire pressure; merging preserves route/failure topology and moves no new policy beyond the existing update class | Test one Platform Wire before adopting the split; report update availability as capability state rather than Wire state |
+| SF-036 | 2026-08-22 | 09 | **Global identity sizing follows Endpoint Domains, not devices** | Large hierarchical systems consume one global identity per Endpoint Domain even when constrained Links use reusable carrier-local compact addresses | Accepted global-identity premise | Representative BESS uses 25 identities in one container while each local bus needs only 3–5 compact addresses | Carry Endpoint-Domain counts into sizing analysis; keep global semantic identity separate from carrier-local ceilings |
 
 ### Finding template (copy for new rows)
 
@@ -314,6 +365,10 @@ Questions that require multiple sketches or agent comparison before answering. *
 - Is **Mild** wire proliferation (four symmetric authority Wires) acceptable product cost for peer CAN, or is raw CAN the honest recommendation below N peers?
 - Does poll projection generalize from RS-485 bridge (`03-B`) to multicore gateway (`05`) without new concepts?
 - When should friction distinguish **model honesty** (good behavior under failure) from **low mapping cost**?
+- Does one-`ParticipantId`-per-Endpoint-Domain preserve systems that need multiple participant-level broadcast, authority, routing, or failure identities inside one dispatch Domain (`SF-028`)?
+- How does Endpoint/binding interest refine all-member Wire broadcast reach without recreating configured observation (`SF-027`)?
+- Should a common on-machine Platform Wire be the default for canonical update/telemetry forwarding across gateway trees (`SF-029`), and when should platform capabilities split despite identical topology (`SF-035`)?
+- What runtime data model exposes connected components, live permitted Origins, and capability-specific authority without pretending to perform failover (`SF-030`, `SF-033`, `SF-034`)?
 
 ---
 
@@ -321,6 +376,10 @@ Questions that require multiple sketches or agent comparison before answering. *
 
 | Date | Change |
 |---|---|
+| 2026-08-22 | Reviewed sketches 07–09; added AMR/excavator comparison notes and SF-029–SF-036 for platform reach, partitioned Wires, operation-level authority, runtime Origin admission, live-Origin state, and identity sizing |
+| 2026-08-22 | Normalized remap 02/05 review: peer Wire proliferation None→None; direct addressing attributed to multi-Origin; broadcast-interest caveat; added SF-028 for multiple identities inside one Endpoint Domain |
+| 2026-08-22 | [remap] 02: SF-026–SF-027; multi-Origin symmetric peer CAN on one Wire |
+| 2026-08-22 | [remap] 05: SF-024–SF-025; global identity resolves SF-018/019; 2→2 Wires |
 | 2026-08-22 | Extended SF-019–SF-021; added SF-022, TF-006, and AF-004 from independent redundant-gateway sketch |
 | 2026-08-22 | Sketch 06 review: reframed as partitioned; SF-023 Service multipath; updated SF-019–022 |
 | 2026-08-22 | Sketch 06: SF-020–SF-021; merged duplicate SF-019; DF-009–DF-010 |

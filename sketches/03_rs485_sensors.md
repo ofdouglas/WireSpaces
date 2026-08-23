@@ -441,6 +441,17 @@ If poll projection reduces to a compact per-Link declaration, interaction stays 
 
 ---
 
+## Spec findings
+
+| ID | Config | Topic |
+|---|---|---|
+| [SF-002](synthesis.md#spec-findings-log) | B | Poll projection (per-Link schedule on one Wire) |
+| [SF-003](synthesis.md#spec-findings-log) | A, B | Wire Origin vs Link poll initiator |
+| [SF-011](synthesis.md#spec-findings-log) | A | Communication age vs measurement age |
+| [SF-017](synthesis.md#spec-findings-log) | A | Master-initiated profile ≠ PHY law |
+
+---
+
 ## References
 
 | Doc | Sections used |

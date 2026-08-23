@@ -25,6 +25,7 @@ The experiment aims to **distinguish natural structure from WS-imposed structure
 |---|---|---|
 | **1 — Sketch** | Now | Natural model first; minimum WS machinery; friction flags; model-pressure notes |
 | **2 — Refine** | After 2–3 sketches exist | Tune format from evidence; run independent agents on the same neutral description; compare Wire decompositions |
+| **2b — Remap** | Now | Re-map existing sketches under a candidate architecture change; see [`remap_brief_multi_origin.md`](remap_brief_multi_origin.md) |
 | **3 — Review** | Later | Aggregate verdicts; status-quo essays; architecture implications |
 
 Phase 1 does **not** require numeric scores, winner/loser verdicts, or full conventional-architecture comparisons.
@@ -76,19 +77,36 @@ Archetypes are chosen to span the design space — **not as predicted verdicts**
 | [`03_rs485_sensors.md`](03_rs485_sensors.md) | RS-485 industrial sensor chain | **A:** single segment; optional **B:** repeater/segmented bus | Master-initiated / polled Link; positive control for Origin/Node |
 | [`04_pi_robot.md`](04_pi_robot.md) | Small robot: Raspberry Pi + simple ECUs; PC via WiFi part-time | **A:** bench (PC ↔ Pi direct); **B:** field (WiFi telemetry); **C:** ECUs standalone (Pi absent) | Linux gateway; intermittent maintenance Link; telemetry logging on Pi always |
 | [`05_multicore_gateway.md`](05_multicore_gateway.md) | Multicore AMP MCU gateway: Ethernet + named heterogeneous fieldbuses | Single configuration | Shared-memory Domains; many Link Interfaces; ASIL-A-ish timing notes |
-| [`06_redundant_gateway.md`](06_redundant_gateway.md) | Rework of 5: dual redundant multicore gateways, 2+2 bus split | Side-by-side with 5 where useful | Fault isolation; cross-partner forwarding; explicit redundancy/taps; debug PC via switch |
+| [`06_redundant_gateway.md`](06_redundant_gateway.md) | Rework of 5: paired multicore gateways, 2+2 exclusive bus split | Side-by-side with 5 where useful | Fault partitioning vs redundancy; partner PlantNet forward; Service branch routing; debug PC via switch |
 
 **Write order:** this README → `01_dev_board.md` → `02_peer_can.md` → `03_rs485_sensors.md` → `04_pi_robot.md` → `05_multicore_gateway.md` → `06_redundant_gateway.md`.
 
 `basic.md` was superseded by Config A of `01_dev_board.md` and removed.
 
-**Phase 2 check:** After `01` and `02` exist, have **independent agents** sketch the same system from the same neutral description (peer CAN is the first candidate). Divergent Wire decompositions suggest underspecified guidance; convergence without coordination is a strong positive signal.
+**Synthesis:** Cross-sketch rollup, friction heatmap, agent comparison, spec findings, and documentation follow-ups live in [`synthesis.md`](synthesis.md). Update that file as sketches mature; do not duplicate long-form synthesis inside individual sketches.
+
+**Phase 2 check:** After `01` and `02` exist, have **independent agents** sketch the same system from the same neutral description (peer CAN is the first candidate). Divergent Wire decompositions suggest underspecified guidance; convergence without coordination is a strong positive signal. Independent variants may be kept in [`../sketches_b/`](../sketches_b/) and compared in `synthesis.md` § Agent comparison.
+
+**Remaps** are a different activity from independent variants. A remap re-maps an *existing* sketch under a candidate architecture change and reports the delta; it does not re-derive the system. Remaps live in `remap/` and are governed by their own brief — currently [`remap_brief_multi_origin.md`](remap_brief_multi_origin.md), covering deployment-global Endpoint-Domain identity and multi-Origin Wires. Read that brief instead of the source change proposal; the brief explains why.
 
 ---
 
 ## Per-sketch structure
 
 Every sketch file uses the same section skeleton **per configuration** (A, B, …). Omit sections only when they truly do not apply.
+
+### 0. Executive summary (top of file)
+
+Place a short block at the **top of each sketch file** (before configuration detail). Copy or adapt into [`synthesis.md`](synthesis.md) when the sketch is review-ready.
+
+```text
+**Mapping:** one sentence — chosen Wire decomposition and why.
+**Worst friction:** signal name + None/Mild/Significant (happy path only).
+**Main lesson:** one sentence — what this sketch teaches about WS fit or limits.
+**Configs:** A, B, … (which are covered in this file).
+```
+
+Keep each field to one line. The body of the sketch carries evidence; the summary is for cross-sketch review.
 
 ### 1. Title and intent
 
@@ -209,6 +227,20 @@ Record simplifications as well as problems — e.g. "these four Wires always tra
 
 Per-sketch follow-ups not captured above. Do not resolve architecture decisions here.
 
+### 9. Spec findings (optional)
+
+If the sketch surfaces a **spec ambiguity, doc gap, or stress-test result** that applies beyond this file, add a row to the [Spec findings log](synthesis.md#spec-findings-log) in `synthesis.md` (do not duplicate long analysis there — link by `SF-0NN` ID).
+
+---
+
+## Recording findings
+
+| Where | What belongs |
+|---|---|
+| Sketch **open questions** | Mapping choices and product questions local to one system |
+| [`synthesis.md` § Spec findings log](synthesis.md#spec-findings-log) | Cross-sketch or normative-doc issues (ambiguity, missing pattern, stress-test of a specified mechanism) |
+| [`synthesis.md` § Documentation follow-ups](synthesis.md#documentation-and-product-follow-ups) | Accepted candidates for `CORE` / `DEPLOY` / `LINK` / tooling changes |
+
 ---
 
 ## Cross-cutting conventions
@@ -253,12 +285,13 @@ If that pattern adds topology or configuration without a clear benefit in the sk
 - **Four named fieldbuses** — not all the same Link type (e.g. mix CAN, RS-485, Ethernet to subsystems).
 - Note **ASIL-A-ish** timing/freshness in interactions; no formal safety case or WireContracts in sketches.
 
-### Redundant gateway (sketch 06) — fixed choices for now
+### Paired / partitioned gateway (sketch 06) — fixed choices for now
 
-- Each redundant MCU has **exclusive access to two of four** fieldbuses (fault isolation).
-- Partners **gateway fieldbus traffic for each other** where cross-visibility is required — model in the **forwarding table**, not as two Origins on one Wire.
+- Each gateway MCU has **exclusive access to two of four** fieldbuses (fault isolation — **not** redundant attachment).
+- Partners **gateway PlantNet traffic** for each other over PartnerLink — model in **forwarding table**, not as two Origins on one Wire.
+- **Service Wire:** branch-owned EthPlant ingress (A-local vs B-local Nodes); **PartnerLink not on nominal Service routing** (avoids multipath cycle).
 - **Debug / service PC** attaches via a **small Ethernet switch**; explore attachment from the **system builder's** perspective.
-- **Redundant delivery, observation taps, and partner status** must be **explicitly modeled** (`CORE §12.6`, `§23.11`). Do not imply redundancy from duplicate cabling alone.
+- **Partner observation taps and partner status** must be **explicitly modeled** (`CORE §12.6`, `§23.11`). Do not imply redundancy from partner link or dual EthPlant alone.
 
 ---
 
@@ -336,6 +369,22 @@ One participant may be **Origin on one Wire and Node on another** over the same 
 
 When a tempting decomposition turns out wrong (physical-link Wires, forced maintenance/user split on one serial link, IDebug splice on a one-cable board), **keep it as an alternative** with a short comparison table. That is often more valuable than only showing the final answer.
 
+### Forward vs compose
+
+Gateway **forwarding** preserves Wire identity (`CORE §12`). **Composition** consumes on one Wire and produces a new PDU on another — teleop, motion control, aggregation. Cross-Wire relay is an authoring error, not a pattern. See [`SF-004`](synthesis.md#spec-findings-log), [`SF-015`](synthesis.md#spec-findings-log).
+
+### Observation on broadcast Links — specified, stress-tested
+
+Configured consumption of another participant's `NodeToOrigin` traffic on a shared medium is **already specified** (`CORE §3.1`, `§12.6`: electrical visibility ≠ membership; delivery requires configuration). Sketches use it for peer telemetry and multi-consumer gateway paths — **not as a proposed extension**.
+
+Treat observation as a **stress-test target** in every sketch that relies on it:
+
+- Is it **useful** compared with duplicate TX or re-origination?
+- Is it **awkward** to author, generate, or audit (symmetric observer tables, tooling presentation)?
+- Is it **limiting** compared with raw CAN visibility or a different Wire decomposition?
+
+Record results in the sketch friction table and, when the finding generalizes, in [`synthesis.md` § Spec findings log](synthesis.md#spec-findings-log) (see SF-001).
+
 ### Prior sketches
 
 | Sketch | Key lesson |
@@ -344,3 +393,5 @@ When a tempting decomposition turns out wrong (physical-link Wires, forced maint
 | `02_peer_can.md` | Peer telemetry via observation is clean; peer-addressed control is the fracture; nominated Origin Significant; native CAN ID matrix simpler for true peer symmetry |
 | `03_rs485_sensors.md` | Strong fit Config A; Config B: semantic Origin ≠ Link poll scheduler; one Wire across two locally-polled RS-485 segments |
 | `04_pi_robot.md` | Forward vs compose; B: WiFi ≠ Wire change; C: Wiring survives Origin offline, no role reassignment |
+| `05_multicore_gateway.md` | Per-Domain Routers (Sm is a real hop); one PlantNet across heterogeneous buses; SCADA Node 22 observe vs Service laptop Origin; Nodes 9/10 for dual-Domain telemetry |
+| `06_redundant_gateway.md` | Partitioned pair (not redundant buses); PlantNet partner forward; Service branch EthPlant routing (no Service on PartnerLink); Config D redundancy outline |

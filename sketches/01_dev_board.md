@@ -566,6 +566,19 @@ Ratings follow the sketch rubric: **actual clunkiness observed**, not merely "a 
 
 ---
 
+## Spec findings
+
+| ID | Config | Topic |
+|---|---|---|
+| [SF-001](synthesis.md#spec-findings-log) | B | Observation on broadcast Links (PC observe plant traffic) |
+| [SF-004](synthesis.md#spec-findings-log) | B | Forward vs compose (same-Wire gateway forward) |
+| [SF-013](synthesis.md#spec-findings-log) | B | Authority Wire lists downstream Nodes across Links |
+| [SF-015](synthesis.md#spec-findings-log) | B | Cross-Wire relay mislabeled as forward (rejected mapping) |
+| [SF-007](synthesis.md#spec-findings-log) | B | CAN NodeId 31 / provisioning drift (deferred commissioning) |
+| [SF-009](synthesis.md#spec-findings-log) | B | Stable device identity definition (deferred commissioning) |
+
+---
+
 ## References
 
 | Doc | Sections used |

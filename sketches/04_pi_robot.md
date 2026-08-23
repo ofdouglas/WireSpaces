@@ -512,6 +512,19 @@ local logging does not
 
 ---
 
+## Spec findings
+
+| ID | Config | Topic |
+|---|---|---|
+| [SF-001](synthesis.md#spec-findings-log) | A, B | Observation on broadcast Links (RobotPlant tap) |
+| [SF-004](synthesis.md#spec-findings-log) | A, B | Forward vs compose (Bench maintenance vs teleop) |
+| [SF-012](synthesis.md#spec-findings-log) | C | Wiring persists when Origin offline |
+| [SF-013](synthesis.md#spec-findings-log) | A | Authority Wire lists downstream Nodes (Bench spans Eth+CAN) |
+| [SF-015](synthesis.md#spec-findings-log) | A | Cross-Wire relay mislabeled as forward (rejected) |
+| [SF-016](synthesis.md#spec-findings-log) | A, B | Local observation tap on gateway ingress |
+
+---
+
 ## References
 
 | Doc | Sections used |

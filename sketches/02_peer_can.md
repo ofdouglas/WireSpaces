@@ -284,6 +284,17 @@ Peer CAN is where **equal participants** meet **exactly-one-Origin-per-Wire**. T
 
 ---
 
+## Spec findings
+
+| ID | Config | Topic |
+|---|---|---|
+| [SF-001](synthesis.md#spec-findings-log) | A | Observation on broadcast Links (peer telemetry) |
+| [SF-006](synthesis.md#spec-findings-log) | A | Per-source Snapshot storage for multi-producer state |
+| [SF-010](synthesis.md#spec-findings-log) | A | No `NodeToOrigin` broadcast (NodeId 0 invalid) |
+| [SF-014](synthesis.md#spec-findings-log) | A | Peer-addressed control class boundary |
+
+---
+
 ## References
 
 | Doc | Sections used |

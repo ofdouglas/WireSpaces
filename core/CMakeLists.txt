@@ -47,7 +47,7 @@ add_library(
 target_include_directories(
     wirespaces_core
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/inc
 )
 
 if(MSVC)
@@ -78,7 +78,16 @@ if(WIRESPACES_BUILD_CORE_TESTS AND BUILD_TESTING)
     set(BUILD_GMOCK OFF CACHE BOOL "Do not build GoogleMock" FORCE)
     FetchContent_MakeAvailable(googletest)
 
-    add_executable(wirespaces_core_tests test/hello_world_test.cpp)
+    add_executable(
+        wirespaces_core_tests
+            test/header_test.cpp
+            test/mailbox_test.cpp
+            test/packet_test.cpp
+            test/dispatch_test.cpp
+            test/router_test.cpp
+            test/local_domain_test.cpp
+            test/hello_world_test.cpp
+    )
     target_link_libraries(
         wirespaces_core_tests
         PRIVATE

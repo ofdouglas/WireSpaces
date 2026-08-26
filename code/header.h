@@ -10,6 +10,7 @@
 
 #ifdef __cplusplus
 namespace wirespaces {
+extern "C" {
 #endif
 
 // Control byte accessor constants
@@ -65,6 +66,11 @@ void header_set_has_extensions(Header* header, bool has_ext);
 void header_set_transport_type(Header* header, TransportType type);
 void header_set_control_fields(Header* header, ControlFields control_fields);
 
+void header_set_endpoint(Header* header, WsNamespace namespace_id, uint16_t endpoint_id);
+uint16_t header_get_endpoint_id(const Header* header);
+WsNamespace header_get_namespace(const Header* header);
+
 #ifdef __cplusplus
+} // extern "C"
 } // namespace wirespaces
 #endif

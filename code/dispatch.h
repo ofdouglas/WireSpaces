@@ -14,6 +14,7 @@
 
 #ifdef __cplusplus
 namespace wirespaces {
+extern "C" {
 #endif
 
 typedef enum {
@@ -43,9 +44,10 @@ typedef struct {
 // (either unicast to us or broadcast *to a wire we are part of*).
 DispatchResult dispatch_packet(const DispatchTable* table, PacketBufferHeader* packet);
 
+#ifdef __cplusplus
+} // extern "C"
 
 // TODO: move to other file?
-#ifdef __cplusplus
 template <typename T>
 void endpoint_receive_thunk(void* context, PacketBufferHeader* packet){
     static_cast<T*>(context)->receive(packet);

@@ -8,6 +8,7 @@
 
 #ifdef __cplusplus
 namespace wirespaces {
+extern "C" {
 #endif
 
 // Default suitable for most MCUs, override for larger gateways.
@@ -28,7 +29,10 @@ typedef struct {
 
 const HostInfo* host_get_info(void);
 
+void host_set_info(const HostInfo* host_info);
+
 
 #ifdef __cplusplus
+} // extern "C"
 } // namespace wirespaces
 #endif

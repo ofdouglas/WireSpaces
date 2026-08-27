@@ -1,8 +1,9 @@
-#pragma once
 /*
  * @file  crc.h
  * @brief Implements the CRC calculation algorithm.
 */
+
+#pragma once
 
 #include <cstdint>
 #include <type_traits>

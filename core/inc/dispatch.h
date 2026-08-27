@@ -2,6 +2,7 @@
  * @file dispatch.h
  * @brief WireSpaces Endpoint Dispatcher -- finds the right endpoint for a packet and dispatches it.
  */
+
 #pragma once
 
 #include <stddef.h>

@@ -2,6 +2,7 @@
  * @file packet.h
  * @brief WireSpaces packet definition and accessors API.
  */
+
 #pragma once
 
 #include "header.h"

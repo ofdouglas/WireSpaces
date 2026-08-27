@@ -2,6 +2,7 @@
  * @file host.h
  * @brief WireSpaces Host -- information about the local host.
  */
+
 #pragma once
 
 #include <stdint.h>

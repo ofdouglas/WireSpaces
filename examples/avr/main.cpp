@@ -4,10 +4,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "WireSpaces/cpp/core/wirespaces_core.hpp"
 #include "WireSpaces/cpp/hal/clock.h"
 #include "WireSpaces/cpp/services/heartbeat.h"
+#include "WireSpaces/cpp/services/ping.h"
+#include "hdlc_decoder.hpp"
 #include "hdlc_encoder.hpp"
 
 namespace {
@@ -18,17 +21,23 @@ constexpr std::uint16_t kBaudDivider{
 constexpr std::uint8_t kHeartbeatWire{1U};
 constexpr std::uint8_t kArduinoParticipant{1U};
 constexpr std::uint8_t kUartEgress{1U};
-constexpr std::size_t kHeartbeatCanonicalSize{
-    sizeof(wirespaces::Header) + sizeof(heartbeat::HeartbeatMessage)};
-constexpr std::size_t kHeartbeatFrameCapacity{kHeartbeatCanonicalSize * 2U + 2U};
+constexpr std::size_t kMaximumPayloadSize{4U};
+constexpr std::size_t kMaximumCanonicalSize{
+    sizeof(wirespaces::Header) + kMaximumPayloadSize};
+constexpr std::size_t kMaximumFrameCapacity{kMaximumCanonicalSize * 2U + 2U};
+constexpr std::uint16_t kPingCanonicalEndpoint{
+    static_cast<std::uint16_t>(0xC000U | WS_SERVICE_PING_ENDPOINT_ID)};
+
+WS_PACKET_DEFINE(UartReceivePacket, kMaximumPayloadSize);
 
 volatile std::uint32_t g_milliseconds{0U};
+wirespaces::avr_example::HdlcDecoder<kMaximumCanonicalSize> g_hdlc_decoder{};
 
 void uartInit() {
     UBRR0H = static_cast<std::uint8_t>(kBaudDivider >> 8U);
     UBRR0L = static_cast<std::uint8_t>(kBaudDivider);
     UCSR0A = _BV(U2X0);
-    UCSR0B = _BV(TXEN0);
+    UCSR0B = _BV(RXEN0) | _BV(TXEN0);
     UCSR0C = _BV(UCSZ01) | _BV(UCSZ00);
 }
 
@@ -60,7 +69,7 @@ void forwardToUart(
     (void)egress_set;
 
     if ((packet == nullptr) ||
-        (packet->size > sizeof(heartbeat::HeartbeatMessage))) {
+        (packet->size > kMaximumPayloadSize)) {
         return;
     }
 
@@ -68,7 +77,7 @@ void forwardToUart(
     const auto* canonical_bytes{
         reinterpret_cast<const std::uint8_t*>(&packet->header)};
 
-    std::uint8_t frame_storage[kHeartbeatFrameCapacity]{};
+    std::uint8_t frame_storage[kMaximumFrameCapacity]{};
     const std::size_t frame_size{
         wirespaces::avr_example::HdlcEncoder::encode(
             canonical_bytes,
@@ -81,6 +90,42 @@ void forwardToUart(
 
     for (std::size_t index{0U}; index < frame_size; ++index) {
         uartWriteByte(frame_storage[index]);
+    }
+}
+
+/**
+ * @brief Dispatch all complete canonical PDUs currently available from UART.
+ *
+ * Invalid and oversized frames are discarded. Reception is polled so the
+ * example does not allocate an interrupt-side packet queue.
+ */
+void processUartInput(const wirespaces::DispatchTable& dispatch_table) {
+    while ((UCSR0A & _BV(RXC0)) != 0U) {
+        const std::uint8_t byte{UDR0};
+        if (!g_hdlc_decoder.push(byte)) {
+            continue;
+        }
+
+        const std::size_t frame_size{g_hdlc_decoder.frameSize()};
+        if ((frame_size >= sizeof(wirespaces::Header)) &&
+            (frame_size <= kMaximumCanonicalSize)) {
+            UartReceivePacket packet{};
+            packet.capacity = kMaximumPayloadSize;
+            packet.size = static_cast<std::uint16_t>(
+                frame_size - sizeof(wirespaces::Header));
+            std::memcpy(
+                &packet.header,
+                g_hdlc_decoder.frameData(),
+                sizeof(packet.header));
+            std::memcpy(
+                packet.data,
+                g_hdlc_decoder.frameData() + sizeof(packet.header),
+                packet.size);
+            (void)ws_dispatch_packet(
+                &dispatch_table,
+                reinterpret_cast<const wirespaces::PacketBuffer*>(&packet));
+        }
+        g_hdlc_decoder.consume();
     }
 }
 
@@ -112,15 +157,34 @@ int main() {
         forwardToUart,
         nullptr,
     };
+    const wirespaces::HostInfo host_info{
+        kArduinoParticipant,
+        1U,
+        {kHeartbeatWire},
+    };
+    ws_host_set_info(&host_info);
+
     heartbeat::HeartbeatService<1000U> heartbeat_service{
         &route_table,
         kHeartbeatWire,
         kArduinoParticipant,
         WS_HOST_BROADCAST,
     };
+    ping::PingService ping_service{&route_table};
+    wirespaces::DispatchTableEntry dispatch_entries[]{
+        {
+            kPingCanonicalEndpoint,
+            ping_service.receiverHandle(),
+        },
+    };
+    const wirespaces::DispatchTable dispatch_table{
+        dispatch_entries,
+        1U,
+    };
 
     sei();
     for (;;) {
+        processUartInput(dispatch_table);
         heartbeat_service.run();
     }
 }

@@ -8,8 +8,8 @@ The example runs a minimal WireSpaces heartbeat publisher:
 - The HDLC Link layer frames and byte-stuffs the canonical header and payload.
 - UART0 transmits at 115200 baud through the UNO USB serial connection.
 
-The heartbeat payload is temporarily fixed to `0xC0DEBABE`. The first-stage
-HDLC framing does not yet append a CRC.
+The heartbeat payload contains the current 32-bit millisecond uptime. The
+first-stage HDLC framing does not yet append a CRC.
 
 Build from WSL:
 
@@ -65,7 +65,41 @@ The rule matches official Arduino UNO USB IDs (`2341:0043` and `2341:0001`), set
 
 The generated files are `build/heartbeat.elf` and `build/heartbeat.hex`.
 
-Verify the diagnostic heartbeat frame:
+Receive and log WireSpaces packets until interrupted:
+
+```sh
+make receive
+```
+
+`receiver.py` incrementally decodes HDLC framing, parses the canonical
+WireSpaces header, and emits each packet through Python's `logging` module.
+Future formatting and log destinations can be added with standard logging
+formatters and handlers without changing serial/framing code.
+
+For a bounded live test that resets the UNO and receives one packet:
+
+```sh
+python3 receiver.py --port /dev/ttyACM0 --baud 115200 \
+    --reset --count 1 --timeout 5
+```
+
+Run receiver unit tests:
+
+```sh
+make test-receiver
+```
+
+Ping the Arduino and require a matching response:
+
+```sh
+make test-ping
+```
+
+The hardware test sends a directed request from PC Participant 2 to Arduino
+Participant 1. Its default sequence, `0x7E7D`, deliberately contains both HDLC
+reserved bytes so the exchange tests byte stuffing in both directions.
+
+Run the bounded hardware smoke test:
 
 ```sh
 make verify
@@ -74,14 +108,12 @@ make verify
 Expected output includes:
 
 ```text
-wire=1 src=1 dst=255 endpoint=0xFFFE heartbeat=0xC0DEBABE
+WS packet wire=1 src=1 dst=broadcast qos=NORMAL ... payload[4]=...
 ```
 
-`config/verify-heartbeat.py` is deliberately a small bring-up decoder. A proper
-WireSpaces receiver is outside this example's current scope.
+The four payload bytes are the little-endian heartbeat uptime.
 
 ## Planned WireSpaces demo
 
 * 4-6 statically allocated packet buffers, sized to hold up to N=4 CAN PDUA payloads (the common upper bound for WS small packet size widespread compatibility)
 * Add HDLC CRC generation and validation.
-* Add a proper host receiver.

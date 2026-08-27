@@ -77,9 +77,7 @@ private:
             return;
         }
 
-        // TODO: use the real time once communication is established and we have a receiver program on PC.
-        const wirespaces::hal::MillisecondClock::TimePoint now_ms{0xC0DEBABEUL};
-        // const auto now_ms{wirespaces::hal::MillisecondClock::now()};
+        const auto now_ms{wirespaces::hal::MillisecondClock::now()};
         const wirespaces::ControlFields control_fields{
             wirespaces::kQoSNormal,
             false,

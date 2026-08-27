@@ -7,17 +7,17 @@
 
 #include <stddef.h>
 
-static HostInfo g_host_info = {
+static ws_host_info_t g_host_info = {
     0x00U,
     0U,
     {0U},
 };
 
-const HostInfo* host_get_info(void) {
+const ws_host_info_t* ws_host_get_info(void) {
     return &g_host_info;
 }
 
-void host_set_info(const HostInfo* host_info) {
+void ws_host_set_info(const ws_host_info_t* host_info) {
     if (host_info == NULL) {
         return;
     }

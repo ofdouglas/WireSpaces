@@ -7,8 +7,10 @@
 
 #include <stdint.h>
 
-#ifdef __cplusplus
-namespace wirespaces {
+#if defined(__GNUC__) || defined(__clang__)
+#define WS_PACKED __attribute__((packed))
+#else
+#define WS_PACKED
 #endif
 
 /** @brief Deliver within the Endpoint Domain; does not enter a Link Interface. */
@@ -19,7 +21,3 @@ namespace wirespaces {
 
 /** @brief Default single-slot mailbox payload capacity for prototypes. */
 #define WS_MAILBOX_DEFAULT_CAPACITY 64U
-
-#ifdef __cplusplus
-} // namespace wirespaces
-#endif

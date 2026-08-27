@@ -6,27 +6,34 @@
 #include "stub_hello_receiver.hpp"
 #include "stub_hello_sender.hpp"
 
-#include "dispatch.h"
-#include "host.h"
-#include "local_domain.h"
-#include "ws_constants.h"
+#include "core/wirespaces_core.hpp"
 
 #include "support/constants.hpp"
-#include "support/packet_builder.hpp"
 #include "support/host_fixture.hpp"
+#include "support/packet_builder.hpp"
 
 #include <gtest/gtest.h>
 
 namespace wirespaces::test {
 namespace {
 
+using support::asPacketBuffer;
 using support::kLocalHostId;
 using support::kReceiverEndpoint;
 using support::kRemoteHostId;
 using support::kUnknownEndpoint;
-using support::TestPacket;
 using support::PacketBuilder;
-using support::asPacketBuffer;
+using support::TestPacket;
+using wirespaces::DispatchResult;
+using wirespaces::DispatchTable;
+using wirespaces::DispatchTableEntry;
+using wirespaces::EndpointReceiver;
+using wirespaces::LocalDomainForwardContext;
+using wirespaces::RouteTable;
+using wirespaces::RouteTableEntry;
+using wirespaces::kDispatchNoEndpoint;
+using wirespaces::kDispatchOk;
+using wirespaces::kNamespaceUser0;
 
 class HelloWorldTest : public support::DefaultHostFixture {
 protected:
@@ -35,7 +42,7 @@ protected:
 
         dispatch_entries_[0] = DispatchTableEntry{
             kHelloSenderEndpoint,
-            EndpointReceiverHandle{nullptr, nullptr},
+            EndpointReceiver{nullptr, nullptr},
         };
         dispatch_entries_[1] = DispatchTableEntry{
             kHelloReceiverEndpoint,
@@ -49,14 +56,14 @@ protected:
         route_table_ = RouteTable{
             route_entries_,
             1U,
-            local_domain_forward_impl,
+            ws_local_domain_forward_impl,
             &forward_context_,
         };
         sender_ = HelloSender{&route_table_, kHelloReceiverEndpoint, kLocalHostId};
     }
 
     DispatchResult dispatchBuiltPacket(TestPacket& packet) {
-        return dispatch_packet(&dispatch_table_, asPacketBuffer(&packet));
+        return ws_dispatch_packet(&dispatch_table_, asPacketBuffer(&packet));
     }
 
     HelloReceiver receiver_{};
@@ -68,7 +75,6 @@ protected:
     HelloSender sender_{nullptr, 0U, 0U};
 };
 
-// Verifies end-to-end delivery of one hello message into the receiver mailbox.
 TEST_F(HelloWorldTest, DeliversHelloToReceiverMailbox) {
     sender_.sendHello();
 
@@ -77,7 +83,6 @@ TEST_F(HelloWorldTest, DeliversHelloToReceiverMailbox) {
     EXPECT_EQ(receiver_.text(), "hello");
 }
 
-// Verifies the single-slot mailbox retains only the latest message.
 TEST_F(HelloWorldTest, OverwritesMailboxOnSecondSend) {
     sender_.sendHello();
     sender_.sendMessage("world");
@@ -87,23 +92,22 @@ TEST_F(HelloWorldTest, OverwritesMailboxOnSecondSend) {
     EXPECT_EQ(receiver_.text(), "world");
 }
 
-// Verifies direct dispatch rejects an endpoint that is not in the table.
 TEST_F(HelloWorldTest, RejectsUnknownEndpoint) {
-    TestPacket packet = PacketBuilder{}.withPayload("hello").withEndpoint(WS_NAMESPACE_USER0, kUnknownEndpoint).packet();
+    TestPacket packet =
+        PacketBuilder{}.withPayload("hello").withEndpoint(kNamespaceUser0, kUnknownEndpoint).packet();
 
-    EXPECT_EQ(dispatchBuiltPacket(packet), DISPATCH_NO_ENDPOINT);
+    EXPECT_EQ(dispatchBuiltPacket(packet), kDispatchNoEndpoint);
     EXPECT_FALSE(receiver_.hasMessage());
 }
 
-// Verifies direct dispatch rejects a unicast addressed to another host.
 TEST_F(HelloWorldTest, RejectsWrongDestinationHost) {
     TestPacket packet = PacketBuilder{}
                             .withPayload("hello")
                             .withDstHost(kRemoteHostId)
-                            .withEndpoint(WS_NAMESPACE_USER0, kReceiverEndpoint)
+                            .withEndpoint(kNamespaceUser0, kReceiverEndpoint)
                             .packet();
 
-    EXPECT_EQ(dispatchBuiltPacket(packet), DISPATCH_NO_ENDPOINT);
+    EXPECT_EQ(dispatchBuiltPacket(packet), kDispatchNoEndpoint);
     EXPECT_FALSE(receiver_.hasMessage());
 }
 

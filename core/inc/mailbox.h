@@ -13,7 +13,6 @@
 #include "ws_constants.h"
 
 #ifdef __cplusplus
-namespace wirespaces {
 extern "C" {
 #endif
 
@@ -22,22 +21,21 @@ typedef struct {
     uint16_t length;
     bool occupied;
     uint32_t generation;
-} Mailbox;
+} ws_mailbox_t;
 
-void mailbox_init(Mailbox* mailbox);
+void ws_mailbox_init(ws_mailbox_t* mailbox);
 
-bool mailbox_store_from_packet(Mailbox* mailbox, PacketBufferHeader* packet);
+bool ws_mailbox_store_from_packet(ws_mailbox_t* mailbox, const ws_packet_buffer_t* packet);
 
-bool mailbox_read(
-    const Mailbox* mailbox,
+bool ws_mailbox_read(
+    const ws_mailbox_t* mailbox,
     uint8_t* out_data,
     size_t out_capacity,
     uint16_t* out_length,
     uint32_t* out_generation);
 
-void mailbox_receive_callback(void* receiver_context, PacketBufferHeader* packet);
+void ws_mailbox_receive_callback(void* receiver_context, const ws_packet_buffer_t* packet);
 
 #ifdef __cplusplus
-} // extern "C"
-} // namespace wirespaces
+}
 #endif

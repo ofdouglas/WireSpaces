@@ -8,12 +8,9 @@
 #include <cstdint>
 #include <string>
 
-#include "dispatch.h"
-#include "mailbox.h"
-#include "ws_constants.h"
+#include "core/wirespaces_core.hpp"
 
-namespace wirespaces {
-namespace test {
+namespace wirespaces::test {
 
 constexpr uint16_t kHelloSenderEndpoint = 0x0001U;
 constexpr uint16_t kHelloReceiverEndpoint = 0x0002U;
@@ -21,15 +18,15 @@ constexpr uint16_t kHelloReceiverEndpoint = 0x0002U;
 class HelloReceiver {
 public:
     HelloReceiver() {
-        mailbox_init(&mailbox_);
+        ws_mailbox_init(&mailbox_);
     }
 
-    void receive(PacketBufferHeader* packet) {
-        mailbox_receive_callback(&mailbox_, packet);
+    void receive(const PacketBuffer* packet) {
+        ws_mailbox_receive_callback(&mailbox_, packet);
     }
 
-    [[nodiscard]] EndpointReceiverHandle receiverHandle() {
-        return EndpointReceiverHandle{endpoint_receive_thunk<HelloReceiver>, this};
+    [[nodiscard]] EndpointReceiver receiverHandle() {
+        return EndpointReceiver{endpoint_receive_thunk<HelloReceiver>, this};
     }
 
     [[nodiscard]] uint16_t endpointId() const {
@@ -48,7 +45,7 @@ public:
         uint8_t buffer[WS_MAILBOX_DEFAULT_CAPACITY]{};
         uint16_t length = 0U;
         uint32_t generation = 0U;
-        if (!mailbox_read(&mailbox_, buffer, sizeof(buffer), &length, &generation)) {
+        if (!ws_mailbox_read(&mailbox_, buffer, sizeof(buffer), &length, &generation)) {
             return {};
         }
 
@@ -63,5 +60,4 @@ private:
     Mailbox mailbox_{};
 };
 
-} // namespace test
-} // namespace wirespaces
+} // namespace wirespaces::test

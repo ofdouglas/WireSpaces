@@ -9,22 +9,20 @@
 #include "router.h"
 
 #ifdef __cplusplus
-namespace wirespaces {
 extern "C" {
 #endif
 
 typedef struct {
-    DispatchTable* dispatch_table;
-} LocalDomainForwardContext;
+    ws_dispatch_table_t* dispatch_table;
+} ws_local_domain_forward_context_t;
 
-void local_domain_forward_impl(
+void ws_local_domain_forward_impl(
     void* forwarder_context,
-    PacketBufferHeader* packet,
-    uint8_t egress_set);
+    const ws_packet_buffer_t* packet,
+    ws_egress_set_t egress_set);
 
-DispatchResult local_domain_forward(RouteTable* route_table, PacketBufferHeader* packet);
+ws_dispatch_result_t ws_local_domain_forward(ws_route_table_t* route_table, const ws_packet_buffer_t* packet);
 
 #ifdef __cplusplus
-} // extern "C"
-} // namespace wirespaces
+}
 #endif

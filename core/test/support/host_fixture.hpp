@@ -7,8 +7,7 @@
 
 #include <gtest/gtest.h>
 
-#include "host.h"
-#include "ws_constants.h"
+#include "core/wirespaces_core.hpp"
 
 #include "support/constants.hpp"
 
@@ -21,7 +20,7 @@ inline void configureHost(uint8_t host_id, uint8_t num_wires, const uint8_t* wir
     for (uint8_t index = 0U; index < num_wires; ++index) {
         host_info.wires[index] = wires[index];
     }
-    host_set_info(&host_info);
+    ws_host_set_info(&host_info);
 }
 
 inline void configureDefaultHost() {

@@ -98,6 +98,7 @@ if(WIRESPACES_BUILD_CORE_TESTS AND BUILD_TESTING)
         wirespaces_core_tests
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/test
+            ${CMAKE_CURRENT_SOURCE_DIR}/../cpp
     )
     wirespaces_configure_host_target(wirespaces_core_tests)
 

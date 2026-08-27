@@ -5,17 +5,12 @@
 
 #pragma once
 
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 
-#include "header.h"
-#include "local_domain.h"
-#include "packet.h"
-#include "router.h"
-#include "ws_constants.h"
+#include "core/wirespaces_core.hpp"
 
-namespace wirespaces {
-namespace test {
+namespace wirespaces::test {
 
 WS_PACKET_DEFINE(HelloPacket, WS_MAILBOX_DEFAULT_CAPACITY);
 
@@ -33,20 +28,20 @@ public:
 
         HelloPacket packet{};
         const uint16_t message_length = static_cast<uint16_t>(std::strlen(message));
-        const ControlFields control_fields{QOS_NORMAL, false, TRANSPORT_SIMPLE};
-        auto* packet_header = reinterpret_cast<PacketBufferHeader*>(&packet);
-        packet_init(packet_header, message_length, control_fields);
+        const ControlFields control_fields{kQoSNormal, false, kTransportSimple};
+        auto* packet_buffer = reinterpret_cast<PacketBuffer*>(&packet);
+        ws_packet_init(packet_buffer, WS_MAILBOX_DEFAULT_CAPACITY, message_length, control_fields);
 
         packet.header.wire_number = WS_WIRE_LOCAL_DOMAIN;
         packet.header.src_host = host_id_;
         packet.header.dst_host = host_id_;
-        packet_set_endpoint(&packet.header, WS_NAMESPACE_USER0, receiver_endpoint_);
+        ws_packet_set_endpoint(&packet.header, kNamespaceUser0, receiver_endpoint_);
 
         if (message_length > 0U) {
             std::memcpy(packet.data, message, message_length);
         }
 
-        local_domain_forward(route_table_, packet_header);
+        ws_local_domain_forward(route_table_, packet_buffer);
     }
 
     void sendHello() {
@@ -63,5 +58,4 @@ private:
     uint8_t host_id_{0U};
 };
 
-} // namespace test
-} // namespace wirespaces
+} // namespace wirespaces::test

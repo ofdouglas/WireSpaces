@@ -10,7 +10,7 @@
 
 #include "packet.h"
 
-void mailbox_init(Mailbox* mailbox) {
+void ws_mailbox_init(ws_mailbox_t* mailbox) {
     if (mailbox == NULL) {
         return;
     }
@@ -21,33 +21,37 @@ void mailbox_init(Mailbox* mailbox) {
     memset(mailbox->data, 0, sizeof(mailbox->data));
 }
 
-bool mailbox_store_from_packet(Mailbox* mailbox, PacketBufferHeader* packet) {
+bool ws_mailbox_store_from_packet(ws_mailbox_t* mailbox, const ws_packet_buffer_t* packet) {
     if (mailbox == NULL || packet == NULL) {
         return false;
     }
 
-    const uint8_t* payload = packet_payload_bytes(packet);
+    const uint8_t* payload = ws_packet_payload_bytes(packet);
     if (payload == NULL) {
         return false;
     }
 
-    if (packet->length > WS_MAILBOX_DEFAULT_CAPACITY) {
+    if (packet->size > packet->capacity) {
         return false;
     }
 
-    if (packet->length > 0U) {
-        memcpy(mailbox->data, payload, packet->length);
+    if (packet->size > sizeof(mailbox->data)) {
+        return false;
     }
 
-    mailbox->length = packet->length;
+    if (packet->size > 0U) {
+        memcpy(mailbox->data, payload, packet->size);
+    }
+
+    mailbox->length = packet->size;
     mailbox->occupied = true;
     mailbox->generation += 1U;
 
     return true;
 }
 
-bool mailbox_read(
-    const Mailbox* mailbox,
+bool ws_mailbox_read(
+    const ws_mailbox_t* mailbox,
     uint8_t* out_data,
     size_t out_capacity,
     uint16_t* out_length,
@@ -73,10 +77,10 @@ bool mailbox_read(
     return true;
 }
 
-void mailbox_receive_callback(void* receiver_context, PacketBufferHeader* packet) {
+void ws_mailbox_receive_callback(void* receiver_context, const ws_packet_buffer_t* packet) {
     if (receiver_context == NULL) {
         return;
     }
 
-    mailbox_store_from_packet((Mailbox*)receiver_context, packet);
+    ws_mailbox_store_from_packet((ws_mailbox_t*)receiver_context, packet);
 }

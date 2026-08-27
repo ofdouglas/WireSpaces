@@ -5,53 +5,61 @@
 
 #include <gtest/gtest.h>
 
-#include "packet.h"
+#include "core/wirespaces_core.hpp"
 
 #include "support/packet_builder.hpp"
 
 namespace wirespaces::test {
 namespace {
 
-using support::TestPacket;
-using support::PacketBuilder;
 using support::asPacketBuffer;
+using support::PacketBuilder;
+using support::TestPacket;
+using wirespaces::ControlFields;
+using wirespaces::kNamespaceCommon;
+using wirespaces::kNamespaceUser0;
+using wirespaces::kQoSBackground;
+using wirespaces::kQoSNormal;
+using wirespaces::kTransportSimple;
 
-// Verifies packet_init stores length and applies control fields to the header.
-TEST(PacketInitTest, InitializesLengthAndControlFields) {
+TEST(PacketInitTest, InitializesSizeAndControlFields) {
     TestPacket packet{};
-    const ControlFields fields{QOS_BACKGROUND, true, TRANSPORT_SIMPLE};
-    packet_init(asPacketBuffer(&packet), 12U, fields);
+    const ControlFields fields{kQoSBackground, true, kTransportSimple};
+    ws_packet_init(asPacketBuffer(&packet), WS_MAILBOX_DEFAULT_CAPACITY, 12U, fields);
 
-    EXPECT_EQ(asPacketBuffer(&packet)->length, 12U);
-    EXPECT_EQ(header_get_qos(&packet.header), QOS_BACKGROUND);
-    EXPECT_TRUE(header_get_has_extensions(&packet.header));
-    EXPECT_EQ(header_get_transport_type(&packet.header), TRANSPORT_SIMPLE);
+    EXPECT_EQ(asPacketBuffer(&packet)->capacity, WS_MAILBOX_DEFAULT_CAPACITY);
+    EXPECT_EQ(asPacketBuffer(&packet)->size, 12U);
+    EXPECT_EQ(ws_header_get_qos(&packet.header), kQoSBackground);
+    EXPECT_TRUE(ws_header_get_has_extensions(&packet.header));
+    EXPECT_EQ(ws_header_get_transport_type(&packet.header), kTransportSimple);
 }
 
-// Verifies packet_payload_bytes points immediately after the packet header struct.
 TEST(PacketPayloadTest, PayloadBytesFollowHeader) {
     TestPacket packet = PacketBuilder{}.withPayload("payload").packet();
-    uint8_t* payload = packet_payload_bytes(asPacketBuffer(&packet));
+    const uint8_t* payload = ws_packet_payload_bytes(asPacketBuffer(&packet));
 
     EXPECT_NE(payload, nullptr);
     EXPECT_EQ(payload, packet.data);
-    EXPECT_STREQ(reinterpret_cast<char*>(payload), "payload");
+    EXPECT_STREQ(reinterpret_cast<const char*>(payload), "payload");
 }
 
-// Verifies packet_set_endpoint delegates to header_set_endpoint.
 TEST(PacketEndpointTest, SetEndpointDelegatesToHeader) {
     TestPacket packet{};
-    packet_set_endpoint(&packet.header, WS_NAMESPACE_COMMON, 0x0042U);
+    ws_packet_set_endpoint(&packet.header, kNamespaceCommon, 0x0042U);
 
-    EXPECT_EQ(header_get_namespace(&packet.header), WS_NAMESPACE_COMMON);
-    EXPECT_EQ(header_get_endpoint_id(&packet.header), 0x0042U);
+    EXPECT_EQ(ws_header_get_namespace(&packet.header), kNamespaceCommon);
+    EXPECT_EQ(ws_header_get_endpoint_id(&packet.header), 0x0042U);
 }
 
-// Verifies null packet helpers return safe results without crashing.
 TEST(PacketNullSafetyTest, HandlesNullPointers) {
-    packet_init(nullptr, 0U, ControlFields{QOS_NORMAL, false, TRANSPORT_SIMPLE});
-    EXPECT_EQ(packet_payload_bytes(nullptr), nullptr);
-    packet_set_endpoint(nullptr, WS_NAMESPACE_USER0, 0x0001U);
+    ws_packet_init(
+        nullptr,
+        WS_MAILBOX_DEFAULT_CAPACITY,
+        0U,
+        ControlFields{kQoSNormal, false, kTransportSimple});
+    EXPECT_EQ(ws_packet_payload_bytes(nullptr), nullptr);
+    EXPECT_EQ(ws_packet_payload_mut(nullptr), nullptr);
+    ws_packet_set_endpoint(nullptr, kNamespaceUser0, 0x0001U);
     SUCCEED();
 }
 

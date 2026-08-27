@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-#include "router.h"
+#include "core/wirespaces_core.hpp"
 
 #include "support/host_fixture.hpp"
 #include "support/packet_builder.hpp"
@@ -22,7 +22,7 @@ public:
         last_egress_set_ = 0U;
     }
 
-    static void forward(void* context, PacketBufferHeader* packet, uint8_t egress_set) {
+    static void forward(void* context, const PacketBuffer* packet, EgressSet egress_set) {
         auto* spy = static_cast<RouterForwardSpy*>(context);
         spy->called_ = true;
         spy->last_packet_ = packet;
@@ -33,18 +33,18 @@ public:
         return called_;
     }
 
-    PacketBufferHeader* lastPacket() const {
+    const PacketBuffer* lastPacket() const {
         return last_packet_;
     }
 
-    uint8_t lastEgressSet() const {
+    EgressSet lastEgressSet() const {
         return last_egress_set_;
     }
 
 private:
     bool called_{false};
-    PacketBufferHeader* last_packet_{nullptr};
-    uint8_t last_egress_set_{0U};
+    const PacketBuffer* last_packet_{nullptr};
+    EgressSet last_egress_set_{0U};
 };
 
 class RouteTableFixture : public DefaultHostFixture {
@@ -55,7 +55,7 @@ protected:
         route_table_ = RouteTable{route_entries_, 0U, nullptr, nullptr};
     }
 
-    void buildRouteTable(uint8_t wire_number, uint8_t egress_set) {
+    void buildRouteTable(uint8_t wire_number, EgressSet egress_set) {
         route_entries_[0] = RouteTableEntry{wire_number, egress_set};
         route_table_ = RouteTable{
             route_entries_,
@@ -66,7 +66,7 @@ protected:
     }
 
     DispatchResult forward(TestPacket& packet) {
-        return router_forward_packet(&route_table_, asPacketBuffer(&packet));
+        return ws_router_forward_packet(&route_table_, asPacketBuffer(&packet));
     }
 
     RouterForwardSpy forward_spy_{};

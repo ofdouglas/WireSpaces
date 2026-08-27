@@ -1,8 +1,6 @@
 /**
  * @file dispatch.h
- * @brief WireSpaces Endpoint Dispatcher -- Finds the right endpoint for a packet and dispatches it.
- *
- * TODO: should this be part of the host.h API?
+ * @brief WireSpaces Endpoint Dispatcher -- finds the right endpoint for a packet and dispatches it.
  */
 #pragma once
 
@@ -13,48 +11,34 @@
 #include "packet.h"
 
 #ifdef __cplusplus
-namespace wirespaces {
 extern "C" {
 #endif
 
 typedef enum {
-    DISPATCH_OK = 0,
-    DISPATCH_NO_ENDPOINT,
-} DispatchResult;
+    WS_DISPATCH_OK = 0,
+    WS_DISPATCH_NO_ENDPOINT,
+} ws_dispatch_result_t;
 
-typedef void (*receive_callback_t)(void* receiver_context, PacketBufferHeader* packet);
+typedef void (*ws_receive_callback_t)(void* receiver_context, const ws_packet_buffer_t* packet);
 
 typedef struct {
-    receive_callback_t receive;
+    ws_receive_callback_t receive;
     void* receiver_context;
-} EndpointReceiverHandle;
+} ws_endpoint_receiver_t;
 
-// Most basic implementation: Linear search of an array
 typedef struct {
     uint16_t endpoint;
-    EndpointReceiverHandle receiver;
-} DispatchTableEntry;
+    ws_endpoint_receiver_t receiver;
+} ws_dispatch_table_entry_t;
 
 typedef struct {
-    DispatchTableEntry* base;
+    ws_dispatch_table_entry_t* base;
     size_t capacity;
-} DispatchTable;
+} ws_dispatch_table_t;
 
-// Deliver the packet to the appropriate endpoint. Only accept the packet if it is addressed to this host
-// (either unicast to us or broadcast *to a wire we are part of*).
-DispatchResult dispatch_packet(const DispatchTable* table, PacketBufferHeader* packet);
+/** Deliver the packet to the appropriate endpoint when addressed to this host. */
+ws_dispatch_result_t ws_dispatch_packet(const ws_dispatch_table_t* table, const ws_packet_buffer_t* packet);
 
 #ifdef __cplusplus
-} // extern "C"
-
-// TODO: move to other file?
-template <typename T>
-void endpoint_receive_thunk(void* context, PacketBufferHeader* packet){
-    static_cast<T*>(context)->receive(packet);
 }
 #endif
-
-#ifdef __cplusplus
-} // namespace wirespaces
-#endif
-

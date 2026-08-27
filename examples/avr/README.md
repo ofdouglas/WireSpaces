@@ -1,7 +1,15 @@
 # WireSpaces demo using ATMEGA328P (Arduino UNO)
 
-The current first-stage example is a minimal C++17 UART hello world. It writes
-`Hello, world!` once at 9600 baud through the UNO's USB serial connection.
+The example runs a minimal WireSpaces heartbeat publisher:
+
+- ATmega328P Timer 0 supplies the millisecond clock.
+- `HeartbeatService` creates one canonical PDU per second.
+- The core Router selects the UART egress for Wire 1.
+- The HDLC Link layer frames and byte-stuffs the canonical header and payload.
+- UART0 transmits at 115200 baud through the UNO USB serial connection.
+
+The heartbeat payload is temporarily fixed to `0xC0DEBABE`. The first-stage
+HDLC framing does not yet append a CRC.
 
 Build from WSL:
 
@@ -55,11 +63,25 @@ sudo usermod -aG dialout "$USER"
 
 The rule matches official Arduino UNO USB IDs (`2341:0043` and `2341:0001`), sets group `dialout`, and creates `/dev/arduino-uno`.
 
-The generated files are `build/hello.elf` and `build/hello.hex`.
+The generated files are `build/heartbeat.elf` and `build/heartbeat.hex`.
+
+Verify the diagnostic heartbeat frame:
+
+```sh
+make verify
+```
+
+Expected output includes:
+
+```text
+wire=1 src=1 dst=255 endpoint=0xFFFE heartbeat=0xC0DEBABE
+```
+
+`config/verify-heartbeat.py` is deliberately a small bring-up decoder. A proper
+WireSpaces receiver is outside this example's current scope.
 
 ## Planned WireSpaces demo
 
-* UART/HDLC link layer
 * 4-6 statically allocated packet buffers, sized to hold up to N=4 CAN PDUA payloads (the common upper bound for WS small packet size widespread compatibility)
-* TODO: services
- - only Heartbeat service for now
+* Add HDLC CRC generation and validation.
+* Add a proper host receiver.

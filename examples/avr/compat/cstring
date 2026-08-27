@@ -1,0 +1,13 @@
+#pragma once
+/*
+ * @file  cstring
+ * @brief Minimal freestanding <cstring> compatibility for avr-g++.
+ */
+
+#include <string.h>
+
+namespace std {
+
+using ::memcpy;
+
+} // namespace std

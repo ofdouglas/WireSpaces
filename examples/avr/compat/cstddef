@@ -1,0 +1,14 @@
+#pragma once
+/*
+ * @file  cstddef
+ * @brief Minimal freestanding <cstddef> compatibility for avr-g++.
+ */
+
+#include <stddef.h>
+
+namespace std {
+
+using ::size_t;
+using ::ptrdiff_t;
+
+} // namespace std

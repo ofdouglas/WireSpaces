@@ -4,8 +4,9 @@
  */
 #pragma once
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 
 #include "WireSpaces/cpp/hal/clock.h"
 #include "WireSpaces/cpp/core/wirespaces_core.hpp"
@@ -14,7 +15,7 @@
 // TODO: schema and code generation for message types.
 
 #ifndef WS_SERVICE_HEARTBEAT_ENDPOINT_ID
-#define WS_SERVICE_HEARTBEAT_ENDPOINT_ID 0xFFFE
+#define WS_SERVICE_HEARTBEAT_ENDPOINT_ID 0x3FFEU
 #endif
 
 
@@ -34,38 +35,82 @@ WS_PACKET_DEFINE(HeartbeatMessagePacket, sizeof(HeartbeatMessage));
 template <uint32_t period_ms>
 class HeartbeatService {
 public:
+    /**
+     * @brief Construct a periodic heartbeat publisher.
+     *
+     * @param[in] route_table Router used to transmit heartbeat packets.
+     * @param[in] wire_number Logical Wire carrying the heartbeat.
+     * @param[in] source_participant Canonical source Participant.
+     * @param[in] destination_participant Canonical destination Participant.
+     */
+    HeartbeatService(
+        wirespaces::RouteTable* route_table,
+        uint8_t wire_number,
+        uint8_t source_participant,
+        uint8_t destination_participant) noexcept
+        : route_table_{route_table}
+        , wire_number_{wire_number}
+        , source_participant_{source_participant}
+        , destination_participant_{destination_participant} {}
 
-    HeartbeatService() noexcept = default;
-
+    /**
+     * @brief Publish a heartbeat when the configured period has elapsed.
+     */
     void run() noexcept {
-        const auto now_ms{wirespaces::hal::MillisecondClock::now_ms()};
+        const auto now_ms{wirespaces::hal::MillisecondClock::now()};
         const auto elapsed_ms{now_ms - last_send_time_ms_};
 
         if (elapsed_ms >= period_ms) {
             last_send_time_ms_ = now_ms;
-            send_heartbeat();
+            sendHeartbeat();
         }
     }
 
 private:
     using TimePointT = wirespaces::hal::MillisecondClock::TimePoint;
 
-    void send_heartbeat() noexcept {
-        const auto now_ms{wirespaces::hal::MillisecondClock::now_ms()};
-        const ControlFields control_fields{wirespaces::kQoSNormal, false, wirespaces::kTransportSimple};
-        HeartbeatMessagePacket packet{};
-    
-        ws_packet_init(&packet, sizeof(HeartbeatMessagePacket), sizeof(HeartbeatMessagePacket), control_fields);
-        packet.header.endpoint = WS_SERVICE_HEARTBEAT_ENDPOINT_ID;
-        packet.payload.uptime_ms = now_ms;
+    /**
+     * @brief Build and route one heartbeat packet.
+     */
+    void sendHeartbeat() noexcept {
+        if (route_table_ == nullptr) {
+            return;
+        }
 
-        const auto result = wirespaces::send_packet(&packet);
+        // TODO: use the real time once communication is established and we have a receiver program on PC.
+        const wirespaces::hal::MillisecondClock::TimePoint now_ms{0xC0DEBABEUL};
+        // const auto now_ms{wirespaces::hal::MillisecondClock::now()};
+        const wirespaces::ControlFields control_fields{
+            wirespaces::kQoSNormal,
+            false,
+            wirespaces::kTransportSimple};
+        HeartbeatMessagePacket packet{};
+
+        auto* packet_buffer{reinterpret_cast<wirespaces::PacketBuffer*>(&packet)};
+        ws_packet_init(
+            packet_buffer,
+            sizeof(HeartbeatMessage),
+            sizeof(HeartbeatMessage),
+            control_fields);
+        packet.header.wire_number = wire_number_;
+        packet.header.src_host = source_participant_;
+        packet.header.dst_host = destination_participant_;
+        ws_packet_set_endpoint(
+            &packet.header,
+            wirespaces::kNamespaceCommon,
+            WS_SERVICE_HEARTBEAT_ENDPOINT_ID);
+        std::memcpy(packet.data, &now_ms, sizeof(now_ms));
+
+        const auto result{ws_router_forward_packet(route_table_, packet_buffer)};
         if (result != wirespaces::kDispatchOk) {
             // TODO: handle error
         }
-        last_send_time_ms_ = now_ms;
     }
 
+    wirespaces::RouteTable* route_table_{nullptr};
+    uint8_t wire_number_{0U};
+    uint8_t source_participant_{0U};
+    uint8_t destination_participant_{0U};
     TimePointT last_send_time_ms_{};
 };
 

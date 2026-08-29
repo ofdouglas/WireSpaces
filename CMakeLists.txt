@@ -22,10 +22,10 @@ function(wirespaces_configure_host_target target_name)
 endfunction()
 
 option(WIRESPACES_BUILD_CORE_TESTS "Build core tests" ON)
-option(WIRESPACES_BUILD_CPP_TESTS "Build reusable C++ library tests" ON)
+option(WIRESPACES_BUILD_LIBRARY_TESTS "Build reusable library tests" ON)
 option(WIRESPACES_BUILD_SIMULATOR "Build the Linux-hosted simulator" ON)
 
-if(BUILD_TESTING AND (WIRESPACES_BUILD_CORE_TESTS OR WIRESPACES_BUILD_CPP_TESTS OR WIRESPACES_BUILD_SIMULATOR))
+if(BUILD_TESTING AND (WIRESPACES_BUILD_CORE_TESTS OR WIRESPACES_BUILD_LIBRARY_TESTS OR WIRESPACES_BUILD_SIMULATOR))
     include(FetchContent)
     FetchContent_Declare(
         googletest
@@ -38,11 +38,10 @@ if(BUILD_TESTING AND (WIRESPACES_BUILD_CORE_TESTS OR WIRESPACES_BUILD_CPP_TESTS 
     FetchContent_MakeAvailable(googletest)
 endif()
 
-add_subdirectory(core)
-add_subdirectory(cpp)
+add_subdirectory(lib/wirespaces)
 
 if(BUILD_TESTING AND WIRESPACES_BUILD_CORE_TESTS)
-    add_subdirectory(core/test)
+    add_subdirectory(lib/wirespaces/core/test)
 endif()
 
 if(WIRESPACES_BUILD_SIMULATOR)

@@ -16,26 +16,28 @@ PORT ?= /dev/ttyACM0
 PROGRAMMER ?= arduino
 UPLOAD_BAUD ?= 115200
 
-CPP_INCLUDE := $(WIRESPACES_ROOT)/cpp
+WIRESPACES_INCLUDE := $(WIRESPACES_ROOT)/lib
 TOOLCHAIN_COMPAT := $(WIRESPACES_ROOT)/platform/avr/toolchain_compat
 PYTHON_ROOT := $(WIRESPACES_ROOT)/tools/python
 HARDWARE_TEST_ROOT := $(WIRESPACES_ROOT)/tests/hardware/arduino_uno
-HDLC_TEST_SOURCE := $(WIRESPACES_ROOT)/cpp/links/uart_hdlc/test/hdlc_test.cpp
+HDLC_TEST_SOURCE := $(WIRESPACES_ROOT)/lib/wirespaces/links/uart_hdlc/test/hdlc_test.cpp
 
 CPPFLAGS := -DF_CPU=$(F_CPU) \
 	-I$(TOOLCHAIN_COMPAT) \
 	-I$(WIRESPACES_ROOT) \
-	-I$(CPP_INCLUDE)
+	-I$(WIRESPACES_INCLUDE)
 CXXFLAGS := -std=c++17 -mmcu=$(MCU) -Os -Wall -Wextra -Wpedantic \
 	-ffunction-sections -fdata-sections -fno-exceptions -fno-rtti \
 	-fno-threadsafe-statics -MMD -MP
 LDFLAGS := -mmcu=$(MCU) -Wl,--gc-sections
-HOST_CPPFLAGS := -I$(CPP_INCLUDE)
+HOST_CPPFLAGS := -I$(WIRESPACES_INCLUDE)
 
 ELF := $(BUILD_DIR)/$(TARGET).elf
 HEX := $(BUILD_DIR)/$(TARGET).hex
 OBJECTS := \
 	$(BUILD_DIR)/main.o \
+	$(BUILD_DIR)/builtin_led.o \
+	$(BUILD_DIR)/millisecond_clock.o \
 	$(BUILD_DIR)/dispatch.o \
 	$(BUILD_DIR)/header.o \
 	$(BUILD_DIR)/host.o \
@@ -53,7 +55,13 @@ $(BUILD_DIR):
 $(BUILD_DIR)/main.o: main.cpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.o: $(WIRESPACES_ROOT)/core/%.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/builtin_led.o: $(WIRESPACES_ROOT)/platform/avr/builtin_led.cpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/millisecond_clock.o: $(WIRESPACES_ROOT)/platform/avr/millisecond_clock.cpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(WIRESPACES_ROOT)/lib/wirespaces/core/%.cpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 $(ELF): $(OBJECTS)

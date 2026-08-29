@@ -1,24 +1,23 @@
 #include <avr/interrupt.h>
-#include <avr/io.h>
-#include <hal/clock.h>
-#include <links/uart_hdlc/decoder.h>
-#include <links/uart_hdlc/encoder.h>
+#include <platform/avr/builtin_led.h>
+#include <platform/avr/millisecond_clock.h>
 #include <platform/avr/stack_monitor.h>
-#include <services/heartbeat/heartbeat.h>
-#include <services/led_control/led_control.h>
-#include <services/ping/ping.h>
-#include <services/stack_report/stack_report.h>
-#include <util/atomic.h>
+#include <platform/avr/uart0.h>
+#include <wirespaces/links/uart_hdlc/decoder.h>
+#include <wirespaces/links/uart_hdlc/encoder.h>
+#include <wirespaces/services/heartbeat/heartbeat.h>
+#include <wirespaces/services/led_control/led_control.h>
+#include <wirespaces/services/ping/ping.h>
+#include <wirespaces/services/stack_report/stack_report.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <runtime/core.hpp>
+#include <wirespaces/runtime/core.hpp>
 
 namespace {
 
 constexpr std::uint32_t kBaudRate{115200UL};
-constexpr std::uint16_t kBaudDivider{static_cast<std::uint16_t>((F_CPU / (8UL * kBaudRate)) - 1UL)};
 constexpr wirespaces::WireNumber kHeartbeatWire{1U};
 constexpr wirespaces::HostId kArduinoHost{1U};
 constexpr std::uint8_t kUartEgress{1U};
@@ -34,65 +33,7 @@ constexpr wirespaces::EndpointAddress kLedControlEndpoint{wirespaces::EndpointAd
 
 WS_PACKET_BUFFER_DEFINE(UartReceivePacket, kMaximumPayloadSize);
 
-volatile std::uint32_t g_milliseconds{0U};
 wirespaces::links::uart_hdlc::HdlcDecoder<kMaximumCanonicalSize> g_hdlc_decoder{};
-
-void uartInit() {
-    UBRR0H = static_cast<std::uint8_t>(kBaudDivider >> 8U);
-    UBRR0L = static_cast<std::uint8_t>(kBaudDivider);
-    UCSR0A = _BV(U2X0);
-    UCSR0B = _BV(RXEN0) | _BV(TXEN0);
-    UCSR0C = _BV(UCSZ01) | _BV(UCSZ00);
-}
-
-void uartWriteByte(std::uint8_t byte) {
-    while ((UCSR0A & _BV(UDRE0)) == 0U) {
-    }
-
-    UDR0 = byte;
-}
-
-void clockInit() {
-    TCCR0A = _BV(WGM01);
-    TCCR0B = _BV(CS01) | _BV(CS00);
-    OCR0A = 249U;
-    TIMSK0 = _BV(OCIE0A);
-}
-
-void ledPwmInit() {
-    DDRB |= _BV(DDB5);
-    PORTB &= static_cast<std::uint8_t>(~_BV(PORTB5));
-    TCCR1A = _BV(WGM10);
-    TCCR1B = _BV(WGM12) | _BV(CS11) | _BV(CS10);
-    OCR1A = 0U;
-    TIMSK1 = 0U;
-}
-
-/**
- * @brief Apply 8-bit ratiometric brightness to the UNO LED on D13/PB5.
- *
- * Zero and 255 are driven statically to guarantee exact 0% and 100%
- * endpoints. PB5 is not a hardware PWM output, so Timer 1 compare and
- * overflow interrupts generate approximately 977 Hz PWM in software.
- */
-void setBuiltInLedBrightness(void* context, std::uint8_t brightness) {
-    (void)context;
-
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-        TIMSK1 = 0U;
-        if (brightness == 0U) {
-            PORTB &= static_cast<std::uint8_t>(~_BV(PORTB5));
-        } else if (brightness == 0xFFU) {
-            PORTB |= _BV(PORTB5);
-        } else {
-            OCR1A = brightness;
-            TCNT1 = 0U;
-            PORTB |= _BV(PORTB5);
-            TIFR1 = _BV(OCF1A) | _BV(TOV1);
-            TIMSK1 = _BV(OCIE1A) | _BV(TOIE1);
-        }
-    }
-}
 
 /**
  * @brief Project a canonical WireSpaces PDU onto the UART HDLC Link.
@@ -121,7 +62,7 @@ public:
         }
 
         for (std::size_t index{0U}; index < frame_size; ++index) {
-            uartWriteByte(frame_storage[index]);
+            wirespaces::platform::avr::uart0WriteByte(frame_storage[index]);
         }
     }
 };
@@ -134,8 +75,8 @@ public:
  * packet queue.
  */
 void processUartInput(const wirespaces::Dispatcher& dispatcher) {
-    while ((UCSR0A & _BV(RXC0)) != 0U) {
-        const std::uint8_t byte{UDR0};
+    while (wirespaces::platform::avr::uart0ByteAvailable()) {
+        const std::uint8_t byte{wirespaces::platform::avr::uart0ReadByte()};
         if (!g_hdlc_decoder.push(byte)) {
             continue;
         }
@@ -158,33 +99,13 @@ void processUartInput(const wirespaces::Dispatcher& dispatcher) {
 
 }  // namespace
 
-ISR(TIMER0_COMPA_vect) {
-    ++g_milliseconds;
-}
-
-ISR(TIMER1_COMPA_vect) {
-    PORTB &= static_cast<std::uint8_t>(~_BV(PORTB5));
-}
-
-ISR(TIMER1_OVF_vect) {
-    PORTB |= _BV(PORTB5);
-}
-
-wirespaces::hal::MillisecondClock::TimePoint wirespaces::hal::MillisecondClock::now() noexcept {
-    std::uint32_t result{0U};
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
-        result = g_milliseconds;
-    }
-    return result;
-}
-
 int main() {
     wirespaces::platform::avr::StackMonitor stack_monitor{};
     stack_monitor.initialize();
 
-    uartInit();
-    clockInit();
-    ledPwmInit();
+    wirespaces::platform::avr::uart0Init(kBaudRate);
+    wirespaces::platform::avr::millisecondClockInit();
+    wirespaces::platform::avr::builtinLedInit();
 
     const wirespaces::RouteTableEntry route_entries[]{
         {kHeartbeatWire, kUartEgress},
@@ -212,7 +133,7 @@ int main() {
     ping::PingService ping_service{&router};
     led_control::LedControlService led_control_service{
         &router,
-        setBuiltInLedBrightness,
+        wirespaces::platform::avr::setBuiltinLedBrightness,
         nullptr,
     };
     const wirespaces::DispatchTableEntry dispatch_entries[]{

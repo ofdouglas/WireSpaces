@@ -10,40 +10,40 @@
 
 ```
 WireSpaces/
-  core/         C++17 WS Core — packet header, router, dispatch, receivers
-    *.h/*.cpp   Production headers and implementations
-    test/       C++ GoogleTest + stub services (host-only)
-  cpp/          Reusable embedded C++17 libraries (ported from Design/Firmware)
-    foundation/ Span, Array, StaticString, …
-    containers/ RingBuffer, …
-    crc/        CRC algorithms
-    <component>/test/  Optional per-component tests
-    services/   Reusable firmware services (heartbeat, DID tables, …)
-  platform/     Target-specific integration and toolchain compatibility
-  sim/          Linux-hosted simulator shell
-    *.h/*.cpp   Production headers and implementations
-    test/       Simulator tests
-  examples/     Buildable examples for supported targets
-  tools/        Host-side tools and reusable Python package
-  tests/        Repository-level integration and hardware tests
-  agents/       Agent instructions (this file)
-  docs/         Governed design documents
-  sketches/     Experiment sketches
+  lib/
+    wirespaces/       Package-qualified portable C++17 library
+      core/           Packet, header, routing, dispatch, receivers
+      foundation/     Span, Array, StaticString, …
+      containers/     RingBuffer, bounded containers, …
+      crc/            CRC algorithms
+      hal/            Portable hardware abstraction contracts
+      links/          Logical Link implementations
+      runtime/        Convenience/umbrella headers
+      services/       Reusable Endpoint services
+      transports/     Transport implementations
+  platform/           Target-specific integration and toolchain compatibility
+  sim/                Linux-hosted simulator shell
+  examples/           Buildable examples for supported targets
+  tools/python/       PC-side Python tools and package
+  tests/              Repository-level integration and hardware tests
+  agents/             Agent instructions
+  docs/               Governed design documents
+  sketches/           Experiment sketches
 ```
 
-* **`core/`** — Native C++17 runtime for routing and local-domain delivery.
-* **`cpp/`** — Header-first or component-directory C++ libraries. Include via `cpp/` on the include path (e.g. `#include <containers/ring_buffer.h>`).
-* **`cpp/services/`** — Endpoint services and cross-cutting firmware features built on core + cpp.
-* When creating **reusable** platform-independent code for WireSpaces, place it under `cpp/`, not back in `Design/Firmware`, unless the library is shared across multiple Design projects.
+* **`lib/wirespaces/core/`** — Native C++17 runtime for routing and local-domain delivery.
+* **`lib/wirespaces/`** — Header-first or component-directory C++ libraries. Add `lib/` to the include path and use package-qualified includes (e.g. `#include <wirespaces/containers/ring_buffer.h>`).
+* **`lib/wirespaces/services/`** — Endpoint services and cross-cutting firmware features built on the core and reusable library modules.
+* When creating **reusable** platform-independent code for WireSpaces, place it under `lib/wirespaces/`, not back in `Design/Firmware`, unless the library is shared across multiple Design projects.
 
 ---
 
-## Core C++ Rules (`core/`)
+## Core C++ Rules (`lib/wirespaces/core/`)
 
 * Use C++17; core APIs live in the `wirespaces` namespace.
 * No dynamic allocation, exceptions, or RTTI.
-* Production headers and implementations live directly in `core/`; tests and
-  test support live in `core/test/`.
+* Production headers and implementations live directly in `lib/wirespaces/core/`; tests and
+  test support live in `lib/wirespaces/core/test/`.
 * Keep packet processing non-templated. `WS_PACKET_BUFFER_DEFINE` may define
   fixed trailing storage while routers and dispatchers operate on `PacketBuffer`.
 * Prefer fixed-size tables, spans, strongly typed identifiers, and small
@@ -79,32 +79,32 @@ WireSpaces/
  - Be conservative with the preprocessor.
  - Prefer brace initialization: `uint32_t value{0x3FFU};`
 
-* Code that is strictly on-host (e.g. unit tests in `core/test/` or `cpp/*/test/`) may use any available C++ features.
+* Code that is strictly on-host (e.g. unit tests in `lib/wirespaces/core/test/` or `lib/wirespaces/*/test/`) may use any available C++ features.
 
 ---
 
 ## File Organization
 
-* Use either of these structures for **software component** directories under `cpp/`:
+* Use either of these structures for **software component** directories under `lib/wirespaces/`:
 
-  **Simple component** (e.g. `cpp/crc/`):
+  **Simple component** (e.g. `lib/wirespaces/crc/`):
   ```
-  cpp/component_name/
+  lib/wirespaces/component_name/
     test/           {test_component.cpp, optional mocks / test_infra}
     *.h / *.cpp
   ```
 
-  **Complex component** (e.g. `services/bootloader/`):
+  **Complex component** (e.g. `lib/wirespaces/services/bootloader/`):
   ```
-  services/component_name/
+  lib/wirespaces/services/component_name/
     test/
     subdirA/        {several .cpp or .h files}
     subdirB/        {more C++, Python, data, scripts, …}
     working.md      optional notes
   ```
 
-* **`core/`** follows the same flat production-file rule, with tests under
-  `core/test/`.
+* **`lib/wirespaces/core/`** follows the same flat production-file rule, with tests under
+  `lib/wirespaces/core/test/`.
 
 * Do not commit CMake build trees (`build/`, `build_core/`, `_deps/`). See each subtree's `.gitignore`.
 
@@ -169,7 +169,7 @@ using NameString = StaticString<kMaxNameLength>;
 * Before finishing a refactor, check that comments and TODOs are still present where they apply (or were intentionally updated). Restoring or relocating lost notes is part of "done."
 * Behavior changes and bug fixes don't justify a comment purge. Update wording where intent changed; remove only what is wrong or redundant.
 * Avoid whitespace-only churn that inserts or removes a blank line on every line—it's hard to review and makes accidental comment loss easy to miss. Prefer one coherent layout pass.
-* When porting libraries from `Design/Firmware` to `WireSpaces/cpp/`, preserve behavior and comments; update include paths to the `cpp/` layout.
+* When porting libraries from `Design/Firmware` to `WireSpaces/lib/wirespaces/`, preserve behavior and comments; update include paths to the `lib/wirespaces/` layout.
 
 ---
 
@@ -216,7 +216,7 @@ inline void Foo::bar() { barImpl(); }
 
 ### Structure and architecture
 
-* **Refactor common setup** into fixtures, builders, and small support types (`test/support/` in `core/`). Test bodies should focus on arrange → act → assert, not boilerplate.
+* **Refactor common setup** into fixtures, builders, and small support types (`test/support/` in `lib/wirespaces/core/`). Test bodies should focus on arrange → act → assert, not boilerplate.
 * When test infrastructure is **non-trivial** (fixtures spanning modules, recorders, spies, packet builders), treat it as real software architecture: headers in `test/support/`, clear names, single responsibility—not a blob of helpers at the bottom of one `.cpp`.
 * Use **parameterized tests** for equivalence classes (enum values, boundary ids, bool flags) instead of copy-pasted cases.
 * Integration tests (e.g. hello-world sender → router → dispatch → mailbox) stay separate from narrow unit tests per module.
@@ -235,17 +235,17 @@ inline void Foo::bar() { barImpl(); }
 2. Infrastructure design when fixtures/builders genuinely reduce duplication.
 3. Execute and iterate.
 
-**WireSpaces:** Core unit tests live in `core/test/` with shared code in `core/test/support/`. Component tests live under `cpp/<component>/test/` or `services/<component>/test/` when added.
+**WireSpaces:** Core unit tests live in `lib/wirespaces/core/test/` with shared code in `lib/wirespaces/core/test/support/`. Component tests live under `lib/wirespaces/<component>/test/` when added.
 
 ---
 
 ## Build
 
-* **Core:** from `core/build_core` (or `core/build`):
+* **Library and core:** configure from the repository root:
   ```bash
-  cmake .. -DWIRESPACES_BUILD_CORE_TESTS=ON
-  cmake --build .
-  ctest --output-on-failure -R wirespaces_core_tests
+  cmake -S . -B build -DWIRESPACES_BUILD_CORE_TESTS=ON
+  cmake --build build
+  ctest --test-dir build --output-on-failure
   ```
 * Do not `git add` build directories or FetchContent `_deps/` trees.
 
@@ -255,4 +255,4 @@ inline void Foo::bar() { barImpl(); }
 
 * Read this file before creating or modifying WireSpaces C/C++ code.
 * For C++-only work in other Design repos, `Design/Instructions/cpp_rules.md` remains the canonical rules file.
-* Do not edit governed docs in `docs/` unless explicitly asked; prototype code in `core/`, `cpp/`, and `services/` may diverge until promoted.
+* Do not edit governed docs in `docs/` unless explicitly asked; prototype code in `lib/wirespaces/` may diverge until promoted.

@@ -9,9 +9,12 @@
 #include "WireSpaces/cpp/core/wirespaces_core.hpp"
 #include "WireSpaces/cpp/hal/clock.h"
 #include "WireSpaces/cpp/services/heartbeat.h"
+#include "WireSpaces/cpp/services/led_control.h"
 #include "WireSpaces/cpp/services/ping.h"
+#include "WireSpaces/cpp/services/stack_report.h"
 #include "hdlc_decoder.hpp"
 #include "hdlc_encoder.hpp"
+#include "stack_monitor.hpp"
 
 namespace {
 
@@ -21,12 +24,15 @@ constexpr std::uint16_t kBaudDivider{
 constexpr std::uint8_t kHeartbeatWire{1U};
 constexpr std::uint8_t kArduinoParticipant{1U};
 constexpr std::uint8_t kUartEgress{1U};
+constexpr std::uint16_t kStackScanIterationPeriod{4096U};
 constexpr std::size_t kMaximumPayloadSize{4U};
 constexpr std::size_t kMaximumCanonicalSize{
     sizeof(wirespaces::Header) + kMaximumPayloadSize};
 constexpr std::size_t kMaximumFrameCapacity{kMaximumCanonicalSize * 2U + 2U};
 constexpr std::uint16_t kPingCanonicalEndpoint{
     static_cast<std::uint16_t>(0xC000U | WS_SERVICE_PING_ENDPOINT_ID)};
+constexpr std::uint16_t kLedControlCanonicalEndpoint{
+    static_cast<std::uint16_t>(0xC000U | WS_SERVICE_LED_CONTROL_ENDPOINT_ID)};
 
 WS_PACKET_DEFINE(UartReceivePacket, kMaximumPayloadSize);
 
@@ -53,6 +59,41 @@ void clockInit() {
     TCCR0B = _BV(CS01) | _BV(CS00);
     OCR0A = 249U;
     TIMSK0 = _BV(OCIE0A);
+}
+
+void ledPwmInit() {
+    DDRB |= _BV(DDB5);
+    PORTB &= static_cast<std::uint8_t>(~_BV(PORTB5));
+    TCCR1A = _BV(WGM10);
+    TCCR1B = _BV(WGM12) | _BV(CS11) | _BV(CS10);
+    OCR1A = 0U;
+    TIMSK1 = 0U;
+}
+
+/**
+ * @brief Apply 8-bit ratiometric brightness to the UNO LED on D13/PB5.
+ *
+ * Zero and 255 are driven statically to guarantee exact 0% and 100%
+ * endpoints. PB5 is not a hardware PWM output, so Timer 1 compare and
+ * overflow interrupts generate approximately 977 Hz PWM in software.
+ */
+void setBuiltInLedBrightness(void* context, std::uint8_t brightness) {
+    (void)context;
+
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        TIMSK1 = 0U;
+        if (brightness == 0U) {
+            PORTB &= static_cast<std::uint8_t>(~_BV(PORTB5));
+        } else if (brightness == 0xFFU) {
+            PORTB |= _BV(PORTB5);
+        } else {
+            OCR1A = brightness;
+            TCNT1 = 0U;
+            PORTB |= _BV(PORTB5);
+            TIFR1 = _BV(OCF1A) | _BV(TOV1);
+            TIMSK1 = _BV(OCIE1A) | _BV(TOIE1);
+        }
+    }
 }
 
 /**
@@ -135,6 +176,14 @@ ISR(TIMER0_COMPA_vect) {
     ++g_milliseconds;
 }
 
+ISR(TIMER1_COMPA_vect) {
+    PORTB &= static_cast<std::uint8_t>(~_BV(PORTB5));
+}
+
+ISR(TIMER1_OVF_vect) {
+    PORTB |= _BV(PORTB5);
+}
+
 wirespaces::hal::MillisecondClock::TimePoint
 wirespaces::hal::MillisecondClock::now() noexcept {
     std::uint32_t result{0U};
@@ -145,8 +194,12 @@ wirespaces::hal::MillisecondClock::now() noexcept {
 }
 
 int main() {
+    wirespaces::avr_example::StackMonitor stack_monitor{};
+    stack_monitor.initialize();
+
     uartInit();
     clockInit();
+    ledPwmInit();
 
     wirespaces::RouteTableEntry route_entries[]{
         {kHeartbeatWire, kUartEgress},
@@ -170,21 +223,45 @@ int main() {
         kArduinoParticipant,
         WS_HOST_BROADCAST,
     };
+    stack_report::StackReportService<1000U> stack_report_service{
+        &route_table,
+        kHeartbeatWire,
+        kArduinoParticipant,
+        WS_HOST_BROADCAST,
+    };
     ping::PingService ping_service{&route_table};
+    led_control::LedControlService led_control_service{
+        &route_table,
+        setBuiltInLedBrightness,
+        nullptr,
+    };
     wirespaces::DispatchTableEntry dispatch_entries[]{
         {
             kPingCanonicalEndpoint,
             ping_service.receiverHandle(),
         },
+        {
+            kLedControlCanonicalEndpoint,
+            led_control_service.receiverHandle(),
+        },
     };
     const wirespaces::DispatchTable dispatch_table{
         dispatch_entries,
-        1U,
+        2U,
     };
 
     sei();
+    std::uint16_t loop_iteration{0U};
     for (;;) {
         processUartInput(dispatch_table);
         heartbeat_service.run();
+        stack_report_service.run(
+            stack_monitor.peakUsedBytes(),
+            stack_monitor.capacityBytes());
+
+        loop_iteration = static_cast<std::uint16_t>(loop_iteration + 1U);
+        if ((loop_iteration % kStackScanIterationPeriod) == 0U) {
+            stack_monitor.scan();
+        }
     }
 }

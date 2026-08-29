@@ -22,6 +22,7 @@ typedef enum {
 
 typedef void (*ws_receive_callback_t)(void* receiver_context, const ws_packet_buffer_t* packet);
 
+// TODO: must be able to choose between copy-based and zero-copy (for the whole dispatch table)
 typedef struct {
     ws_receive_callback_t receive;
     void* receiver_context;

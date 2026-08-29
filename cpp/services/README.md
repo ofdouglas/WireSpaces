@@ -12,3 +12,9 @@ This will eventually contain re-usable firmware services such as:
  - OS / memory / thread health telemetry
  - DID-style table accessible over network, may be useful during development.
 
+Current prototypes:
+ - Heartbeat
+ - Ping
+ - Peak stack utilization report
+ - LED on/off control
+

@@ -1,8 +1,9 @@
-#pragma once
 /*
  * @file  hdlc_decoder.hpp
  * @brief Freestanding C++ HDLC stream decoder for the AVR UART example.
  */
+
+#pragma once
 
 #include <cstddef>
 #include <cstdint>

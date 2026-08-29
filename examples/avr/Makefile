@@ -38,7 +38,7 @@ OBJECTS := \
 	$(BUILD_DIR)/packet.o \
 	$(BUILD_DIR)/router.o
 
-.PHONY: all clean flash receive size test-ping test-receiver verify
+.PHONY: all clean flash led-off led-on led-ramp receive size test-ping test-receiver test-stack verify
 
 all: $(HEX) size
 
@@ -76,6 +76,15 @@ flash: $(HEX)
 	$(AVRDUDE) -p $(MCU) -c $(PROGRAMMER) -P $(PORT) \
 		-b $(UPLOAD_BAUD) -D -U flash:w:$(HEX):i
 
+led-on:
+	python3 led_control.py on --port $(PORT) --baud 115200
+
+led-off:
+	python3 led_control.py off --port $(PORT) --baud 115200
+
+led-ramp:
+	python3 led_ramp.py --port $(PORT) --baud 115200
+
 receive:
 	python3 receiver.py --port $(PORT) --baud 115200
 
@@ -84,6 +93,10 @@ test-receiver:
 
 test-ping:
 	python3 ping_test.py --port $(PORT) --baud 115200 \
+		--reset --timeout 5
+
+test-stack:
+	python3 stack_report_test.py --port $(PORT) --baud 115200 \
 		--reset --timeout 5
 
 verify:

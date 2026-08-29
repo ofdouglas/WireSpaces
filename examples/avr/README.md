@@ -4,6 +4,8 @@ The example runs a minimal WireSpaces heartbeat publisher:
 
 - ATmega328P Timer 0 supplies the millisecond clock.
 - `HeartbeatService` creates one canonical PDU per second.
+- `StackReportService` publishes peak painted-stack utilization once per second.
+- `LedControlService` controls the UNO built-in LED on digital pin 13.
 - The core Router selects the UART egress for Wire 1.
 - The HDLC Link layer frames and byte-stuffs the canonical header and payload.
 - UART0 transmits at 115200 baud through the UNO USB serial connection.
@@ -98,6 +100,34 @@ make test-ping
 The hardware test sends a directed request from PC Participant 2 to Arduino
 Participant 1. Its default sequence, `0x7E7D`, deliberately contains both HDLC
 reserved bytes so the exchange tests byte stuffing in both directions.
+
+Validate the live stack report:
+
+```sh
+make test-stack
+```
+
+The AVR monitor paints unused SRAM once during startup, scans the paint boundary
+every 4096 superloop iterations, and reports peak-used and available bytes.
+The initialization guard and startup/main stack frames are conservatively
+counted as used.
+
+Control the built-in LED through directed WireSpaces requests:
+
+```sh
+make led-on
+make led-off
+python3 led_control.py 10% --port /dev/ttyACM0
+python3 led_control.py 128 --port /dev/ttyACM0
+make led-ramp
+```
+
+The controller waits for an acknowledgement from Arduino Participant 1 before
+reporting success. The LED control Service uses Common Endpoint `0x3FFB` and an
+8-bit ratiometric brightness value, where `0/255` is off and `255/255` is fully
+on. Because the built-in D13/PB5 LED is not connected to a hardware PWM output,
+Timer 1 interrupts generate approximately 977 Hz PWM. The ramp test sends
+acknowledged 10% steps from 0% through 100% over one second.
 
 Run the bounded hardware smoke test:
 

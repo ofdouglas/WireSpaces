@@ -1,6 +1,6 @@
 /**
  * @file packet_builder.hpp
- * @brief Builds in-memory test packets with sane local-domain defaults.
+ * @brief Builds fixed-storage test packets with local-domain defaults.
  */
 
 #pragma once
@@ -13,97 +13,75 @@
 
 namespace wirespaces::test::support {
 
-WS_PACKET_DEFINE(TestPacket, WS_MAILBOX_DEFAULT_CAPACITY);
+WS_PACKET_BUFFER_DEFINE(TestPacket, kDefaultEndpointStorageCapacity);
 
 inline ControlFields defaultControlFields() {
-    return ControlFields{kQoSNormal, false, kTransportSimple};
+    return ControlFields{QoS::kNormal, false, TransportType::kSimple};
 }
 
-inline PacketBuffer* asPacketBuffer(TestPacket* packet) {
-    return reinterpret_cast<PacketBuffer*>(packet);
-}
-
-inline const PacketBuffer* asPacketBuffer(const TestPacket* packet) {
-    return reinterpret_cast<const PacketBuffer*>(packet);
-}
+inline PacketBuffer* asPacketBuffer(TestPacket* packet) { return packet; }
+inline const PacketBuffer* asPacketBuffer(const TestPacket* packet) { return packet; }
 
 class PacketBuilder {
 public:
     PacketBuilder() {
-        packet_ = TestPacket{};
-        ws_packet_init(
-            asPacketBuffer(&packet_),
-            WS_MAILBOX_DEFAULT_CAPACITY,
-            0U,
-            defaultControlFields());
-        packet_.header.wire_number = WS_WIRE_LOCAL_DOMAIN;
-        packet_.header.src_host = kLocalHostId;
-        packet_.header.dst_host = kLocalHostId;
+        static_cast<void>(packet_.initialize(0U, defaultControlFields()));
+        packet_.header().wire = kLocalWire;
+        packet_.header().source = kLocalHostId;
+        packet_.header().destination = kLocalHostId;
     }
 
     PacketBuilder& withSize(uint16_t size) {
-        asPacketBuffer(&packet_)->size = size;
+        static_cast<void>(packet_.resize(size));
         return *this;
     }
 
     PacketBuilder& withPayload(const char* text) {
-        const size_t length = std::strlen(text);
+        const size_t length{std::strlen(text)};
         withSize(static_cast<uint16_t>(length));
         if (length > 0U) {
-            std::memcpy(packet_.data, text, length);
+            std::memcpy(packet_.payload().data(), text, length);
         }
         return *this;
     }
 
     PacketBuilder& withPayloadLength(uint16_t length) {
         withSize(length);
+        MutableByteSpan payload{packet_.payload()};
         for (uint16_t index = 0U; index < length; ++index) {
-            packet_.data[index] = static_cast<uint8_t>('A' + (index % 26U));
+            payload[index] = static_cast<uint8_t>('A' + (index % 26U));
         }
         return *this;
     }
 
-    PacketBuilder& withWire(uint8_t wire_number) {
-        packet_.header.wire_number = wire_number;
+    PacketBuilder& withWire(WireNumber wire) {
+        packet_.header().wire = wire;
         return *this;
     }
 
-    PacketBuilder& withSrcHost(uint8_t host_id) {
-        packet_.header.src_host = host_id;
+    PacketBuilder& withSource(HostId host) {
+        packet_.header().source = host;
         return *this;
     }
 
-    PacketBuilder& withDstHost(uint8_t host_id) {
-        packet_.header.dst_host = host_id;
+    PacketBuilder& withDestination(HostId host) {
+        packet_.header().destination = host;
         return *this;
     }
 
-    PacketBuilder& withEndpoint(Namespace namespace_id, uint16_t endpoint_id) {
-        ws_packet_set_endpoint(&packet_.header, namespace_id, endpoint_id);
+    PacketBuilder& withEndpoint(EndpointAddress endpoint) {
+        packet_.header().endpoint = endpoint;
         return *this;
     }
 
-    PacketBuilder& withRawEndpoint(uint16_t endpoint) {
-        packet_.header.endpoint = endpoint;
+    PacketBuilder& withControlFields(ControlFields control_fields) {
+        packet_.header().setControlFields(control_fields);
         return *this;
     }
 
-    PacketBuilder& withControlFields(const ControlFields& control_fields) {
-        ws_header_set_control_fields(&packet_.header, control_fields);
-        return *this;
-    }
-
-    TestPacket& packet() {
-        return packet_;
-    }
-
-    const TestPacket& packet() const {
-        return packet_;
-    }
-
-    PacketBuffer* packetBuffer() {
-        return asPacketBuffer(&packet_);
-    }
+    TestPacket& packet() { return packet_; }
+    const TestPacket& packet() const { return packet_; }
+    PacketBuffer& packetBuffer() { return packet_; }
 
 private:
     TestPacket packet_{};

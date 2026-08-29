@@ -1,38 +1,49 @@
 /**
  * @file router.h
- * @brief WireSpaces Router: forwards packets to the appropriate links.
+ * @brief Static WireSpaces route table and packet forwarding interface.
  */
 
 #pragma once
 
-#include <core/dispatch.h>
+#include <core/packet.h>
+#include <foundation/span.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <cstdint>
 
-#define WS_EGRESS_SET_NONE 0U
+namespace wirespaces {
 
-typedef uint8_t ws_egress_set_t;
+using EgressSet = uint8_t;
+constexpr EgressSet kNoEgress{0U};
 
-typedef struct {
-    uint8_t wire_number;
-    ws_egress_set_t egress_set;
-} ws_route_table_entry_t;
+struct RouteTableEntry {
+    WireNumber wire{};
+    EgressSet egress_set{kNoEgress};
+};
 
-typedef struct {
-    ws_route_table_entry_t* base;
-    size_t capacity;
+class PacketForwarder {
+public:
+    virtual void forward(const PacketBuffer& packet, EgressSet egress_set) noexcept = 0;
 
-    void (*forward)(
-        void* forwarder_context,
-        const ws_packet_buffer_t* packet,
-        ws_egress_set_t egress_set);
-    void* forwarder_context;
-} ws_route_table_t;
+protected:
+    ~PacketForwarder() = default;
+};
 
-ws_dispatch_result_t ws_router_forward_packet(const ws_route_table_t* table, const ws_packet_buffer_t* packet);
+enum class RouteResult : uint8_t {
+    kForwarded = 0U,
+    kNoRoute,
+};
 
-#ifdef __cplusplus
-}
-#endif
+class Router {
+public:
+    constexpr Router(foundation::Span<const RouteTableEntry> entries,
+                     PacketForwarder& forwarder) noexcept
+        : entries_{entries}, forwarder_{forwarder} {}
+
+    [[nodiscard]] RouteResult forward(const PacketBuffer& packet) const noexcept;
+
+private:
+    foundation::Span<const RouteTableEntry> entries_{};
+    PacketForwarder& forwarder_;
+};
+
+}  // namespace wirespaces

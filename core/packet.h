@@ -1,54 +1,71 @@
 /**
  * @file packet.h
- * @brief WireSpaces packet definition and accessors API.
+ * @brief Fixed-storage, non-templated WireSpaces packet buffer API.
  */
 
 #pragma once
 
 #include <core/header.h>
+#include <foundation/span.h>
 
-#include <stddef.h>
-#include <stdint.h>
+#include <cstdint>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace wirespaces {
 
-typedef struct {
-    uint16_t capacity;
-    uint16_t size;
-    ws_header_t header;
-} WS_PACKED ws_packet_buffer_t;
+using ByteSpan = foundation::Span<const uint8_t>;
+using MutableByteSpan = foundation::Span<uint8_t>;
 
-#define WS_PACKET_DEFINE(name, payload_capacity) \
-    typedef struct { \
-        uint16_t capacity; \
-        uint16_t size; \
-        ws_header_t header; \
-        uint8_t data[(payload_capacity)]; \
-    } WS_PACKED name
+/**
+ * @brief Common packet prefix used by all statically sized packet buffers.
+ *
+ * Payload storage immediately follows this object and is supplied by
+ * WS_PACKET_BUFFER_DEFINE. Packet-processing code remains non-templated.
+ */
+class alignas(4) PacketBuffer {
+public:
+    [[nodiscard]] uint16_t capacity() const noexcept {
+        return capacity_;
+    }
+    [[nodiscard]] uint16_t size() const noexcept {
+        return size_;
+    }
 
-#if defined(__cplusplus)
-static_assert(
-    offsetof(ws_packet_buffer_t, header) + sizeof(ws_header_t) == sizeof(ws_packet_buffer_t),
-    "ws_packet_buffer_t must not contain padding before payload");
-#else
-_Static_assert(
-    offsetof(ws_packet_buffer_t, header) + sizeof(ws_header_t) == sizeof(ws_packet_buffer_t),
-    "ws_packet_buffer_t must not contain padding before payload");
-#endif
+    [[nodiscard]] bool resize(uint16_t size) noexcept;
+    [[nodiscard]] bool initialize(uint16_t size, ControlFields control_fields) noexcept;
 
-void ws_packet_init(
-    ws_packet_buffer_t* packet,
-    uint16_t capacity,
-    uint16_t size,
-    ws_control_fields_t control_fields);
+    [[nodiscard]] Header& header() noexcept {
+        return header_;
+    }
+    [[nodiscard]] const Header& header() const noexcept {
+        return header_;
+    }
 
-const uint8_t* ws_packet_payload_bytes(const ws_packet_buffer_t* packet);
-uint8_t* ws_packet_payload_mut(ws_packet_buffer_t* packet);
+    [[nodiscard]] MutableByteSpan payload() noexcept;
+    [[nodiscard]] ByteSpan payload() const noexcept;
 
-void ws_packet_set_endpoint(ws_header_t* header, ws_namespace_t namespace_id, uint16_t endpoint_id);
+protected:
+    explicit constexpr PacketBuffer(uint16_t capacity) noexcept : capacity_{capacity} {}
 
-#ifdef __cplusplus
-}
-#endif
+private:
+    uint16_t capacity_{0U};
+    uint16_t size_{0U};
+    uint16_t payload_alignment_padding_{0U};
+    Header header_{};
+};
+
+static_assert(alignof(PacketBuffer) >= 4U, "PacketBuffer must be four-byte aligned");
+static_assert((sizeof(PacketBuffer) % 4U) == 0U, "Packet payload offset must be four-byte aligned");
+
+}  // namespace wirespaces
+
+#define WS_PACKET_BUFFER_DEFINE(name, payload_capacity)               \
+    class alignas(4) name final : public ::wirespaces::PacketBuffer { \
+    public:                                                           \
+        static constexpr uint16_t kPayloadCapacity{payload_capacity}; \
+                                                                      \
+        constexpr name() noexcept : PacketBuffer{kPayloadCapacity} {} \
+                                                                      \
+    private:                                                          \
+        uint8_t payload_storage_[kPayloadCapacity]{};                 \
+    };                                                                \
+    static_assert(alignof(name) >= 4U, #name " must be four-byte aligned")

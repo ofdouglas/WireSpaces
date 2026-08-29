@@ -1,46 +1,53 @@
 /**
  * @file dispatch.h
- * @brief WireSpaces Endpoint Dispatcher -- finds the right endpoint for a packet and dispatches it.
+ * @brief Endpoint receiver interface and bounded dispatch table.
  */
 
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
-
-#include <core/header.h>
 #include <core/packet.h>
+#include <foundation/span.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <cstdint>
 
-typedef enum {
-    WS_DISPATCH_OK = 0,
-    WS_DISPATCH_NO_ENDPOINT,
-} ws_dispatch_result_t;
+namespace wirespaces {
 
-typedef void (*ws_receive_callback_t)(void* receiver_context, const ws_packet_buffer_t* packet);
+enum class ReceiveResult : uint8_t {
+    kAccepted = 0U,
+    kFull,
+    kRejected,
+};
 
-// TODO: must be able to choose between copy-based and zero-copy (for the whole dispatch table)
-typedef struct {
-    ws_receive_callback_t receive;
-    void* receiver_context;
-} ws_endpoint_receiver_t;
+class EndpointReceiver {
+public:
+    virtual ReceiveResult receive(const PacketBuffer& packet) noexcept = 0;
 
-typedef struct {
-    uint16_t endpoint;
-    ws_endpoint_receiver_t receiver;
-} ws_dispatch_table_entry_t;
+protected:
+    ~EndpointReceiver() = default;
+};
 
-typedef struct {
-    ws_dispatch_table_entry_t* base;
-    size_t capacity;
-} ws_dispatch_table_t;
+struct DispatchTableEntry {
+    HostId host{};
+    EndpointAddress endpoint{};
+    EndpointReceiver* receiver{nullptr};
+};
 
-/** Deliver the packet to the appropriate endpoint when addressed to this host. */
-ws_dispatch_result_t ws_dispatch_packet(const ws_dispatch_table_t* table, const ws_packet_buffer_t* packet);
+enum class DispatchResult : uint8_t {
+    kAccepted = 0U,
+    kFull,
+    kRejected,
+    kNoEndpoint,
+};
 
-#ifdef __cplusplus
-}
-#endif
+class Dispatcher {
+public:
+    explicit constexpr Dispatcher(foundation::Span<const DispatchTableEntry> entries) noexcept
+        : entries_{entries} {}
+
+    [[nodiscard]] DispatchResult dispatch(const PacketBuffer& packet) const noexcept;
+
+private:
+    foundation::Span<const DispatchTableEntry> entries_{};
+};
+
+}  // namespace wirespaces

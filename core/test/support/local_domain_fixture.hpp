@@ -1,6 +1,6 @@
 /**
  * @file local_domain_fixture.hpp
- * @brief Wires route table + dispatch table for end-to-end local-domain tests.
+ * @brief Router to Dispatcher local-domain integration fixture.
  */
 
 #pragma once
@@ -13,28 +13,25 @@
 
 namespace wirespaces::test::support {
 
-class LocalDomainFixture : public DispatchTableFixture {
+class LocalDomainFixture : public DefaultHostFixture {
 protected:
     void SetUp() override {
-        DispatchTableFixture::SetUp();
-        registerEndpoint(kReceiverEndpoint, recorder_.handle());
-        forward_context_ = LocalDomainForwardContext{&dispatch_table_};
-        route_entries_[0] = RouteTableEntry{WS_WIRE_LOCAL_DOMAIN, WS_EGRESS_SET_NONE};
-        route_table_ = RouteTable{
-            route_entries_,
-            1U,
-            ws_local_domain_forward_impl,
-            &forward_context_,
-        };
+        DefaultHostFixture::SetUp();
+        recorder_.reset();
+        dispatch_entry_ = DispatchTableEntry{kLocalHostId, kReceiverEndpoint, &recorder_};
+        route_entry_ = RouteTableEntry{kLocalWire, kNoEgress};
     }
 
-    DispatchResult forwardDomain(TestPacket& packet) {
-        return ws_local_domain_forward(&route_table_, asPacketBuffer(&packet));
+    [[nodiscard]] RouteResult forwardDomain(TestPacket& packet) const {
+        return router_.forward(packet);
     }
 
-    LocalDomainForwardContext forward_context_{};
-    RouteTableEntry route_entries_[1]{};
-    RouteTable route_table_{route_entries_, 0U, nullptr, nullptr};
+    DispatchRecorder recorder_{};
+    DispatchTableEntry dispatch_entry_{};
+    Dispatcher dispatcher_{foundation::Span<const DispatchTableEntry>{&dispatch_entry_, 1U}};
+    LocalDomainForwarder local_forwarder_{dispatcher_};
+    RouteTableEntry route_entry_{};
+    Router router_{foundation::Span<const RouteTableEntry>{&route_entry_, 1U}, local_forwarder_};
 };
 
 } // namespace wirespaces::test::support

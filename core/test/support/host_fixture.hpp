@@ -1,6 +1,6 @@
 /**
  * @file host_fixture.hpp
- * @brief Configures HostInfo for tests that depend on local host membership.
+ * @brief Configures local host membership for core tests.
  */
 
 #pragma once
@@ -13,31 +13,20 @@
 
 namespace wirespaces::test::support {
 
-inline void configureHost(uint8_t host_id, uint8_t num_wires, const uint8_t* wires) {
+inline void configureHost(HostId host_id, WireNumber wire) {
     HostInfo host_info{};
-    host_info.host_id = host_id;
-    host_info.num_wires = num_wires;
-    for (uint8_t index = 0U; index < num_wires; ++index) {
-        host_info.wires[index] = wires[index];
-    }
-    ws_host_set_info(&host_info);
+    host_info.id = host_id;
+    host_info.wire_count = 1U;
+    host_info.wires[0] = wire;
+    setLocalHostInfo(host_info);
 }
 
-inline void configureDefaultHost() {
-    const uint8_t wires[] = {WS_WIRE_LOCAL_DOMAIN};
-    configureHost(kLocalHostId, 1U, wires);
-}
-
-inline void configureHostWithoutLocalWire() {
-    const uint8_t wires[] = {kOtherWire};
-    configureHost(kLocalHostId, 1U, wires);
-}
+inline void configureDefaultHost() { configureHost(kLocalHostId, kLocalWire); }
+inline void configureHostWithoutLocalWire() { configureHost(kLocalHostId, kOtherWire); }
 
 class DefaultHostFixture : public ::testing::Test {
 protected:
-    void SetUp() override {
-        configureDefaultHost();
-    }
+    void SetUp() override { configureDefaultHost(); }
 };
 
 } // namespace wirespaces::test::support

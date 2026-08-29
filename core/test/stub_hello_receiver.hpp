@@ -1,63 +1,42 @@
 /**
  * @file stub_hello_receiver.hpp
- * @brief Stub receiver service using a 1-slot mailbox.
+ * @brief Stub EndpointReceiver backed by a snapshot receiver.
  */
 
 #pragma once
 
-#include <cstdint>
 #include <string>
 
 #include <runtime/core.hpp>
 
 namespace wirespaces::test {
 
-constexpr uint16_t kHelloSenderEndpoint = 0x0001U;
-constexpr uint16_t kHelloReceiverEndpoint = 0x0002U;
+constexpr uint16_t kHelloSenderEndpointId{0x0001U};
+constexpr uint16_t kHelloReceiverEndpointId{0x0002U};
+constexpr EndpointAddress kHelloReceiverEndpoint{
+    EndpointAddress::from(Namespace::kUser0, kHelloReceiverEndpointId)};
 
-class HelloReceiver {
+class HelloReceiver final : public EndpointReceiver {
 public:
-    HelloReceiver() {
-        ws_mailbox_init(&mailbox_);
+    ReceiveResult receive(const PacketBuffer& packet) noexcept override {
+        return snapshot_.receive(packet);
     }
 
-    void receive(const PacketBuffer* packet) {
-        ws_mailbox_receive_callback(&mailbox_, packet);
-    }
-
-    [[nodiscard]] EndpointReceiver receiverHandle() {
-        return EndpointReceiver{endpoint_receive_thunk<HelloReceiver>, this};
-    }
-
-    [[nodiscard]] uint16_t endpointId() const {
-        return kHelloReceiverEndpoint;
-    }
-
-    [[nodiscard]] bool hasMessage() const {
-        return mailbox_.occupied;
-    }
-
-    [[nodiscard]] uint32_t generation() const {
-        return mailbox_.generation;
-    }
+    [[nodiscard]] bool hasMessage() const noexcept { return snapshot_.hasValue(); }
+    [[nodiscard]] uint32_t generation() const noexcept { return snapshot_.generation(); }
 
     [[nodiscard]] std::string text() const {
-        uint8_t buffer[WS_MAILBOX_DEFAULT_CAPACITY]{};
-        uint16_t length = 0U;
-        uint32_t generation = 0U;
-        if (!ws_mailbox_read(&mailbox_, buffer, sizeof(buffer), &length, &generation)) {
+        uint8_t buffer[kDefaultEndpointStorageCapacity]{};
+        uint16_t length{0U};
+        uint32_t generation_value{0U};
+        if (!snapshot_.read(MutableByteSpan{buffer}, length, generation_value)) {
             return {};
         }
-
-        return std::string(reinterpret_cast<char*>(buffer), length);
-    }
-
-    [[nodiscard]] const Mailbox& mailbox() const {
-        return mailbox_;
+        return std::string{reinterpret_cast<char*>(buffer), length};
     }
 
 private:
-    Mailbox mailbox_{};
+    EndpointSnapshotReceiver snapshot_{};
 };
 
 } // namespace wirespaces::test

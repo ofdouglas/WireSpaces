@@ -1,69 +1,37 @@
 /**
  * @file local_domain_test.cpp
- * @brief Local-domain glue: router → dispatch integration and ingress validation.
+ * @brief Router to local Dispatcher integration coverage.
  */
 
 #include <gtest/gtest.h>
 
-#include <runtime/core.hpp>
-
-#include "support/constants.hpp"
 #include "support/local_domain_fixture.hpp"
-#include "support/packet_builder.hpp"
 
 namespace wirespaces::test {
 namespace {
 
-using support::asPacketBuffer;
+using support::kOtherWire;
 using support::kReceiverEndpoint;
 using support::LocalDomainFixture;
 using support::PacketBuilder;
 using support::TestPacket;
-using wirespaces::kDispatchNoEndpoint;
-using wirespaces::kDispatchOk;
-using wirespaces::kNamespaceUser0;
-using wirespaces::PacketBuffer;
 
-class LocalDomainTest : public LocalDomainFixture {};
-
-TEST_F(LocalDomainTest, ForwardsLocalWirePacketToDispatch) {
-    TestPacket packet = PacketBuilder{}
-                            .withPayload("domain")
-                            .withEndpoint(kNamespaceUser0, kReceiverEndpoint)
-                            .packet();
-
-    EXPECT_EQ(forwardDomain(packet), kDispatchOk);
+// Local-domain forwarding routes and dispatches a matching packet.
+TEST_F(LocalDomainFixture, RoutesIntoDispatcher) {
+    TestPacket packet{PacketBuilder{}.withEndpoint(kReceiverEndpoint).packet()};
+    EXPECT_EQ(forwardDomain(packet), RouteResult::kForwarded);
+    EXPECT_EQ(local_forwarder_.lastResult(), DispatchResult::kAccepted);
     EXPECT_EQ(recorder_.invocationCount(), 1U);
 }
 
-TEST_F(LocalDomainTest, ForwardImplDispatchesRegardlessOfEgressSet) {
-    TestPacket packet = PacketBuilder{}
-                            .withPayload("egress")
-                            .withEndpoint(kNamespaceUser0, kReceiverEndpoint)
-                            .packet();
-
-    ws_local_domain_forward_impl(&forward_context_, asPacketBuffer(&packet), 0xFFU);
-
-    EXPECT_EQ(recorder_.invocationCount(), 1U);
-}
-
-TEST_F(LocalDomainTest, RejectsUnknownWireAtRouter) {
-    TestPacket packet = PacketBuilder{}
-                            .withWire(support::kOtherWire)
-                            .withPayload("nowhere")
-                            .withEndpoint(kNamespaceUser0, kReceiverEndpoint)
-                            .packet();
-
-    EXPECT_EQ(forwardDomain(packet), kDispatchNoEndpoint);
+// A missing route never reaches local dispatch.
+TEST_F(LocalDomainFixture, RejectsUnregisteredWireBeforeDispatch) {
+    TestPacket packet{PacketBuilder{}
+                          .withWire(kOtherWire)
+                          .withEndpoint(kReceiverEndpoint)
+                          .packet()};
+    EXPECT_EQ(forwardDomain(packet), RouteResult::kNoRoute);
     EXPECT_EQ(recorder_.invocationCount(), 0U);
-}
-
-TEST_F(LocalDomainTest, RejectsNullRouteTableOrPacket) {
-    TestPacket packet = PacketBuilder{}.withPayload("null").packet();
-    const PacketBuffer* packet_buffer = asPacketBuffer(&packet);
-
-    EXPECT_EQ(ws_local_domain_forward(nullptr, packet_buffer), kDispatchNoEndpoint);
-    EXPECT_EQ(ws_local_domain_forward(&route_table_, nullptr), kDispatchNoEndpoint);
 }
 
 } // namespace

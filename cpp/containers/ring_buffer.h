@@ -5,12 +5,13 @@
 
 #pragma once
 
-#include <atomic>
-#include <cstddef>
-#include <type_traits>
-
 #include <foundation/array.h>
 #include <foundation/span.h>
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <type_traits>
 
 namespace wirespaces::containers {
 
@@ -19,20 +20,16 @@ namespace wirespaces::containers {
  *
  * @tparam T Item type.
  * @tparam kCapacity Number of items the queue can contain.
+ * @tparam IndexType Type of the index used to track the write and read positions.
  */
-template <typename T, size_t kCapacity>
+template <typename T, std::size_t kCapacity, typename IndexType = std::uint16_t>
 class RingBuffer {
 public:
-    static_assert(
-        std::is_default_constructible<T>::value,
-        "T must be default constructible");
-    static_assert(
-        std::is_copy_constructible<T>::value,
-        "T must be copy constructible");
-    static_assert(
-        std::is_copy_assignable<T>::value,
-        "T must be copy assignable");
+    static_assert(std::is_default_constructible<T>::value, "T must be default constructible");
+    static_assert(std::is_copy_constructible<T>::value, "T must be copy constructible");
+    static_assert(std::is_copy_assignable<T>::value, "T must be copy assignable");
     static_assert(kCapacity > 0U, "kCapacity must be greater than zero");
+    static_assert(std::is_unsigned<IndexType>::value, "IndexType must be an unsigned integer type");
 
     RingBuffer() = default;
     RingBuffer(const RingBuffer&) = delete;
@@ -40,12 +37,16 @@ public:
     RingBuffer(RingBuffer&&) = delete;
     RingBuffer& operator=(RingBuffer&&) = delete;
 
-    bool isEmpty() const noexcept { return write_index_ == read_index_; }
-    bool isFull() const noexcept { return increment(write_index_) == read_index_; }
+    bool isEmpty() const noexcept {
+        return write_index_ == read_index_;
+    }
+    bool isFull() const noexcept {
+        return increment(write_index_) == read_index_;
+    }
 
-    size_t size() const noexcept {
-        const size_t writer{write_index_.load()};
-        const size_t reader{read_index_.load()};
+    IndexType size() const noexcept {
+        const IndexType writer{write_index_.load()};
+        const IndexType reader{read_index_.load()};
         if (writer >= reader) {
             return writer - reader;
         }
@@ -79,8 +80,8 @@ public:
         return true;
     }
 
-    size_t dequeue(foundation::Span<T> output) noexcept {
-        size_t index{0U};
+    IndexType dequeue(foundation::Span<T> output) noexcept {
+        IndexType index{0U};
         while ((index < output.size()) && dequeue(output[index])) {
             ++index;
         }
@@ -103,13 +104,13 @@ public:
     }
 
 private:
-    size_t increment(size_t index) const noexcept {
+    IndexType increment(IndexType index) const noexcept {
         return (index == kCapacity) ? 0U : index + 1U;
     }
 
     foundation::Array<T, kCapacity + 1U> buffer_{};
-    std::atomic<size_t> write_index_{};
-    std::atomic<size_t> read_index_{};
+    std::atomic<IndexType> write_index_{};
+    std::atomic<IndexType> read_index_{};
 };
 
-} // namespace wirespaces::containers
+}  // namespace wirespaces::containers

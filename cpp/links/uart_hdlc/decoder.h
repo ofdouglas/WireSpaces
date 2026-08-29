@@ -5,10 +5,11 @@
 
 #pragma once
 
+#include <crc/crc_algorithm.h>
+#include <foundation/span.h>
+
 #include <cstddef>
 #include <cstdint>
-
-#include <crc/crc_algorithm.h>
 
 namespace wirespaces::links::uart_hdlc {
 
@@ -31,15 +32,8 @@ public:
     /**
      * @brief Return the current completed frame body.
      */
-    const std::uint8_t* frameData() const noexcept {
-        return frame_;
-    }
-
-    /**
-     * @brief Return the current completed frame-body length.
-     */
-    std::size_t frameSize() const noexcept {
-        return frame_size_;
+    foundation::Span<const std::uint8_t> frame() const noexcept {
+        return foundation::Span<const std::uint8_t>{frame_, frame_size_};
     }
 
     /**
@@ -72,16 +66,11 @@ bool HdlcDecoder<kFrameCapacity>::hasValidCrc() const noexcept {
     }
 
     const std::size_t payload_size{frame_size_ - kCrcSize};
-    const std::uint16_t received_crc{
-        static_cast<std::uint16_t>(
-            static_cast<std::uint16_t>(frame_[payload_size]) |
-            static_cast<std::uint16_t>(
-                static_cast<std::uint16_t>(frame_[payload_size + 1U]) <<
-                8U))};
-    return received_crc ==
-           wirespaces::crc::algorithm::Crc16CcittFalse::compute(
-               wirespaces::foundation::Span<const std::uint8_t>{
-                   frame_, payload_size});
+    const std::uint16_t received_crc{static_cast<std::uint16_t>(
+        static_cast<std::uint16_t>(frame_[payload_size]) |
+        static_cast<std::uint16_t>(static_cast<std::uint16_t>(frame_[payload_size + 1U]) << 8U))};
+    return received_crc == wirespaces::crc::algorithm::Crc16CcittFalse::compute(
+                               foundation::Span<const std::uint8_t>{frame_, payload_size});
 }
 
 template <std::size_t kFrameCapacity>
@@ -126,4 +115,4 @@ bool HdlcDecoder<kFrameCapacity>::push(std::uint8_t byte) noexcept {
     return false;
 }
 
-} // namespace wirespaces::links::uart_hdlc
+}  // namespace wirespaces::links::uart_hdlc

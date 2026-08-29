@@ -29,8 +29,6 @@ CPPFLAGS := -DF_CPU=$(F_CPU) \
 CXXFLAGS := -std=c++17 -mmcu=$(MCU) -Os -Wall -Wextra -Wpedantic \
 	-ffunction-sections -fdata-sections -fno-exceptions -fno-rtti \
 	-fno-threadsafe-statics -MMD -MP
-CFLAGS := -std=c11 -mmcu=$(MCU) -Os -Wall -Wextra -Wpedantic \
-	-ffunction-sections -fdata-sections -MMD -MP
 LDFLAGS := -mmcu=$(MCU) -Wl,--gc-sections
 HOST_CPPFLAGS := -I$(CPP_INCLUDE)
 
@@ -55,8 +53,8 @@ $(BUILD_DIR):
 $(BUILD_DIR)/main.o: main.cpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.o: $(WIRESPACES_ROOT)/core/%.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+$(BUILD_DIR)/%.o: $(WIRESPACES_ROOT)/core/%.cpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 $(ELF): $(OBJECTS)
 	$(CXX) $(LDFLAGS) $^ -o $@

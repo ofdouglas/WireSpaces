@@ -1,41 +1,42 @@
 /**
  * @file mailbox.h
- * @brief Single-slot Snapshot-style mailbox for Endpoint receive callbacks.
+ * @brief Single-slot snapshot EndpointReceiver.
  */
 
 #pragma once
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-
 #include <core/dispatch.h>
 #include <core/ws_constants.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <cstdint>
 
-typedef struct {
-    uint8_t data[WS_MAILBOX_DEFAULT_CAPACITY];
-    uint16_t length;
-    bool occupied;
-    uint32_t generation;
-} ws_mailbox_t;
+namespace wirespaces {
 
-void ws_mailbox_init(ws_mailbox_t* mailbox);
+/**
+ * @brief Retains the latest received payload and its generation.
+ *
+ * Synchronization is deliberately internal to the receiver implementation.
+ * The initial implementation is intended for a serialized single-writer domain.
+ */
+class EndpointSnapshotReceiver final : public EndpointReceiver {
+public:
+    ReceiveResult receive(const PacketBuffer& packet) noexcept override;
 
-bool ws_mailbox_store_from_packet(ws_mailbox_t* mailbox, const ws_packet_buffer_t* packet);
+    [[nodiscard]] bool read(MutableByteSpan output, uint16_t& length,
+                            uint32_t& generation) const noexcept;
 
-bool ws_mailbox_read(
-    const ws_mailbox_t* mailbox,
-    uint8_t* out_data,
-    size_t out_capacity,
-    uint16_t* out_length,
-    uint32_t* out_generation);
+    [[nodiscard]] bool hasValue() const noexcept {
+        return occupied_;
+    }
+    [[nodiscard]] uint32_t generation() const noexcept {
+        return generation_;
+    }
 
-void ws_mailbox_receive_callback(void* receiver_context, const ws_packet_buffer_t* packet);
+private:
+    uint8_t data_[kDefaultEndpointStorageCapacity]{};
+    uint16_t length_{0U};
+    bool occupied_{false};
+    uint32_t generation_{0U};
+};
 
-#ifdef __cplusplus
-}
-#endif
+}  // namespace wirespaces

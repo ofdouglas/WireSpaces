@@ -1,6 +1,6 @@
 /**
  * @file dispatch_recorder.hpp
- * @brief Records endpoint receive callbacks for dispatch unit tests.
+ * @brief EndpointReceiver and dispatch fixture for unit tests.
  */
 
 #pragma once
@@ -14,37 +14,28 @@
 
 namespace wirespaces::test::support {
 
-class DispatchRecorder {
+class DispatchRecorder final : public EndpointReceiver {
 public:
-    void reset() {
+    ReceiveResult receive(const PacketBuffer& packet) noexcept override {
+        ++invocation_count_;
+        last_packet_ = &packet;
+        return result_;
+    }
+
+    void reset() noexcept {
         invocation_count_ = 0U;
         last_packet_ = nullptr;
+        result_ = ReceiveResult::kAccepted;
     }
 
-    void onReceive(const PacketBuffer* packet) {
-        ++invocation_count_;
-        last_packet_ = packet;
-    }
-
-    static void thunk(void* context, const PacketBuffer* packet) {
-        static_cast<DispatchRecorder*>(context)->onReceive(packet);
-    }
-
-    EndpointReceiver handle() {
-        return EndpointReceiver{thunk, this};
-    }
-
-    uint32_t invocationCount() const {
-        return invocation_count_;
-    }
-
-    const PacketBuffer* lastPacket() const {
-        return last_packet_;
-    }
+    void setResult(ReceiveResult result) noexcept { result_ = result; }
+    [[nodiscard]] uint32_t invocationCount() const noexcept { return invocation_count_; }
+    [[nodiscard]] const PacketBuffer* lastPacket() const noexcept { return last_packet_; }
 
 private:
     uint32_t invocation_count_{0U};
     const PacketBuffer* last_packet_{nullptr};
+    ReceiveResult result_{ReceiveResult::kAccepted};
 };
 
 class DispatchTableFixture : public DefaultHostFixture {
@@ -52,24 +43,26 @@ protected:
     void SetUp() override {
         DefaultHostFixture::SetUp();
         entry_count_ = 0U;
-        dispatch_table_ = DispatchTable{dispatch_entries_, 0U};
         recorder_.reset();
     }
 
-    void registerEndpoint(uint16_t endpoint, EndpointReceiver receiver) {
-        dispatch_entries_[entry_count_] = DispatchTableEntry{endpoint, receiver};
+    void registerEndpoint(
+        EndpointAddress endpoint,
+        EndpointReceiver& receiver,
+        HostId host = kLocalHostId) {
+        dispatch_entries_[entry_count_] = DispatchTableEntry{host, endpoint, &receiver};
         ++entry_count_;
-        dispatch_table_ = DispatchTable{dispatch_entries_, entry_count_};
     }
 
-    DispatchResult dispatch(TestPacket& packet) {
-        return ws_dispatch_packet(&dispatch_table_, asPacketBuffer(&packet));
+    [[nodiscard]] DispatchResult dispatch(TestPacket& packet) const {
+        const Dispatcher dispatcher{
+            foundation::Span<const DispatchTableEntry>{dispatch_entries_, entry_count_}};
+        return dispatcher.dispatch(packet);
     }
 
     DispatchRecorder recorder_{};
     DispatchTableEntry dispatch_entries_[4]{};
     size_t entry_count_{0U};
-    DispatchTable dispatch_table_{dispatch_entries_, 0U};
 };
 
 } // namespace wirespaces::test::support

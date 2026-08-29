@@ -1,64 +1,115 @@
 /**
  * @file header.h
- * @brief WireSpaces header definition and accessors API.
+ * @brief Canonical WireSpaces packet header and strongly typed identifiers.
  */
 
 #pragma once
 
-#include <stdbool.h>
-#include <stdint.h>
-
 #include <core/ws_constants.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <cstdint>
 
-typedef enum {
-    WS_QOS_CRITICAL = 0,
-    WS_QOS_HIGH = 1,
-    WS_QOS_NORMAL = 2,
-    WS_QOS_BACKGROUND = 3
-} ws_qos_t;
+namespace wirespaces {
 
-typedef enum {
-    WS_TRANSPORT_SIMPLE = 0,
-} ws_transport_type_t;
+struct HostId {
+    uint8_t value;
+    [[nodiscard]] constexpr bool isBroadcast() const noexcept {
+        return value == kBroadcastHostValue;
+    }
+};
 
-typedef enum {
-    WS_NAMESPACE_USER0 = 0,
-    WS_NAMESPACE_USER1 = 1,
-    WS_NAMESPACE_USER2 = 2,
-    WS_NAMESPACE_COMMON = 3
-} ws_namespace_t;
-
-typedef struct {
-    uint8_t control;
-    uint8_t wire_number;
-    uint8_t src_host;
-    uint8_t dst_host;
-    uint16_t endpoint;
-} WS_PACKED ws_header_t;
-
-typedef struct {
-    ws_qos_t qos;
-    bool has_extensions;
-    ws_transport_type_t transport_type;
-} ws_control_fields_t;
-
-ws_qos_t ws_header_get_qos(const ws_header_t* header);
-bool ws_header_get_has_extensions(const ws_header_t* header);
-ws_transport_type_t ws_header_get_transport_type(const ws_header_t* header);
-
-void ws_header_set_qos(ws_header_t* header, ws_qos_t qos);
-void ws_header_set_has_extensions(ws_header_t* header, bool has_ext);
-void ws_header_set_transport_type(ws_header_t* header, ws_transport_type_t type);
-void ws_header_set_control_fields(ws_header_t* header, ws_control_fields_t control_fields);
-
-void ws_header_set_endpoint(ws_header_t* header, ws_namespace_t namespace_id, uint16_t endpoint_id);
-uint16_t ws_header_get_endpoint_id(const ws_header_t* header);
-ws_namespace_t ws_header_get_namespace(const ws_header_t* header);
-
-#ifdef __cplusplus
+constexpr bool operator==(HostId lhs, HostId rhs) noexcept {
+    return lhs.value == rhs.value;
 }
-#endif
+constexpr bool operator!=(HostId lhs, HostId rhs) noexcept {
+    return !(lhs == rhs);
+}
+
+struct WireNumber {
+    uint8_t value;
+};
+
+constexpr bool operator==(WireNumber lhs, WireNumber rhs) noexcept {
+    return lhs.value == rhs.value;
+}
+constexpr bool operator!=(WireNumber lhs, WireNumber rhs) noexcept {
+    return !(lhs == rhs);
+}
+
+enum class QoS : uint8_t {
+    kCritical = 0U,
+    kHigh = 1U,
+    kNormal = 2U,
+    kBackground = 3U,
+};
+
+enum class TransportType : uint8_t { kSimple = 0U };
+
+enum class Namespace : uint8_t {
+    kUser0 = 0U,
+    kUser1 = 1U,
+    kUser2 = 2U,
+    kCommon = 3U,
+};
+
+struct EndpointAddress {
+    uint16_t value;
+
+    [[nodiscard]] static constexpr EndpointAddress from(Namespace namespace_id,
+                                                        uint16_t endpoint_id) noexcept {
+        return EndpointAddress{
+            static_cast<uint16_t>((static_cast<uint16_t>(namespace_id) << kNamespaceShift) |
+                                  (endpoint_id & kEndpointIdMask))};
+    }
+
+    [[nodiscard]] constexpr Namespace namespaceId() const noexcept {
+        return static_cast<Namespace>((value & kNamespaceMask) >> kNamespaceShift);
+    }
+
+    [[nodiscard]] constexpr uint16_t endpointId() const noexcept {
+        return value & kEndpointIdMask;
+    }
+
+private:
+    static constexpr uint16_t kNamespaceMask{0xC000U};
+    static constexpr uint16_t kNamespaceShift{14U};
+    static constexpr uint16_t kEndpointIdMask{0x3FFFU};
+};
+
+constexpr bool operator==(EndpointAddress lhs, EndpointAddress rhs) noexcept {
+    return lhs.value == rhs.value;
+}
+constexpr bool operator!=(EndpointAddress lhs, EndpointAddress rhs) noexcept {
+    return !(lhs == rhs);
+}
+
+struct ControlFields {
+    QoS qos{QoS::kNormal};
+    bool has_extensions{false};
+    TransportType transport_type{TransportType::kSimple};
+};
+
+class WS_PACKED Header {
+public:
+    uint8_t control{};
+    [[nodiscard]] QoS qos() const noexcept;
+    [[nodiscard]] bool hasExtensions() const noexcept;
+    [[nodiscard]] TransportType transportType() const noexcept;
+
+    void setQoS(QoS qos) noexcept;
+    void setHasExtensions(bool has_extensions) noexcept;
+    void setTransportType(TransportType transport_type) noexcept;
+    void setControlFields(ControlFields control_fields) noexcept;
+
+    WireNumber wire{};
+    HostId source{};
+    HostId destination{};
+    EndpointAddress endpoint{};
+};
+
+static_assert(sizeof(HostId) == 1U, "HostId must remain one byte");
+static_assert(sizeof(WireNumber) == 1U, "WireNumber must remain one byte");
+static_assert(sizeof(EndpointAddress) == 2U, "EndpointAddress must remain two bytes");
+static_assert(sizeof(Header) == 6U, "Header must remain six bytes");
+
+}  // namespace wirespaces

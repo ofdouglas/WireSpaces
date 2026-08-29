@@ -1,23 +1,27 @@
 add_library(
     wirespaces_core
     STATIC
-        dispatch.c
-        header.c
-        host.c
-        local_domain.c
-        mailbox.c
-        packet.c
-        router.c
+        dispatch.cpp
+        header.cpp
+        host.cpp
+        local_domain.cpp
+        mailbox.cpp
+        packet.cpp
+        router.cpp
 )
 add_library(WireSpaces::core ALIAS wirespaces_core)
 
+target_compile_features(wirespaces_core PUBLIC cxx_std_17)
+
 target_include_directories(
     wirespaces_core
-    PUBLIC ${PROJECT_SOURCE_DIR}
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/cpp
 )
 
 if(MSVC)
-    target_compile_options(wirespaces_core PRIVATE /W4 /WX)
+    target_compile_options(wirespaces_core PRIVATE /W4 /WX /permissive-)
 else()
     target_compile_options(
         wirespaces_core

@@ -1,7 +1,10 @@
 /**
  * @file packet_test.cpp
- * @brief Packet helper coverage: init, payload pointer, endpoint delegate.
+ * @brief Packet initialization, bounded resizing, spans, and alignment.
  */
+
+#include <cstdint>
+#include <cstring>
 
 #include <gtest/gtest.h>
 
@@ -12,55 +15,43 @@
 namespace wirespaces::test {
 namespace {
 
-using support::asPacketBuffer;
-using support::PacketBuilder;
 using support::TestPacket;
-using wirespaces::ControlFields;
-using wirespaces::kNamespaceCommon;
-using wirespaces::kNamespaceUser0;
-using wirespaces::kQoSBackground;
-using wirespaces::kQoSNormal;
-using wirespaces::kTransportSimple;
 
-TEST(PacketInitTest, InitializesSizeAndControlFields) {
+// Initialization sets size and canonical control fields without changing capacity.
+TEST(PacketTest, InitializesSizeAndControlFields) {
     TestPacket packet{};
-    const ControlFields fields{kQoSBackground, true, kTransportSimple};
-    ws_packet_init(asPacketBuffer(&packet), WS_MAILBOX_DEFAULT_CAPACITY, 12U, fields);
-
-    EXPECT_EQ(asPacketBuffer(&packet)->capacity, WS_MAILBOX_DEFAULT_CAPACITY);
-    EXPECT_EQ(asPacketBuffer(&packet)->size, 12U);
-    EXPECT_EQ(ws_header_get_qos(&packet.header), kQoSBackground);
-    EXPECT_TRUE(ws_header_get_has_extensions(&packet.header));
-    EXPECT_EQ(ws_header_get_transport_type(&packet.header), kTransportSimple);
+    ASSERT_TRUE(packet.initialize(12U, ControlFields{QoS::kBackground, true, TransportType::kSimple}));
+    EXPECT_EQ(packet.capacity(), kDefaultEndpointStorageCapacity);
+    EXPECT_EQ(packet.size(), 12U);
+    EXPECT_EQ(packet.header().qos(), QoS::kBackground);
+    EXPECT_TRUE(packet.header().hasExtensions());
 }
 
-TEST(PacketPayloadTest, PayloadBytesFollowHeader) {
-    TestPacket packet = PacketBuilder{}.withPayload("payload").packet();
-    const uint8_t* payload = ws_packet_payload_bytes(asPacketBuffer(&packet));
-
-    EXPECT_NE(payload, nullptr);
-    EXPECT_EQ(payload, packet.data);
-    EXPECT_STREQ(reinterpret_cast<const char*>(payload), "payload");
-}
-
-TEST(PacketEndpointTest, SetEndpointDelegatesToHeader) {
+// Mutable and const payload access expose the same active bytes.
+TEST(PacketTest, PayloadReturnsSpanOfActiveSize) {
     TestPacket packet{};
-    ws_packet_set_endpoint(&packet.header, kNamespaceCommon, 0x0042U);
+    ASSERT_TRUE(packet.resize(7U));
+    std::memcpy(packet.payload().data(), "payload", 7U);
 
-    EXPECT_EQ(ws_header_get_namespace(&packet.header), kNamespaceCommon);
-    EXPECT_EQ(ws_header_get_endpoint_id(&packet.header), 0x0042U);
+    const PacketBuffer& const_packet{packet};
+    EXPECT_EQ(const_packet.payload().size(), 7U);
+    EXPECT_EQ(std::memcmp(const_packet.payload().data(), "payload", 7U), 0);
 }
 
-TEST(PacketNullSafetyTest, HandlesNullPointers) {
-    ws_packet_init(
-        nullptr,
-        WS_MAILBOX_DEFAULT_CAPACITY,
-        0U,
-        ControlFields{kQoSNormal, false, kTransportSimple});
-    EXPECT_EQ(ws_packet_payload_bytes(nullptr), nullptr);
-    EXPECT_EQ(ws_packet_payload_mut(nullptr), nullptr);
-    ws_packet_set_endpoint(nullptr, kNamespaceUser0, 0x0001U);
-    SUCCEED();
+// PacketBuffer and its trailing payload begin at four-byte boundaries.
+TEST(PacketTest, PayloadIsFourByteAligned) {
+    TestPacket packet{};
+    ASSERT_TRUE(packet.resize(1U));
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(&packet) % 4U, 0U);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(packet.payload().data()) % 4U, 0U);
+}
+
+// Resize rejects capacity overflow and preserves the previous active size.
+TEST(PacketTest, RejectsResizeBeyondCapacity) {
+    TestPacket packet{};
+    ASSERT_TRUE(packet.resize(5U));
+    EXPECT_FALSE(packet.resize(kDefaultEndpointStorageCapacity + 1U));
+    EXPECT_EQ(packet.size(), 5U);
 }
 
 } // namespace

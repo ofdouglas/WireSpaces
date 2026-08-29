@@ -1,23 +1,28 @@
 /**
  * @file constants.hpp
- * @brief Shared literals for core unit and integration tests.
+ * @brief Shared strongly typed constants for core tests.
  */
 
 #pragma once
 
-#include <cstdint>
+#include <runtime/core.hpp>
 
 namespace wirespaces::test::support {
 
-constexpr uint8_t kLocalHostId = 0x01U;
-constexpr uint8_t kRemoteHostId = 0x02U;
-constexpr uint8_t kOtherWire = 0x05U;
+constexpr HostId kLocalHostId{0x01U};
+constexpr HostId kRemoteHostId{0x02U};
+constexpr WireNumber kLocalWire{kLocalWireValue};
+constexpr WireNumber kOtherWire{0x05U};
 
-constexpr uint16_t kSenderEndpoint = 0x0001U;
-constexpr uint16_t kReceiverEndpoint = 0x0002U;
-constexpr uint16_t kUnknownEndpoint = 0x0099U;
+constexpr uint16_t kSenderEndpointId{0x0001U};
+constexpr uint16_t kReceiverEndpointId{0x0002U};
+constexpr uint16_t kUnknownEndpointId{0x0099U};
 
-constexpr uint16_t kMinEndpointId = 0x0000U;
-constexpr uint16_t kMaxEndpointId = 0x3FFFU;
+constexpr EndpointAddress kSenderEndpoint{
+    EndpointAddress::from(Namespace::kUser0, kSenderEndpointId)};
+constexpr EndpointAddress kReceiverEndpoint{
+    EndpointAddress::from(Namespace::kUser0, kReceiverEndpointId)};
+constexpr EndpointAddress kUnknownEndpoint{
+    EndpointAddress::from(Namespace::kUser0, kUnknownEndpointId)};
 
 } // namespace wirespaces::test::support

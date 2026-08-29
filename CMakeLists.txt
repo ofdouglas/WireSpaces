@@ -4,7 +4,7 @@ project(
     WireSpaces
     VERSION 0.1.0
     DESCRIPTION "Network and messaging stack for hierarchical embedded systems"
-    LANGUAGES C CXX
+    LANGUAGES CXX
 )
 
 include(CTest)
@@ -21,7 +21,7 @@ function(wirespaces_configure_host_target target_name)
     endif()
 endfunction()
 
-option(WIRESPACES_BUILD_CORE_TESTS "Build C core tests" ON)
+option(WIRESPACES_BUILD_CORE_TESTS "Build core tests" ON)
 option(WIRESPACES_BUILD_CPP_TESTS "Build reusable C++ library tests" ON)
 option(WIRESPACES_BUILD_SIMULATOR "Build the Linux-hosted simulator" ON)
 

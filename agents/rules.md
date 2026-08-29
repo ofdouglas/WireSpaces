@@ -1,8 +1,8 @@
 # WireSpaces Coding Rules / Style Guide
 
-**Background:** Embedded C and C++ for the WireSpaces messaging / networking stack — MCU firmware, host simulators, and agent-assisted development.
+**Background:** Embedded C++ for the WireSpaces messaging / networking stack — MCU firmware, host simulators, and agent-assisted development.
 
-**Related:** General embedded C++ rules also live in `Design/Instructions/cpp_rules.md`. This file is the WireSpaces-specific view: repository layout, C core conventions, and agent workflow.
+**Related:** General embedded C++ rules also live in `Design/Instructions/cpp_rules.md`. This file is the WireSpaces-specific view: repository layout, C++ core conventions, and agent workflow.
 
 ---
 
@@ -10,8 +10,8 @@
 
 ```
 WireSpaces/
-  core/         C WS Core — packet header, router, dispatch, mailbox
-    *.h/*.c     Production headers and implementations
+  core/         C++17 WS Core — packet header, router, dispatch, receivers
+    *.h/*.cpp   Production headers and implementations
     test/       C++ GoogleTest + stub services (host-only)
   cpp/          Reusable embedded C++17 libraries (ported from Design/Firmware)
     foundation/ Span, Array, StaticString, …
@@ -31,23 +31,25 @@ WireSpaces/
   sketches/     Experiment sketches
 ```
 
-* **`core/`** — C-only runtime for routing and local-domain delivery.
+* **`core/`** — Native C++17 runtime for routing and local-domain delivery.
 * **`cpp/`** — Header-first or component-directory C++ libraries. Include via `cpp/` on the include path (e.g. `#include <containers/ring_buffer.h>`).
 * **`cpp/services/`** — Endpoint services and cross-cutting firmware features built on core + cpp.
 * When creating **reusable** platform-independent code for WireSpaces, place it under `cpp/`, not back in `Design/Firmware`, unless the library is shared across multiple Design projects.
 
 ---
 
-## C Rules (`core/`)
+## Core C++ Rules (`core/`)
 
-* Use C11 or later; match the platform toolchain default.
-* No dynamic allocation in the core library.
+* Use C++17; core APIs live in the `wirespaces` namespace.
+* No dynamic allocation, exceptions, or RTTI.
 * Production headers and implementations live directly in `core/`; tests and
   test support live in `core/test/`.
-* C headers use `#ifdef __cplusplus` / `namespace wirespaces` / `extern "C"` so C++ tests and services can link without symbol mismatches.
-* Prefer fixed-size tables and structs (dispatch table, route table, 1-slot mailbox).
-* `stdint.h` / `stdbool.h` for types; include `<stddef.h>` when using `NULL` or `size_t`.
-* Naming: snake_case for functions and struct fields; `WS_` prefix for macro constants (e.g. `WS_WIRE_LOCAL_DOMAIN`).
+* Keep packet processing non-templated. `WS_PACKET_BUFFER_DEFINE` may define
+  fixed trailing storage while routers and dispatchers operate on `PacketBuffer`.
+* Prefer fixed-size tables, spans, strongly typed identifiers, and small
+  interfaces such as `EndpointReceiver` and `PacketForwarder`.
+* Synchronization belongs inside concrete receiver implementations, not in the
+  dispatcher or `EndpointReceiver` interface.
 
 ---
 
@@ -121,7 +123,7 @@ WireSpaces/
 | Class private members | `snake_case_` |
 | Enum values | `kEnumValue` |
 
-WireSpaces C headers use `src_host` / `dst_host` (not `ParticipantId` from governed docs) until a naming migration is explicitly planned.
+WireSpaces uses `HostId` for canonical host identity and `EndpointAddress` for the packed Namespace/Endpoint dispatch key.
 
 ---
 

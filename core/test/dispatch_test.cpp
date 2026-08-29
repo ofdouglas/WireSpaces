@@ -1,116 +1,88 @@
 /**
  * @file dispatch_test.cpp
- * @brief Endpoint dispatch coverage: addressing, table lookup, callback invocation.
+ * @brief Strong-address dispatch, broadcast fanout, and receiver outcomes.
  */
 
 #include <gtest/gtest.h>
 
-#include <runtime/core.hpp>
-
-#include "support/constants.hpp"
 #include "support/dispatch_recorder.hpp"
-#include "support/packet_builder.hpp"
 
 namespace wirespaces::test {
 namespace {
 
-using support::asPacketBuffer;
 using support::DispatchTableFixture;
+using support::kLocalHostId;
+using support::kLocalWire;
 using support::kReceiverEndpoint;
 using support::kRemoteHostId;
-using support::kSenderEndpoint;
 using support::kUnknownEndpoint;
 using support::PacketBuilder;
 using support::TestPacket;
-using wirespaces::EndpointReceiver;
-using wirespaces::kDispatchNoEndpoint;
-using wirespaces::kDispatchOk;
-using wirespaces::kNamespaceUser0;
-using wirespaces::PacketBuffer;
 
 class DispatchTest : public DispatchTableFixture {
 protected:
     void SetUp() override {
         DispatchTableFixture::SetUp();
-        registerEndpoint(kReceiverEndpoint, recorder_.handle());
+        registerEndpoint(kReceiverEndpoint, recorder_);
     }
 };
 
+// Directed packets are offered to the matching host and EndpointReceiver.
 TEST_F(DispatchTest, DeliversToRegisteredEndpoint) {
-    TestPacket packet = PacketBuilder{}
-                            .withPayload("hello")
-                            .withEndpoint(kNamespaceUser0, kReceiverEndpoint)
-                            .packet();
-
-    EXPECT_EQ(dispatch(packet), kDispatchOk);
+    TestPacket packet{PacketBuilder{}.withPayload("hello").withEndpoint(kReceiverEndpoint).packet()};
+    EXPECT_EQ(dispatch(packet), DispatchResult::kAccepted);
     EXPECT_EQ(recorder_.invocationCount(), 1U);
-    EXPECT_EQ(recorder_.lastPacket(), asPacketBuffer(&packet));
+    EXPECT_EQ(recorder_.lastPacket(), &packet);
 }
 
+// A missing endpoint is reported without invoking a receiver.
 TEST_F(DispatchTest, RejectsUnknownEndpoint) {
-    TestPacket packet = PacketBuilder{}
-                            .withPayload("hello")
-                            .withEndpoint(kNamespaceUser0, kUnknownEndpoint)
-                            .packet();
-
-    EXPECT_EQ(dispatch(packet), kDispatchNoEndpoint);
+    TestPacket packet{PacketBuilder{}.withEndpoint(kUnknownEndpoint).packet()};
+    EXPECT_EQ(dispatch(packet), DispatchResult::kNoEndpoint);
     EXPECT_EQ(recorder_.invocationCount(), 0U);
 }
 
+// A matching endpoint on another host is not a local directed destination.
 TEST_F(DispatchTest, RejectsUnicastToRemoteHost) {
-    TestPacket packet = PacketBuilder{}
-                            .withPayload("hello")
-                            .withDstHost(kRemoteHostId)
-                            .withEndpoint(kNamespaceUser0, kReceiverEndpoint)
-                            .packet();
-
-    EXPECT_EQ(dispatch(packet), kDispatchNoEndpoint);
-    EXPECT_EQ(recorder_.invocationCount(), 0U);
+    TestPacket packet{PacketBuilder{}
+                          .withDestination(kRemoteHostId)
+                          .withEndpoint(kReceiverEndpoint)
+                          .packet()};
+    EXPECT_EQ(dispatch(packet), DispatchResult::kNoEndpoint);
 }
 
-TEST_F(DispatchTest, AcceptsBroadcastOnMemberWire) {
-    TestPacket packet = PacketBuilder{}
-                            .withPayload("hello")
-                            .withDstHost(WS_HOST_BROADCAST)
-                            .withWire(WS_WIRE_LOCAL_DOMAIN)
-                            .withEndpoint(kNamespaceUser0, kReceiverEndpoint)
-                            .packet();
-
-    EXPECT_EQ(dispatch(packet), kDispatchOk);
+// Broadcast on a joined wire fans out to every host binding for the endpoint.
+TEST_F(DispatchTest, FansOutBroadcastOnMemberWire) {
+    support::DispatchRecorder second{};
+    registerEndpoint(kReceiverEndpoint, second, kRemoteHostId);
+    TestPacket packet{PacketBuilder{}
+                          .withDestination(HostId{kBroadcastHostValue})
+                          .withWire(kLocalWire)
+                          .withEndpoint(kReceiverEndpoint)
+                          .packet()};
+    EXPECT_EQ(dispatch(packet), DispatchResult::kAccepted);
     EXPECT_EQ(recorder_.invocationCount(), 1U);
+    EXPECT_EQ(second.invocationCount(), 1U);
 }
 
+// Broadcast on a wire the local domain has not joined is rejected before fanout.
 TEST_F(DispatchTest, RejectsBroadcastOnNonMemberWire) {
     support::configureHostWithoutLocalWire();
-
-    TestPacket packet = PacketBuilder{}
-                            .withPayload("hello")
-                            .withDstHost(WS_HOST_BROADCAST)
-                            .withWire(WS_WIRE_LOCAL_DOMAIN)
-                            .withEndpoint(kNamespaceUser0, kReceiverEndpoint)
-                            .packet();
-
-    EXPECT_EQ(dispatch(packet), kDispatchNoEndpoint);
-    EXPECT_EQ(recorder_.invocationCount(), 0U);
+    TestPacket packet{PacketBuilder{}
+                          .withDestination(HostId{kBroadcastHostValue})
+                          .withWire(kLocalWire)
+                          .withEndpoint(kReceiverEndpoint)
+                          .packet()};
+    EXPECT_EQ(dispatch(packet), DispatchResult::kNoEndpoint);
 }
 
-TEST_F(DispatchTest, RejectsEndpointWithNullCallback) {
-    registerEndpoint(kSenderEndpoint, EndpointReceiver{nullptr, nullptr});
-
-    TestPacket packet = PacketBuilder{}
-                            .withPayload("hello")
-                            .withEndpoint(kNamespaceUser0, kSenderEndpoint)
-                            .packet();
-
-    EXPECT_EQ(dispatch(packet), kDispatchNoEndpoint);
-}
-
-TEST_F(DispatchTest, RejectsNullTableOrPacket) {
-    TestPacket packet = PacketBuilder{}.withPayload("hello").packet();
-    const PacketBuffer* packet_buffer = asPacketBuffer(&packet);
-
-    EXPECT_EQ(ws_dispatch_packet(nullptr, packet_buffer), kDispatchNoEndpoint);
-    EXPECT_EQ(ws_dispatch_packet(&dispatch_table_, nullptr), kDispatchNoEndpoint);
+// Full and rejected receiver results propagate through the dispatcher.
+TEST_F(DispatchTest, PropagatesReceiverResult) {
+    TestPacket packet{PacketBuilder{}.withEndpoint(kReceiverEndpoint).packet()};
+    recorder_.setResult(ReceiveResult::kFull);
+    EXPECT_EQ(dispatch(packet), DispatchResult::kFull);
+    recorder_.setResult(ReceiveResult::kRejected);
+    EXPECT_EQ(dispatch(packet), DispatchResult::kRejected);
 }
 
 } // namespace

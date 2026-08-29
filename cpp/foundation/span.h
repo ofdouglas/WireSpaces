@@ -18,22 +18,30 @@ template <typename T>
 class Span {
 public:
     constexpr Span() noexcept = default;
-    constexpr Span(T* data, size_t size) noexcept
-        : data_{data}
-        , size_{size} {}
+    constexpr Span(T* data, size_t size) noexcept : data_{data}, size_{size} {}
 
     template <size_t N>
-    constexpr Span(T (&array)[N]) noexcept
-        : data_{array}
-        , size_{N} {}
+    constexpr Span(T (&array)[N]) noexcept : data_{array}, size_{N} {}
 
-    constexpr size_t size() const noexcept { return size_; }
-    constexpr bool empty() const noexcept { return size_ == 0U; }
+    constexpr size_t size() const noexcept {
+        return size_;
+    }
+    constexpr bool empty() const noexcept {
+        return size_ == 0U;
+    }
 
-    constexpr T& operator[](size_t index) const noexcept { return data_[index]; }
-    constexpr T* data() const noexcept { return data_; }
-    constexpr T* begin() const noexcept { return data_; }
-    constexpr T* end() const noexcept { return data_ + size_; }
+    constexpr T& operator[](size_t index) const noexcept {
+        return data_[index];
+    }
+    constexpr T* data() const noexcept {
+        return data_;
+    }
+    constexpr T* begin() const noexcept {
+        return data_;
+    }
+    constexpr T* end() const noexcept {
+        return data_ + size_;
+    }
 
     constexpr Span<T> subspan(size_t start, size_t length) const noexcept {
         return Span<T>{data_ + start, length};
@@ -48,4 +56,4 @@ private:
     size_t size_{0U};
 };
 
-} // namespace wirespaces::foundation
+}  // namespace wirespaces::foundation

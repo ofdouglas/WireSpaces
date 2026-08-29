@@ -1,11 +1,11 @@
 /**
  * @file ws_constants.h
- * @brief Provisional WireSpaces wire and host sentinel values.
+ * @brief WireSpaces compile-time constants and layout attributes.
  */
 
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define WS_PACKED __attribute__((packed))
@@ -13,11 +13,10 @@
 #define WS_PACKED
 #endif
 
-/** @brief Deliver within the Endpoint Domain; does not enter a Link Interface. */
-#define WS_WIRE_LOCAL_DOMAIN ((uint8_t)0x00U)
+namespace wirespaces {
 
-/** @brief Broadcast destination host sentinel (invalid as source). */
-#define WS_HOST_BROADCAST ((uint8_t)0xFFU)
+constexpr uint8_t kLocalWireValue{0x00U};
+constexpr uint8_t kBroadcastHostValue{0xFFU};
+constexpr uint16_t kDefaultEndpointStorageCapacity{64U};
 
-/** @brief Default single-slot mailbox payload capacity for prototypes. */
-#define WS_MAILBOX_DEFAULT_CAPACITY 64U
+}  // namespace wirespaces

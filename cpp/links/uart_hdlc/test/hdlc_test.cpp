@@ -50,25 +50,20 @@ int main() {
 
     const std::uint8_t payload[]{0x01U, 0x7EU, 0x7DU, 0x02U};
     std::uint8_t frame[kFrameCapacity]{};
-    const std::size_t frame_size{
-        HdlcEncoder::encode(payload, sizeof(payload), frame, sizeof(frame))};
+    const std::size_t frame_size{HdlcEncoder::encode(payload, frame)};
     HdlcDecoder<kPayloadCapacity> valid_decoder{};
-    if (!decodeFrame(frame, frame_size, valid_decoder) ||
-        (valid_decoder.frameSize() != sizeof(payload)) ||
-        (std::memcmp(
-             valid_decoder.frameData(),
-             payload,
-             sizeof(payload)) != 0)) {
+    if (!decodeFrame(frame, frame_size, valid_decoder)) {
+        return 2;
+    }
+    const auto decoded_frame{valid_decoder.frame()};
+    if ((decoded_frame.size() != sizeof(payload)) ||
+        (std::memcmp(decoded_frame.data(), payload, sizeof(payload)) != 0)) {
         return 2;
     }
 
     const std::uint8_t simple_payload[]{0x01U, 0x02U};
     const std::size_t simple_frame_size{
-        HdlcEncoder::encode(
-            simple_payload,
-            sizeof(simple_payload),
-            frame,
-            sizeof(frame))};
+        HdlcEncoder::encode(simple_payload, frame)};
     frame[1] ^= 0x01U;
     HdlcDecoder<kPayloadCapacity> corrupt_decoder{};
     if (decodeFrame(frame, simple_frame_size, corrupt_decoder)) {

@@ -164,7 +164,7 @@ A related change fell out of writing it. `LINK §2.5`'s `PduControl` byte was de
 
 ## 4.2 Bounded Endpoint delivery, and the retirement of `Port`
 
-Adopted from `archive/decision-bounded-endpoint-delivery.md` (formerly `docs/proposal-bounded-endpoint-delivery-and-snapshot-semantics.md`) with modifications. This is the largest semantic change since the QoS renumbering, and unlike that one it removes a capability rather than renumbering a field.
+Adopted from `docs/archive/decision-bounded-endpoint-delivery.md` (formerly `docs/proposal-bounded-endpoint-delivery-and-snapshot-semantics.md`) with modifications. This is the largest semantic change since the QoS renumbering, and unlike that one it removes a capability rather than renumbering a field.
 
 **Delivery.** `Inline` and `Serialized` delivery policies are withdrawn and replaced by a single model: Endpoint delivery crosses a bounded storage boundary and never synchronously executes Service code (`DISP-2`, `CORE §9.4`). Routing stays synchronous in the caller's context; only destination Service execution is deferred. The decisive argument is not tidiness but analyzability — `Inline` made a Link's worst-case execution time depend on every Service that might be delivered to, so no Link could be analyzed in isolation and its worst case changed whenever a deployment added a Service its author never saw. The reasoning is recorded in `REG §5` because "just call it directly, it is faster" will be proposed again.
 
@@ -357,7 +357,7 @@ Carried forward from the snapshot and still superseding the overview: PDUA MaxN 
 
 | Document | Superseded by |
 |---|---|
-| `archive/wirespaces_high_level_design_overview.md` | Revision 0.2 |
+| `docs/archive/wirespaces_high_level_design_overview.md` | Revision 0.2 |
 | `wirespaces_architecture_snapshot_2026-08-20.md` | Revision 0.2 |
 | `wirespaces_simplified_wire_and_autowiring_design_change.md` | Revision 0.3 |
 | `WS_old/network/architecture_overview.md` | Revision 0.4 |
@@ -368,6 +368,6 @@ Carried forward from the snapshot and still superseding the overview: PDUA MaxN 
 | `WS_old/network/core_protocol_and_routing.md` | Revision 0.7 |
 | `WS_old/network/logical_links_and_transports.md` | Revision 0.7 |
 | `WS_old/network/application_protocols_and_services.md` | Revision 0.7 |
-| `archive/decision-bounded-endpoint-delivery.md` | Revision 0.9 (`CORE §9`, `REG` DISP-*) |
+| `docs/archive/decision-bounded-endpoint-delivery.md` | Revision 0.9 (`CORE §9`, `REG` DISP-*) |
 
-`WS_old` is left intact as its own historical tree; `archive/` holds copies of the documents mined from it, so this document set carries its own provenance without editing the old one.
+`WS_old` is left intact as its own historical tree; `docs/archive/` holds copies of the documents mined from it, so this document set carries its own provenance without editing the old one.

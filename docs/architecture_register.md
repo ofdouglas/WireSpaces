@@ -663,7 +663,7 @@ The following older documents have **not** yet been mined. Their model is the su
 | `WS_old/network/hdlc_logical_link_profile.md` | 410 | `LINK §3` |
 | `WS_old/network/rationale_use_cases_and_risks.md` | 510 | `INTRO`, `FUTURE` |
 
-The copy of `can_pdu_adapter_spec.md` that sat in this directory was byte-identical to the `WS_old` one, so mining the latter covered both. It has moved to `archive/`.
+The copy of `can_pdu_adapter_spec.md` that sat in this directory was byte-identical to the `WS_old` one, so mining the latter covered both. It has moved to `docs/archive/`.
 
 Two sources were mined in revision 0.10. `link_engine_runtime_and_status.md` answered the restart and lifecycle questions that `CORE §13.3` and `OWN-4` had opened, and supplied the telemetry lifetime and validity distinctions (`CORE §23`, `CORE §18.4`, `CORE §18.5`, `RUN-1`..`RUN-10`, `ERR-4`, `ERR-5`). `prototype_and_validation.md` supplied validation discipline rather than architecture: the evidence-generator stance, capability claims, the reason registry, frozen budgets, and staged freezes (`CONFORM §1.1`, `CONFORM §3.2`, `CONFORM §4`, `CONFORM §5`). Its own protocol content was almost entirely the superseded generation.
 

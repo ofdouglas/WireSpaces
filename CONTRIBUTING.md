@@ -32,12 +32,19 @@ Do not push directly to `main`.
 
 ### Code
 
-The reference implementation lives under `code/`.
+The C core, embedded C++ libraries, and host simulator build as one project
+from the repository root.
 
 Build and test on Linux or WSL:
 
 ```sh
-cmake -S code -B build -DCMAKE_BUILD_TYPE=Debug
+./scripts/test.sh
+```
+
+Or manually:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```

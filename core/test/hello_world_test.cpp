@@ -6,7 +6,7 @@
 #include "stub_hello_receiver.hpp"
 #include "stub_hello_sender.hpp"
 
-#include "core/wirespaces_core.hpp"
+#include <runtime/core.hpp>
 
 #include "support/constants.hpp"
 #include "support/host_fixture.hpp"

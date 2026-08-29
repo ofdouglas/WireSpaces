@@ -4,8 +4,14 @@
 # Architecture and protocol documents.
 /docs/ @ofdouglas
 
-# Reference implementation and simulator code.
-/code/ @ofdouglas
+# Reference implementation, platform integration, examples, and tests.
+/core/ @ofdouglas
+/cpp/ @ofdouglas
+/platform/ @ofdouglas
+/sim/ @ofdouglas
+/examples/ @ofdouglas
+/tools/ @ofdouglas
+/tests/ @ofdouglas
 
 # CI and repository automation.
 /.github/ @ofdouglas

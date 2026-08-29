@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <string>
 
-#include "core/wirespaces_core.hpp"
+#include <runtime/core.hpp>
 
 namespace wirespaces::test {
 

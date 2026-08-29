@@ -6,11 +6,8 @@
 #pragma once
 
 #include <cstdint>
-#include <cstddef>
-#include <type_traits>
 
-#include "crc/crc.h"
-#include "util/span.h"
+#include <crc/crc.h>
 
 /*
  * @brief Definitions of specific CRC algorithms.
@@ -18,7 +15,7 @@
  * @todo Add an implementation-selection feature (not necessarily in this file)
  * @todo Add more algorithms
  */
-namespace crc::algorithm {
+namespace wirespaces::crc::algorithm {
 
 /******************************************************************************
  *  CRC-8 Algorithms
@@ -55,4 +52,4 @@ struct Crc16CcittFalse : details::SpecImpl<Crc16CcittFalse, uint16_t, 0x1021, UI
 //     static constexpr const char* name() { return "Crc32Ethernet"; }
 // };
 
-} // namespace crc::algorithm
+} // namespace wirespaces::crc::algorithm

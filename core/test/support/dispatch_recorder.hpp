@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-#include "core/wirespaces_core.hpp"
+#include <runtime/core.hpp>
 
 #include "support/host_fixture.hpp"
 #include "support/packet_builder.hpp"

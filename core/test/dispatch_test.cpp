@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-#include "core/wirespaces_core.hpp"
+#include <runtime/core.hpp>
 
 #include "support/constants.hpp"
 #include "support/dispatch_recorder.hpp"

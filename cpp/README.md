@@ -2,23 +2,25 @@
 
 Reusable C++17 libraries for WireSpaces firmware. The C-compatible WS Core lives in `../core/`; this directory holds higher-level embedded libraries ported from `Design/Firmware`.
 
-**Include convention:** add `cpp/` to your include path, then include by component path:
+**Include convention:** add `cpp/` to your include path, then include by module path:
 
 ```cpp
-#include "data_structures/ring_buffer.h"
+#include "containers/ring_buffer.h"
 #include "crc/crc_algorithm.h"
-#include "util/span.h"
+#include "foundation/span.h"
 ```
 
 ## Layout
 
 | Path | Contents |
 |------|----------|
-| `util/` | Span, StaticString, and other small helpers |
-| `data_structures/` | RingBuffer, memory pools, seqlock buffers (planned) |
+| `foundation/` | Array, Span, StaticString, and other compatibility helpers |
+| `containers/` | RingBuffer, memory pools, seqlock buffers (planned) |
 | `crc/` | CRC algorithms and bitwise implementation |
 
-Each component may add a `test/` subdirectory with GoogleTest sources when tests are wired into CMake.
+Production headers and sources live directly in each module directory. Each
+module may add a `test/` subdirectory with GoogleTest sources and other support
+subdirectories as needed.
 
 ## Planned (from README sketch)
 

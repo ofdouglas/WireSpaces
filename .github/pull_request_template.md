@@ -12,9 +12,7 @@ Commands and results:
 
 ```sh
 # Example:
-# cmake -S code -B build -DCMAKE_BUILD_TYPE=Debug
-# cmake --build build
-# ctest --test-dir build --output-on-failure
+# ./scripts/test.sh
 ```
 
 ## Documentation

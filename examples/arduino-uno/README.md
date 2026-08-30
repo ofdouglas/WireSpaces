@@ -146,6 +146,57 @@ WS packet wire=1 src=1 dst=broadcast qos=NORMAL ... payload[4]=...
 The four payload bytes are the little-endian heartbeat uptime. The CRC trailer
 is removed by the Link decoder before canonical packet parsing.
 
+## BITS RAM transfer test
+
+The standalone `bits_ram_transfer` firmware exercises both Compact BITS roles
+without changing the heartbeat demo. The PC uploads an arbitrary object into a
+fixed 256-byte UNO receive buffer. Once reception completes, the UNO snapshots
+the object into a separate stable transmit buffer and starts a second BITS
+transfer that echoes it into a PC-side RAM receiver. The PC command succeeds
+only when both transfers complete and the returned bytes match.
+
+Two User0 endpoints keep the simultaneous directions independent:
+
+- endpoint 1: PC transmitter to UNO RAM receiver;
+- endpoint 2: UNO RAM transmitter to PC receiver.
+
+Both sides use Host 1 for the UNO, Host 2 for the PC, and Wire 1. UNO segment
+payloads are at most 24 bytes, and its receive window is backed by two
+caller-owned packet slots.
+
+Build and flash the test firmware:
+
+```sh
+make bits-ram-transfer
+make flash-bits PORT=/dev/arduino-uno
+```
+
+Run a deterministic 128-byte round trip:
+
+```sh
+make verify-bits PORT=/dev/arduino-uno
+```
+
+The PC tool also accepts exact file or hexadecimal input and generated objects
+from 1 through 256 bytes:
+
+```sh
+PYTHONPATH=../../tools/python python3 -m wirespaces.bits_ram_transfer \
+    --port /dev/arduino-uno --file image.bin
+
+PYTHONPATH=../../tools/python python3 -m wirespaces.bits_ram_transfer \
+    --port /dev/arduino-uno --hex "00 7e 7d ff 01"
+
+PYTHONPATH=../../tools/python python3 -m wirespaces.bits_ram_transfer \
+    --port /dev/arduino-uno --size 256 --seed 0x1234
+```
+
+Run the PC Compact BITS state-machine tests without hardware:
+
+```sh
+make test-bits
+```
+
 ## Planned WireSpaces demo
 
 * 4-6 statically allocated packet buffers, sized to hold up to N=4 CAN PDUA payloads (the common upper bound for WS small packet size widespread compatibility)

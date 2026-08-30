@@ -1,6 +1,8 @@
 #include <avr/interrupt.h>
 #include <platform/avr/builtin_led.h>
+#include <platform/avr/mcp2515.h>
 #include <platform/avr/millisecond_clock.h>
+#include <platform/avr/spi0.h>
 #include <platform/avr/stack_monitor.h>
 #include <platform/avr/uart0.h>
 #include <wirespaces/links/uart_hdlc/decoder.h>
@@ -34,6 +36,19 @@ constexpr wirespaces::EndpointAddress kLedControlEndpoint{wirespaces::EndpointAd
 WS_PACKET_BUFFER_DEFINE(UartReceivePacket, kMaximumPayloadSize);
 
 wirespaces::links::uart_hdlc::HdlcDecoder<kMaximumCanonicalSize> g_hdlc_decoder{};
+volatile std::uint8_t g_mcp2515_canstat{0U};
+
+void uart0WriteHexNibble(std::uint8_t nibble) noexcept {
+    static constexpr char kHexDigits[]{'0', '1', '2', '3', '4', '5', '6', '7',
+                                       '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+    wirespaces::platform::avr::uart0WriteByte(
+        static_cast<std::uint8_t>(kHexDigits[nibble & 0x0FU]));
+}
+
+void uart0WriteHexByte(std::uint8_t value) noexcept {
+    uart0WriteHexNibble(static_cast<std::uint8_t>(value >> 4U));
+    uart0WriteHexNibble(value);
+}
 
 /**
  * @brief Project a canonical WireSpaces PDU onto the UART HDLC Link.
@@ -104,8 +119,18 @@ int main() {
     stack_monitor.initialize();
 
     wirespaces::platform::avr::uart0Init(kBaudRate);
+    wirespaces::platform::avr::spi0Init();
     wirespaces::platform::avr::millisecondClockInit();
     wirespaces::platform::avr::builtinLedInit();
+
+    std::uint8_t canstat{0U};
+    const bool mcp2515_ok{wirespaces::platform::avr::Mcp2515::probeCanstat(canstat)};
+    g_mcp2515_canstat = canstat;
+    wirespaces::platform::avr::uart0WriteByte(mcp2515_ok ? 'C' : 'E');
+    wirespaces::platform::avr::uart0WriteByte(':');
+    uart0WriteHexByte(canstat);
+    wirespaces::platform::avr::uart0WriteByte('\r');
+    wirespaces::platform::avr::uart0WriteByte('\n');
 
     const wirespaces::RouteTableEntry route_entries[]{
         {kHeartbeatWire, kUartEgress},
@@ -147,6 +172,9 @@ int main() {
     sei();
     std::uint16_t loop_iteration{0U};
     for (;;) {
+        volatile bool mcp2515_probe_result{
+            wirespaces::platform::avr::Mcp2515::probeCanstat(canstat)};
+
         processUartInput(dispatcher);
         heartbeat_service.run();
         stack_report_service.run(stack_monitor.peakUsedBytes(), stack_monitor.capacityBytes());

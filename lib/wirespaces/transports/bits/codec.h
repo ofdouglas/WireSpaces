@@ -32,6 +32,14 @@ namespace wirespaces::transport::bits {
 [[nodiscard]] bool encodeProbe(const Probe& probe, MutableByteSpan output) noexcept;
 [[nodiscard]] bool decodeProbe(ByteSpan input, Probe& probe) noexcept;
 
+/** @brief Encode or decode a session-specific SETUP rejection. */
+[[nodiscard]] bool encodeReject(const Reject& reject, MutableByteSpan output) noexcept;
+[[nodiscard]] bool decodeReject(ByteSpan input, Reject& reject) noexcept;
+
+/** @brief Encode or decode a session-specific transfer abort. */
+[[nodiscard]] bool encodeAbort(const Abort& abort, MutableByteSpan output) noexcept;
+[[nodiscard]] bool decodeAbort(ByteSpan input, Abort& abort) noexcept;
+
 /** @brief Encode a connection-scoped unreliable sideband datagram. */
 [[nodiscard]] bool encodeUserDatagram(ByteSpan payload, MutableByteSpan output) noexcept;
 

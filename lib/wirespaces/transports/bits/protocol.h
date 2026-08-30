@@ -12,6 +12,7 @@ namespace wirespaces::transport::bits {
 constexpr uint8_t kProtocolVersion{0U};
 constexpr uint8_t kCompactProfile{0U};
 constexpr uint8_t kReservedProfile{1U};
+constexpr uint8_t kCompactWindowWidth{16U};
 
 constexpr uint16_t kControlSize{1U};
 constexpr uint16_t kSetupSize{9U};
@@ -19,6 +20,7 @@ constexpr uint16_t kSegmentHeaderSize{4U};
 constexpr uint16_t kAckSize{6U};
 constexpr uint16_t kProbeSize{2U};
 constexpr uint16_t kRejectSize{3U};
+constexpr uint16_t kAbortSize{2U};
 constexpr uint16_t kUserDatagramHeaderSize{1U};
 constexpr uint32_t kMaximumCompactSegmentCount{65536UL};
 
@@ -30,6 +32,7 @@ enum class MessageType : uint8_t {
     kProbe = 3U,
     kReject = 4U,
     kUserDatagram = 5U,
+    kAbort = 6U,
 };
 
 /** @brief Decoded fields from the fixed BITS control byte. */
@@ -66,7 +69,7 @@ struct Probe {
     uint8_t session_id{0U};
 };
 
-/** @brief SETUP rejection reason used by the initial Compact implementation. */
+/** @brief SETUP rejection reason used by Compact BITS. */
 enum class RejectReason : uint8_t {
     kUnsupportedVersion = 0U,
     kUnsupportedProfile,
@@ -75,6 +78,17 @@ enum class RejectReason : uint8_t {
     kBusy,
     kInvalidArgument,
     kInternalError,
+};
+
+/** @brief Session-specific SETUP rejection fields. */
+struct Reject {
+    uint8_t session_id{0U};
+    RejectReason reason{RejectReason::kInvalidArgument};
+};
+
+/** @brief Session-specific transfer abort fields. */
+struct Abort {
+    uint8_t session_id{0U};
 };
 
 }  // namespace wirespaces::transport::bits

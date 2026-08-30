@@ -7,6 +7,7 @@
 
 #include <wirespaces/core/dispatch.h>
 #include <wirespaces/core/router.h>
+#include <wirespaces/foundation/span.h>
 #include <wirespaces/transports/bits/codec.h>
 
 #include <cstdint>
@@ -19,6 +20,13 @@ struct ConnectionConfig {
     HostId local_host{};
     HostId remote_host{};
     EndpointAddress endpoint{};
+};
+
+/** @brief Caller-selected retransmission behavior, in monotonic milliseconds. */
+struct TimingConfig {
+    uint32_t retransmission_timeout_ms{100U};
+    uint32_t probe_timeout_ms{250U};
+    uint8_t max_retries{5U};
 };
 
 /** @brief Result of one bounded BITS processing step. */
@@ -34,6 +42,8 @@ enum class TransferState : uint8_t {
     kStarting,
     kActive,
     kCompleted,
+    kRejected,
+    kAborted,
     kError,
 };
 
@@ -45,11 +55,12 @@ enum class StartResult : uint8_t {
     kPacketTooSmall,
 };
 
-/** @brief Result of an immediate sideband datagram send request. */
+/** @brief Result of an immediate BITS send request. */
 enum class SendResult : uint8_t {
     kSent = 0U,
     kTooLarge,
     kNoRoute,
+    kInvalidState,
 };
 
 /** @brief Service callbacks invoked by BitsReceiver::process(). */
@@ -64,6 +75,8 @@ public:
     virtual void onDatagram(ByteSpan payload) noexcept = 0;
     /** @brief Notify that every object segment has been accepted by the sink. */
     virtual void onTransferComplete() noexcept = 0;
+    /** @brief Notify that the active transfer was aborted locally or by its peer. */
+    virtual void onTransferAborted() noexcept = 0;
 
 protected:
     ~ReceiverCallbacks() = default;
@@ -76,65 +89,77 @@ public:
     virtual void onDatagram(ByteSpan payload) noexcept = 0;
     /** @brief Notify that the receiver has acknowledged the complete object. */
     virtual void onTransferComplete() noexcept = 0;
+    /** @brief Notify that SETUP was rejected by the receiver. */
+    virtual void onTransferRejected(RejectReason reason) noexcept = 0;
+    /** @brief Notify that the active transfer was aborted locally or by its peer. */
+    virtual void onTransferAborted() noexcept = 0;
 
 protected:
     ~TransmitterCallbacks() = default;
 };
 
 /**
- * @brief Compact BITS receiver with caller-owned depth-one ingress slots.
+ * @brief Compact BITS receiver with caller-owned bounded ingress storage.
  *
- * receive() performs only connection validation, message classification, and a bounded copy.
- * Protocol processing and Service callbacks occur later from process().
+ * Up to sixteen packet slots form the advertised receive window. receive() only validates,
+ * classifies, and copies; protocol state and callbacks are advanced later by process().
  */
 class BitsReceiver final : public EndpointReceiver {
 public:
     BitsReceiver(const ConnectionConfig& connection, Router& router, ReceiverCallbacks& callbacks,
-                 PacketBuffer& segment_ingress, PacketBuffer& datagram_ingress,
-                 PacketBuffer& transmit_packet) noexcept;
+                 foundation::Span<PacketBuffer*> segment_ingress,
+                 PacketBuffer& datagram_ingress, PacketBuffer& transmit_packet) noexcept;
 
     ReceiveResult receive(const PacketBuffer& packet) noexcept override;
     [[nodiscard]] ProcessResult process() noexcept;
     [[nodiscard]] SendResult sendDatagram(ByteSpan payload) noexcept;
+    [[nodiscard]] SendResult abort() noexcept;
     [[nodiscard]] TransferState state() const noexcept { return state_; }
 
 private:
-    [[nodiscard]] bool handleSegment() noexcept;
+    [[nodiscard]] bool handleSegment(PacketBuffer& packet) noexcept;
     [[nodiscard]] bool handleDatagram() noexcept;
     [[nodiscard]] bool handleSetup(ByteSpan payload) noexcept;
+    [[nodiscard]] bool handleAbort(ByteSpan payload) noexcept;
     [[nodiscard]] bool sendAck() noexcept;
+    [[nodiscard]] bool sendReject(uint8_t session_id, RejectReason reason) noexcept;
+    [[nodiscard]] bool sendAbort() noexcept;
     [[nodiscard]] bool preparePacket(uint16_t payload_size, QoS qos) noexcept;
     [[nodiscard]] bool forwardPacket() noexcept;
+    void updateGrant() noexcept;
 
     ConnectionConfig connection_{};
     Router& router_;
     ReceiverCallbacks& callbacks_;
-    PacketBuffer& segment_ingress_;
+    foundation::Span<PacketBuffer*> segment_ingress_{};
     PacketBuffer& datagram_ingress_;
     PacketBuffer& transmit_packet_;
-    bool segment_occupied_{false};
+    uint16_t segment_occupied_mask_{0U};
     bool datagram_occupied_{false};
     TransferState state_{TransferState::kIdle};
     Setup setup_{};
     uint32_t segment_count_{0U};
-    uint32_t received_segment_count_{0U};
+    uint32_t contiguous_count_{0U};
+    uint32_t granted_end_{0U};
+    uint16_t receive_bitmap_{0U};
 };
 
 /**
  * @brief Compact BITS transmitter backed by stable caller-owned object bytes.
  *
  * The object passed to startTransfer() must remain valid until the transfer reaches a terminal
- * state. One SETUP or SEGMENT is emitted per process() call.
+ * state. process() accepts a wrapping monotonic millisecond time and performs bounded work.
  */
 class BitsTransmitter final : public EndpointReceiver {
 public:
-    BitsTransmitter(const ConnectionConfig& connection, Router& router,
+    BitsTransmitter(const ConnectionConfig& connection, const TimingConfig& timing, Router& router,
                     TransmitterCallbacks& callbacks, PacketBuffer& datagram_ingress,
                     PacketBuffer& transmit_packet) noexcept;
 
     ReceiveResult receive(const PacketBuffer& packet) noexcept override;
-    [[nodiscard]] ProcessResult process() noexcept;
+    [[nodiscard]] ProcessResult process(uint32_t now_ms) noexcept;
     [[nodiscard]] SendResult sendDatagram(ByteSpan payload) noexcept;
+    [[nodiscard]] SendResult abort() noexcept;
     [[nodiscard]] StartResult startTransfer(ByteSpan object, uint16_t segment_size,
                                             uint8_t session_id,
                                             uint8_t initial_sequence_number) noexcept;
@@ -143,12 +168,22 @@ public:
 private:
     [[nodiscard]] bool handleDatagram() noexcept;
     [[nodiscard]] bool handleAck(ByteSpan payload) noexcept;
-    [[nodiscard]] bool sendSetup() noexcept;
-    [[nodiscard]] bool sendNextSegment() noexcept;
+    [[nodiscard]] bool handleReject(ByteSpan payload) noexcept;
+    [[nodiscard]] bool handleAbort(ByteSpan payload) noexcept;
+    [[nodiscard]] bool sendSetup(uint32_t now_ms, bool retransmission) noexcept;
+    [[nodiscard]] bool sendSegment(uint8_t window_offset, uint32_t now_ms,
+                                   bool retransmission) noexcept;
+    [[nodiscard]] bool sendProbe(uint32_t now_ms) noexcept;
+    [[nodiscard]] bool sendAbort() noexcept;
     [[nodiscard]] bool preparePacket(uint16_t payload_size, QoS qos) noexcept;
     [[nodiscard]] bool forwardPacket() noexcept;
+    [[nodiscard]] bool retryLimitReached(uint8_t retry_count) const noexcept;
+    void shiftWindow(uint8_t count) noexcept;
+    void resetTransferTracking() noexcept;
+    void transitionToAborted() noexcept;
 
     ConnectionConfig connection_{};
+    TimingConfig timing_{};
     Router& router_;
     TransmitterCallbacks& callbacks_;
     PacketBuffer& datagram_ingress_;
@@ -158,11 +193,18 @@ private:
     ByteSpan object_{};
     Setup setup_{};
     uint32_t segment_count_{0U};
-    uint32_t next_segment_index_{0U};
-    uint16_t outstanding_segment_index_{0U};
-    uint8_t max_receive_sequence_{0U};
+    uint32_t acknowledged_count_{0U};
+    uint32_t granted_end_{0U};
+    uint16_t sent_bitmap_{0U};
+    uint16_t acknowledged_bitmap_{0U};
+    uint32_t segment_last_send_ms_[kCompactWindowWidth]{};
+    uint8_t segment_retry_count_[kCompactWindowWidth]{};
+    uint32_t setup_last_send_ms_{0U};
+    uint32_t probe_last_send_ms_{0U};
+    uint8_t setup_retry_count_{0U};
+    uint8_t probe_retry_count_{0U};
     bool setup_sent_{false};
-    bool waiting_for_ack_{false};
+    bool probe_timer_active_{false};
 };
 
 }  // namespace wirespaces::transport::bits

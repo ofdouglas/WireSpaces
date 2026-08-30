@@ -58,7 +58,7 @@ bool decodeControl(uint8_t encoded, Control& control) noexcept {
     const uint8_t version{static_cast<uint8_t>((encoded & kVersionMask) >> kVersionShift)};
     const uint8_t type_value{static_cast<uint8_t>(encoded & kTypeMask)};
     if (profile != kCompactProfile || version != kProtocolVersion ||
-        type_value > static_cast<uint8_t>(MessageType::kUserDatagram)) {
+        type_value > static_cast<uint8_t>(MessageType::kAbort)) {
         return false;
     }
 
@@ -138,6 +138,42 @@ bool decodeProbe(ByteSpan input, Probe& probe) noexcept {
         return false;
     }
     probe.session_id = input[1];
+    return true;
+}
+
+bool encodeReject(const Reject& reject, MutableByteSpan output) noexcept {
+    if (output.size() < kRejectSize) {
+        return false;
+    }
+    output[0] = encodeControl(MessageType::kReject);
+    output[1] = reject.session_id;
+    output[2] = static_cast<uint8_t>(reject.reason);
+    return true;
+}
+
+bool decodeReject(ByteSpan input, Reject& reject) noexcept {
+    if (input.size() != kRejectSize || !hasType(input, MessageType::kReject) ||
+        input[2] > static_cast<uint8_t>(RejectReason::kInternalError)) {
+        return false;
+    }
+    reject = Reject{input[1], static_cast<RejectReason>(input[2])};
+    return true;
+}
+
+bool encodeAbort(const Abort& abort, MutableByteSpan output) noexcept {
+    if (output.size() < kAbortSize) {
+        return false;
+    }
+    output[0] = encodeControl(MessageType::kAbort);
+    output[1] = abort.session_id;
+    return true;
+}
+
+bool decodeAbort(ByteSpan input, Abort& abort) noexcept {
+    if (input.size() != kAbortSize || !hasType(input, MessageType::kAbort)) {
+        return false;
+    }
+    abort.session_id = input[1];
     return true;
 }
 

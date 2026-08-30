@@ -7,7 +7,6 @@
 
 #include <cstdint>
 #include <cstring>
-
 #include <wirespaces/runtime/core.hpp>
 
 #ifndef WS_SERVICE_PING_ENDPOINT_ID
@@ -31,13 +30,10 @@ WS_PACKET_BUFFER_DEFINE(PingPacketBuffer, sizeof(PingMessage));
 /** Ping request receiver that sends a directed response. */
 class PingService final : public wirespaces::EndpointReceiver {
 public:
-    explicit PingService(wirespaces::Router* router) noexcept
-        : router_{router} {}
+    explicit PingService(wirespaces::Router* router) noexcept : router_{router} {}
 
-    wirespaces::ReceiveResult receive(
-        const wirespaces::PacketBuffer& packet) noexcept override {
-        if (router_ == nullptr ||
-            packet.size() != sizeof(PingMessage) ||
+    wirespaces::ReceiveResult receive(const wirespaces::PacketBuffer& packet) noexcept override {
+        if (router_ == nullptr || packet.size() != sizeof(PingMessage) ||
             packet.header().destination.isBroadcast()) {
             return wirespaces::ReceiveResult::kRejected;
         }
@@ -54,22 +50,16 @@ public:
     }
 
 private:
-    void sendResponse(
-        const wirespaces::Header& request_header,
-        uint16_t sequence_number) noexcept {
+    void sendResponse(const wirespaces::Header& request_header, uint16_t sequence_number) noexcept {
         PingPacketBuffer response{};
         static_cast<void>(response.initialize(
-            sizeof(PingMessage),
-            wirespaces::ControlFields{
-                wirespaces::QoS::kNormal,
-                false,
-                wirespaces::TransportType::kSimple}));
+            sizeof(PingMessage), wirespaces::ControlFields{wirespaces::QoS::kNormal, false,
+                                                           wirespaces::TransportType::kSimple}));
         response.header().wire = request_header.wire;
         response.header().source = request_header.destination;
         response.header().destination = request_header.source;
         response.header().endpoint = wirespaces::EndpointAddress::from(
-            wirespaces::Namespace::kCommon,
-            WS_SERVICE_PING_ENDPOINT_ID);
+            wirespaces::Namespace::kCommon, WS_SERVICE_PING_ENDPOINT_ID);
 
         const PingMessage message{
             PingMessage::kMagic,
@@ -85,4 +75,4 @@ private:
 
 static_assert(sizeof(PingMessage) == 4U);
 
-} // namespace ping
+}  // namespace ping

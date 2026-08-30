@@ -5,10 +5,10 @@
 
 #pragma once
 
+#include <wirespaces/hal/clock.h>
+
 #include <cstdint>
 #include <cstring>
-
-#include <wirespaces/hal/clock.h>
 #include <wirespaces/runtime/core.hpp>
 
 #ifndef WS_SERVICE_STACK_REPORT_ENDPOINT_ID
@@ -28,15 +28,12 @@ WS_PACKET_BUFFER_DEFINE(StackReportPacketBuffer, sizeof(StackReportMessage));
 template <uint32_t period_ms>
 class StackReportService {
 public:
-    StackReportService(
-        wirespaces::Router* router,
-        wirespaces::WireNumber wire,
-        wirespaces::HostId source_host,
-        wirespaces::HostId destination_host) noexcept
-        : router_{router}
-        , wire_{wire}
-        , source_host_{source_host}
-        , destination_host_{destination_host} {}
+    StackReportService(wirespaces::Router* router, wirespaces::WireNumber wire,
+                       wirespaces::HostId source_host, wirespaces::HostId destination_host) noexcept
+        : router_{router},
+          wire_{wire},
+          source_host_{source_host},
+          destination_host_{destination_host} {}
 
     void run(uint16_t peak_used_bytes, uint16_t capacity_bytes) noexcept {
         const auto now_ms{wirespaces::hal::MillisecondClock::now()};
@@ -56,18 +53,15 @@ private:
         }
 
         StackReportPacketBuffer packet{};
-        static_cast<void>(packet.initialize(
-            sizeof(StackReportMessage),
-            wirespaces::ControlFields{
-                wirespaces::QoS::kBackground,
-                false,
-                wirespaces::TransportType::kSimple}));
+        static_cast<void>(
+            packet.initialize(sizeof(StackReportMessage),
+                              wirespaces::ControlFields{wirespaces::QoS::kBackground, false,
+                                                        wirespaces::TransportType::kSimple}));
         packet.header().wire = wire_;
         packet.header().source = source_host_;
         packet.header().destination = destination_host_;
         packet.header().endpoint = wirespaces::EndpointAddress::from(
-            wirespaces::Namespace::kCommon,
-            WS_SERVICE_STACK_REPORT_ENDPOINT_ID);
+            wirespaces::Namespace::kCommon, WS_SERVICE_STACK_REPORT_ENDPOINT_ID);
 
         const StackReportMessage message{peak_used_bytes, capacity_bytes};
         std::memcpy(packet.payload().data(), &message, sizeof(message));
@@ -83,4 +77,4 @@ private:
 
 static_assert(sizeof(StackReportMessage) == 4U);
 
-} // namespace stack_report
+}  // namespace stack_report

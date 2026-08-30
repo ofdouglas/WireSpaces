@@ -7,7 +7,6 @@
 
 #include <cstdint>
 #include <cstring>
-
 #include <wirespaces/runtime/core.hpp>
 
 #ifndef WS_SERVICE_LED_CONTROL_ENDPOINT_ID
@@ -35,18 +34,12 @@ class LedControlService final : public wirespaces::EndpointReceiver {
 public:
     using SetBrightness = void (*)(void* context, uint8_t brightness);
 
-    LedControlService(
-        wirespaces::Router* router,
-        SetBrightness set_brightness,
-        void* output_context) noexcept
-        : router_{router}
-        , set_brightness_{set_brightness}
-        , output_context_{output_context} {}
+    LedControlService(wirespaces::Router* router, SetBrightness set_brightness,
+                      void* output_context) noexcept
+        : router_{router}, set_brightness_{set_brightness}, output_context_{output_context} {}
 
-    wirespaces::ReceiveResult receive(
-        const wirespaces::PacketBuffer& packet) noexcept override {
-        if (router_ == nullptr ||
-            set_brightness_ == nullptr ||
+    wirespaces::ReceiveResult receive(const wirespaces::PacketBuffer& packet) noexcept override {
+        if (router_ == nullptr || set_brightness_ == nullptr ||
             packet.size() != sizeof(LedControlMessage) ||
             packet.header().destination.isBroadcast()) {
             return wirespaces::ReceiveResult::kRejected;
@@ -65,23 +58,18 @@ public:
     }
 
 private:
-    void sendResponse(
-        const wirespaces::Header& request_header,
-        uint8_t brightness,
-        uint8_t sequence_number) noexcept {
+    void sendResponse(const wirespaces::Header& request_header, uint8_t brightness,
+                      uint8_t sequence_number) noexcept {
         LedControlPacketBuffer response{};
-        static_cast<void>(response.initialize(
-            sizeof(LedControlMessage),
-            wirespaces::ControlFields{
-                wirespaces::QoS::kNormal,
-                false,
-                wirespaces::TransportType::kSimple}));
+        static_cast<void>(
+            response.initialize(sizeof(LedControlMessage),
+                                wirespaces::ControlFields{wirespaces::QoS::kNormal, false,
+                                                          wirespaces::TransportType::kSimple}));
         response.header().wire = request_header.wire;
         response.header().source = request_header.destination;
         response.header().destination = request_header.source;
         response.header().endpoint = wirespaces::EndpointAddress::from(
-            wirespaces::Namespace::kCommon,
-            WS_SERVICE_LED_CONTROL_ENDPOINT_ID);
+            wirespaces::Namespace::kCommon, WS_SERVICE_LED_CONTROL_ENDPOINT_ID);
 
         const LedControlMessage message{
             LedControlMessage::kMagic,
@@ -100,4 +88,4 @@ private:
 
 static_assert(sizeof(LedControlMessage) == 4U);
 
-} // namespace led_control
+}  // namespace led_control

@@ -51,12 +51,30 @@ target_link_libraries(
     INTERFACE WireSpaces::crc WireSpaces::foundation
 )
 
+add_library(
+    wirespaces_bits
+    STATIC
+        transports/bits/bits.cpp
+        transports/bits/codec.cpp
+)
+add_library(WireSpaces::bits ALIAS wirespaces_bits)
+target_include_directories(
+    wirespaces_bits
+    PUBLIC ${WIRESPACES_INCLUDE_ROOT}
+)
+target_link_libraries(
+    wirespaces_bits
+    PUBLIC WireSpaces::core WireSpaces::foundation
+)
+wirespaces_configure_host_target(wirespaces_bits)
+
 add_library(wirespaces_transports INTERFACE)
 add_library(WireSpaces::transports ALIAS wirespaces_transports)
 target_include_directories(
     wirespaces_transports
     INTERFACE ${WIRESPACES_INCLUDE_ROOT}
 )
+target_link_libraries(wirespaces_transports INTERFACE WireSpaces::bits)
 
 add_library(wirespaces_services INTERFACE)
 add_library(WireSpaces::services ALIAS wirespaces_services)
@@ -80,4 +98,21 @@ if(BUILD_TESTING AND WIRESPACES_BUILD_LIBRARY_TESTS)
     )
     wirespaces_configure_host_target(wirespaces_uart_hdlc_tests)
     add_test(NAME wirespaces_uart_hdlc_tests COMMAND wirespaces_uart_hdlc_tests)
+
+    add_executable(
+        wirespaces_bits_tests
+        transports/bits/test/bits_test.cpp
+    )
+    target_include_directories(
+        wirespaces_bits_tests
+        PRIVATE transports/bits/test
+    )
+    target_link_libraries(
+        wirespaces_bits_tests
+        PRIVATE WireSpaces::bits GTest::gtest_main
+    )
+    wirespaces_configure_host_target(wirespaces_bits_tests)
+
+    include(GoogleTest)
+    gtest_discover_tests(wirespaces_bits_tests)
 endif()

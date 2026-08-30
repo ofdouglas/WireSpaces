@@ -43,7 +43,7 @@ enum class QoS : uint8_t {
     kBackground = 3U,
 };
 
-enum class TransportType : uint8_t { kSimple = 0U, kReliableSegmented, kNumTransportTypes };
+enum class TransportType : uint8_t { kSimple = 0U, kBits, kNumTransportTypes };
 
 enum class Namespace : uint8_t {
     kUser0 = 0U,

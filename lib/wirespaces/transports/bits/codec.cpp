@@ -17,27 +17,23 @@ constexpr uint8_t kVersionShift{4U};
 constexpr uint8_t kTypeMask{0x0FU};
 
 void writeU16(uint16_t value, uint8_t* output) noexcept {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    std::memcpy(output, &value, sizeof(value));
+#else
     output[0] = static_cast<uint8_t>(value);
     output[1] = static_cast<uint8_t>(value >> 8U);
+#endif
 }
 
 uint16_t readU16(const uint8_t* input) noexcept {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    uint16_t value{0U};
+    std::memcpy(&value, input, sizeof(value));
+    return value;
+#else
     return static_cast<uint16_t>(static_cast<uint16_t>(input[0]) |
                                  (static_cast<uint16_t>(input[1]) << 8U));
-}
-
-void writeU32(uint32_t value, uint8_t* output) noexcept {
-    output[0] = static_cast<uint8_t>(value);
-    output[1] = static_cast<uint8_t>(value >> 8U);
-    output[2] = static_cast<uint8_t>(value >> 16U);
-    output[3] = static_cast<uint8_t>(value >> 24U);
-}
-
-uint32_t readU32(const uint8_t* input) noexcept {
-    return static_cast<uint32_t>(input[0]) |
-           (static_cast<uint32_t>(input[1]) << 8U) |
-           (static_cast<uint32_t>(input[2]) << 16U) |
-           (static_cast<uint32_t>(input[3]) << 24U);
+#endif
 }
 
 bool hasType(ByteSpan input, MessageType expected) noexcept {
@@ -73,17 +69,25 @@ bool encodeSetup(const Setup& setup, MutableByteSpan output) noexcept {
     output[0] = encodeControl(MessageType::kSetup);
     output[1] = setup.session_id;
     output[2] = setup.initial_sequence_number;
-    writeU16(setup.segment_size, output.data() + 3U);
-    writeU32(setup.total_size, output.data() + 5U);
+    output[3] = 0U;
+    writeU16(setup.final_segment_index, output.data() + 4U);
+    writeU16(setup.segment_size, output.data() + 6U);
+    writeU16(setup.final_segment_size, output.data() + 8U);
+    return true;
+}
+
+bool detail::decodeSetupKnownType(ByteSpan input, Setup& setup) noexcept {
+    if (input.size() != kSetupSize || input[3] != 0U) {
+        return false;
+    }
+    setup = Setup{input[1], input[2], readU16(input.data() + 4U),
+                  readU16(input.data() + 6U), readU16(input.data() + 8U)};
     return true;
 }
 
 bool decodeSetup(ByteSpan input, Setup& setup) noexcept {
-    if (input.size() != kSetupSize || !hasType(input, MessageType::kSetup)) {
-        return false;
-    }
-    setup = Setup{input[1], input[2], readU16(input.data() + 3U), readU32(input.data() + 5U)};
-    return true;
+    return hasType(input, MessageType::kSetup) &&
+           detail::decodeSetupKnownType(input, setup);
 }
 
 bool encodeSegmentHeader(const SegmentHeader& header, MutableByteSpan output) noexcept {
@@ -96,12 +100,18 @@ bool encodeSegmentHeader(const SegmentHeader& header, MutableByteSpan output) no
     return true;
 }
 
-bool decodeSegmentHeader(ByteSpan input, SegmentHeader& header) noexcept {
-    if (input.size() < kSegmentHeaderSize || !hasType(input, MessageType::kSegment)) {
+bool detail::decodeSegmentHeaderKnownType(ByteSpan input,
+                                          SegmentHeader& header) noexcept {
+    if (input.size() < kSegmentHeaderSize) {
         return false;
     }
     header = SegmentHeader{input[1], readU16(input.data() + 2U)};
     return true;
+}
+
+bool decodeSegmentHeader(ByteSpan input, SegmentHeader& header) noexcept {
+    return hasType(input, MessageType::kSegment) &&
+           detail::decodeSegmentHeaderKnownType(input, header);
 }
 
 bool encodeAck(const Ack& ack, MutableByteSpan output) noexcept {
@@ -116,12 +126,17 @@ bool encodeAck(const Ack& ack, MutableByteSpan output) noexcept {
     return true;
 }
 
-bool decodeAck(ByteSpan input, Ack& ack) noexcept {
-    if (input.size() != kAckSize || !hasType(input, MessageType::kAck)) {
+bool detail::decodeAckKnownType(ByteSpan input, Ack& ack) noexcept {
+    if (input.size() != kAckSize) {
         return false;
     }
     ack = Ack{input[1], readU16(input.data() + 2U), input[4], input[5]};
     return true;
+}
+
+bool decodeAck(ByteSpan input, Ack& ack) noexcept {
+    return hasType(input, MessageType::kAck) &&
+           detail::decodeAckKnownType(input, ack);
 }
 
 bool encodeProbe(const Probe& probe, MutableByteSpan output) noexcept {
@@ -133,12 +148,17 @@ bool encodeProbe(const Probe& probe, MutableByteSpan output) noexcept {
     return true;
 }
 
-bool decodeProbe(ByteSpan input, Probe& probe) noexcept {
-    if (input.size() != kProbeSize || !hasType(input, MessageType::kProbe)) {
+bool detail::decodeProbeKnownType(ByteSpan input, Probe& probe) noexcept {
+    if (input.size() != kProbeSize) {
         return false;
     }
     probe.session_id = input[1];
     return true;
+}
+
+bool decodeProbe(ByteSpan input, Probe& probe) noexcept {
+    return hasType(input, MessageType::kProbe) &&
+           detail::decodeProbeKnownType(input, probe);
 }
 
 bool encodeReject(const Reject& reject, MutableByteSpan output) noexcept {
@@ -151,13 +171,18 @@ bool encodeReject(const Reject& reject, MutableByteSpan output) noexcept {
     return true;
 }
 
-bool decodeReject(ByteSpan input, Reject& reject) noexcept {
-    if (input.size() != kRejectSize || !hasType(input, MessageType::kReject) ||
+bool detail::decodeRejectKnownType(ByteSpan input, Reject& reject) noexcept {
+    if (input.size() != kRejectSize ||
         input[2] > static_cast<uint8_t>(RejectReason::kInternalError)) {
         return false;
     }
     reject = Reject{input[1], static_cast<RejectReason>(input[2])};
     return true;
+}
+
+bool decodeReject(ByteSpan input, Reject& reject) noexcept {
+    return hasType(input, MessageType::kReject) &&
+           detail::decodeRejectKnownType(input, reject);
 }
 
 bool encodeAbort(const Abort& abort, MutableByteSpan output) noexcept {
@@ -169,12 +194,17 @@ bool encodeAbort(const Abort& abort, MutableByteSpan output) noexcept {
     return true;
 }
 
-bool decodeAbort(ByteSpan input, Abort& abort) noexcept {
-    if (input.size() != kAbortSize || !hasType(input, MessageType::kAbort)) {
+bool detail::decodeAbortKnownType(ByteSpan input, Abort& abort) noexcept {
+    if (input.size() != kAbortSize) {
         return false;
     }
     abort.session_id = input[1];
     return true;
+}
+
+bool decodeAbort(ByteSpan input, Abort& abort) noexcept {
+    return hasType(input, MessageType::kAbort) &&
+           detail::decodeAbortKnownType(input, abort);
 }
 
 bool encodeUserDatagram(ByteSpan payload, MutableByteSpan output) noexcept {
@@ -188,12 +218,18 @@ bool encodeUserDatagram(ByteSpan payload, MutableByteSpan output) noexcept {
     return true;
 }
 
-bool decodeUserDatagram(ByteSpan input, ByteSpan& payload) noexcept {
-    if (input.empty() || !hasType(input, MessageType::kUserDatagram)) {
+bool detail::decodeUserDatagramKnownType(ByteSpan input,
+                                         ByteSpan& payload) noexcept {
+    if (input.empty()) {
         return false;
     }
     payload = input.subspan(kUserDatagramHeaderSize);
     return true;
+}
+
+bool decodeUserDatagram(ByteSpan input, ByteSpan& payload) noexcept {
+    return hasType(input, MessageType::kUserDatagram) &&
+           detail::decodeUserDatagramKnownType(input, payload);
 }
 
 }  // namespace wirespaces::transport::bits

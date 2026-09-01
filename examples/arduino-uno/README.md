@@ -197,6 +197,40 @@ Run the PC Compact BITS state-machine tests without hardware:
 make test-bits
 ```
 
+## BITS constrained receiver RAM test
+
+The `bits_boot_profile_ram` firmware is the receiver-only precursor to the
+4 KB bootloader. It directly composes the synchronous, one-window Compact BITS
+engine with WireSpaces headers and UART HDLC. It does not link `Dispatcher`,
+`Router`, queued ingress, timers, or a BITS transmitter.
+
+Build and check both size gates:
+
+```sh
+make bits-boot-profile-ram
+make bits-boot-profile-size
+```
+
+The first image contains the complete hardware-test instrumentation and must
+remain at or below 4,096 bytes. The second removes RAM-pattern verification but
+retains a minimal user-datagram service; it must remain at or below 3,350 bytes
+before board-specific flash code is added. Both targets write ELF and map files
+under `build/boot_profile/`.
+
+Flash the hardware-test image through the existing Arduino bootloader and run
+the PC test:
+
+```sh
+make flash-bits-boot-profile PORT=/dev/arduino-uno
+make test-bits-boot-profile PORT=/dev/arduino-uno
+```
+
+The test verifies an exact BITS user-datagram echo, transfers a 256-byte object
+where `data[i] == uint8_t(i)`, and repeats with 251 bytes to exercise a partial
+final segment. The Arduino stores each object in RAM and returns its validation
+result in a BITS user datagram.
+
+
 ## Planned WireSpaces demo
 
 * 4-6 statically allocated packet buffers, sized to hold up to N=4 CAN PDUA payloads (the common upper bound for WS small packet size widespread compatibility)

@@ -15,7 +15,7 @@ constexpr uint8_t kReservedProfile{1U};
 constexpr uint8_t kCompactWindowWidth{16U};
 
 constexpr uint16_t kControlSize{1U};
-constexpr uint16_t kSetupSize{9U};
+constexpr uint16_t kSetupSize{10U};
 constexpr uint16_t kSegmentHeaderSize{4U};
 constexpr uint16_t kAckSize{6U};
 constexpr uint16_t kProbeSize{2U};
@@ -46,9 +46,20 @@ struct Control {
 struct Setup {
     uint8_t session_id{0U};
     uint8_t initial_sequence_number{0U};
+    uint16_t final_segment_index{0U};
     uint16_t segment_size{0U};
-    uint32_t total_size{0U};
+    uint16_t final_segment_size{0U};
 };
+
+/** @brief Geometry derived from Compact SETUP fields. */
+[[nodiscard]] constexpr uint32_t setupSegmentCount(const Setup& setup) noexcept {
+    return static_cast<uint32_t>(setup.final_segment_index) + 1U;
+}
+
+[[nodiscard]] constexpr uint32_t setupTotalSize(const Setup& setup) noexcept {
+    return static_cast<uint32_t>(setup.final_segment_index) * setup.segment_size +
+           setup.final_segment_size;
+}
 
 /** @brief Compact SEGMENT header fields. */
 struct SegmentHeader {
@@ -59,7 +70,7 @@ struct SegmentHeader {
 /** @brief Compact cumulative/selective ACK fields. */
 struct Ack {
     uint8_t session_id{0U};
-    uint16_t window_bitmap{0U};
+    uint16_t window_bitmap{0U};  // TODO: move this for better alignment
     uint8_t max_receive_sequence{0U};
     uint8_t window_base{0U};
 };

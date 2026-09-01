@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <vector>
 
 namespace wirespaces::transport::bits::test {
 namespace {
@@ -20,7 +21,204 @@ std::array<uint8_t, Size> makeObject() {
     return object;
 }
 
+
+class CapturingReceiverPduSender final : public ReceiverPduSender {
+public:
+    MutableByteSpan prepare(uint16_t payload_size) noexcept override {
+        prepared_size_ = 0U;
+        if (payload_size > storage_.size()) {
+            return MutableByteSpan{};
+        }
+        prepared_size_ = payload_size;
+        return MutableByteSpan{storage_.data(), prepared_size_};
+    }
+
+    bool sendPrepared() noexcept override {
+        sent_.assign(storage_.begin(), storage_.begin() + prepared_size_);
+        return true;
+    }
+
+    [[nodiscard]] ByteSpan sent() const noexcept {
+        return ByteSpan{sent_.data(), sent_.size()};
+    }
+
+private:
+    std::array<uint8_t, 64U> storage_{};
+    std::vector<uint8_t> sent_{};
+    uint16_t prepared_size_{0U};
+};
+
+template <size_t PayloadSize>
+std::array<uint8_t, kSegmentHeaderSize + PayloadSize> makeSegment(
+    uint8_t session_id, uint16_t segment_index,
+    const std::array<uint8_t, PayloadSize>& payload) {
+    std::array<uint8_t, kSegmentHeaderSize + PayloadSize> message{};
+    const MutableByteSpan storage{message.data(), message.size()};
+    EXPECT_TRUE(encodeSegmentHeader(SegmentHeader{session_id, segment_index},
+                                    storage));
+    std::copy(payload.begin(), payload.end(),
+              message.begin() + kSegmentHeaderSize);
+    return message;
+}
+
 }  // namespace
+
+
+TEST(BitsCodecTest, SetupUsesAlignedLittleEndianLayout) {
+    const wirespaces::transport::bits::Setup original{0x12U, 0x34U, 0x5678U, 0x9ABCU, 0xDEF0U};
+    std::array<uint8_t, kSetupSize> encoded{};
+    ASSERT_TRUE(encodeSetup(original, MutableByteSpan{encoded.data(), encoded.size()}));
+
+    const std::array<uint8_t, kSetupSize> expected{
+        0x00U, 0x12U, 0x34U, 0x00U, 0x78U,
+        0x56U, 0xBCU, 0x9AU, 0xF0U, 0xDEU};
+    EXPECT_EQ(encoded, expected);
+
+    wirespaces::transport::bits::Setup decoded{};
+    ASSERT_TRUE(decodeSetup(ByteSpan{encoded.data(), encoded.size()}, decoded));
+    EXPECT_EQ(decoded.session_id, original.session_id);
+    EXPECT_EQ(decoded.initial_sequence_number, original.initial_sequence_number);
+    EXPECT_EQ(decoded.final_segment_index, original.final_segment_index);
+    EXPECT_EQ(decoded.segment_size, original.segment_size);
+    EXPECT_EQ(decoded.final_segment_size, original.final_segment_size);
+
+    encoded[3] = 1U;
+    EXPECT_FALSE(decodeSetup(ByteSpan{encoded.data(), encoded.size()}, decoded));
+    encoded[3] = 0U;
+    encoded[0] = encodeControl(MessageType::kAck);
+    EXPECT_FALSE(decodeSetup(ByteSpan{encoded.data(), encoded.size()}, decoded));
+}
+
+// The constrained engine exchanges user datagrams without endpoint, router, or queue objects.
+TEST(BitsReceiverEngineTest, DeliversAndSendsUserDatagramsSynchronously) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{ReceiverEngineConfig{8U, 1U}, callbacks, sender};
+
+    const std::array<uint8_t, 3U> request{0x10U, 0x20U, 0x30U};
+    std::array<uint8_t, kUserDatagramHeaderSize + request.size()> message{};
+    ASSERT_TRUE(encodeUserDatagram(ByteSpan{request.data(), request.size()},
+                                   MutableByteSpan{message.data(), message.size()}));
+    EXPECT_EQ(engine.process(ByteSpan{message.data(), message.size()}),
+              ProcessResult::kProgress);
+    EXPECT_TRUE(std::equal(callbacks.datagram().begin(),
+                           callbacks.datagram().end(), request.begin(),
+                           request.end()));
+
+    const std::array<uint8_t, 2U> response{0xA0U, 0xB0U};
+    ASSERT_EQ(engine.sendDatagram(ByteSpan{response.data(), response.size()}),
+              SendResult::kSent);
+    ByteSpan decoded{};
+    ASSERT_TRUE(decodeUserDatagram(sender.sent(), decoded));
+    EXPECT_TRUE(std::equal(decoded.begin(), decoded.end(), response.begin(),
+                           response.end()));
+}
+
+// A one-position grant accepts only the next segment and completes a partial final segment.
+TEST(BitsReceiverEngineTest, OneWindowProfileTransfersInOrder) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{ReceiverEngineConfig{4U, 1U}, callbacks, sender};
+
+    std::array<uint8_t, kSetupSize> setup_message{};
+    ASSERT_TRUE(encodeSetup(wirespaces::transport::bits::Setup{0x42U, 0x20U, 2U, 4U, 2U},
+                            MutableByteSpan{setup_message.data(),
+                                            setup_message.size()}));
+    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}),
+              ProcessResult::kProgress);
+    Ack ack{};
+    ASSERT_TRUE(decodeAck(sender.sent(), ack));
+    EXPECT_EQ(ack.window_base, 0x1FU);
+    EXPECT_EQ(ack.max_receive_sequence, 0x20U);
+
+    const auto early_segment{
+        makeSegment(0x42U, 1U, std::array<uint8_t, 4U>{4U, 5U, 6U, 7U})};
+    EXPECT_EQ(engine.process(ByteSpan{early_segment.data(), early_segment.size()}),
+              ProcessResult::kProgress);
+    EXPECT_EQ(callbacks.segmentCount(), 0U);
+
+    const auto segment_0{
+        makeSegment(0x42U, 0U, std::array<uint8_t, 4U>{0U, 1U, 2U, 3U})};
+    const auto segment_1{
+        makeSegment(0x42U, 1U, std::array<uint8_t, 4U>{4U, 5U, 6U, 7U})};
+    const auto segment_2{
+        makeSegment(0x42U, 2U, std::array<uint8_t, 2U>{8U, 9U})};
+    EXPECT_EQ(engine.process(ByteSpan{segment_0.data(), segment_0.size()}),
+              ProcessResult::kProgress);
+    EXPECT_EQ(engine.process(ByteSpan{segment_1.data(), segment_1.size()}),
+              ProcessResult::kProgress);
+    EXPECT_EQ(engine.process(ByteSpan{segment_2.data(), segment_2.size()}),
+              ProcessResult::kProgress);
+
+    EXPECT_EQ(engine.state(), TransferState::kCompleted);
+    EXPECT_EQ(callbacks.segmentCount(), 3U);
+    EXPECT_EQ(callbacks.completionCount(), 1U);
+    ASSERT_EQ(callbacks.receivedSize(), 10U);
+    for (size_t index{0U}; index < 10U; ++index) {
+        EXPECT_EQ(callbacks.object()[index], static_cast<uint8_t>(index));
+    }
+}
+
+// Resource limits are enforced by the engine and reported with a Compact BITS REJECT.
+TEST(BitsReceiverEngineTest, RejectsUnsupportedSegmentSize) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{ReceiverEngineConfig{4U, 1U}, callbacks, sender};
+
+    std::array<uint8_t, kSetupSize> setup_message{};
+    ASSERT_TRUE(encodeSetup(wirespaces::transport::bits::Setup{0x43U, 0x10U, 1U, 8U, 8U},
+                            MutableByteSpan{setup_message.data(),
+                                            setup_message.size()}));
+    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}),
+              ProcessResult::kProgress);
+
+    Reject reject{};
+    ASSERT_TRUE(decodeReject(sender.sent(), reject));
+    EXPECT_EQ(reject.session_id, 0x43U);
+    EXPECT_EQ(reject.reason, RejectReason::kUnsupportedSegmentSize);
+    EXPECT_EQ(engine.state(), TransferState::kIdle);
+}
+
+
+TEST(BitsReceiverEngineTest, RejectsInvalidFinalSegmentGeometry) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{ReceiverEngineConfig{8U, 1U}, callbacks, sender};
+
+    std::array<uint8_t, kSetupSize> setup_message{};
+    ASSERT_TRUE(encodeSetup(
+        wirespaces::transport::bits::Setup{0x45U, 0x10U, 1U, 4U, 5U},
+        MutableByteSpan{setup_message.data(), setup_message.size()}));
+    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}),
+              ProcessResult::kProgress);
+
+    Reject reject{};
+    ASSERT_TRUE(decodeReject(sender.sent(), reject));
+    EXPECT_EQ(reject.session_id, 0x45U);
+    EXPECT_EQ(reject.reason, RejectReason::kInvalidArgument);
+    EXPECT_EQ(engine.state(), TransferState::kIdle);
+}
+
+TEST(BitsReceiverEngineTest, RejectsObjectLargerThanSinkCapacity) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{ReceiverEngineConfig{8U, 1U, 12U}, callbacks,
+                              sender};
+
+    std::array<uint8_t, kSetupSize> setup_message{};
+    ASSERT_TRUE(encodeSetup(
+        wirespaces::transport::bits::Setup{0x44U, 0x10U, 3U, 4U, 1U},
+        MutableByteSpan{setup_message.data(), setup_message.size()}));
+    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}),
+              ProcessResult::kProgress);
+
+    Reject reject{};
+    ASSERT_TRUE(decodeReject(sender.sent(), reject));
+    EXPECT_EQ(reject.session_id, 0x44U);
+    EXPECT_EQ(reject.reason, RejectReason::kObjectTooLarge);
+    EXPECT_EQ(engine.state(), TransferState::kIdle);
+}
+
 
 // USER_DATAGRAM remains connection-scoped and independent of segmented-transfer state.
 TEST_F(BitsConnectionFixture, DeliversUserDatagramsInBothDirections) {
@@ -166,7 +364,7 @@ TEST_F(BitsConnectionFixture, RejectsASecondSetupWhileBusy) {
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
     ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
     ASSERT_EQ(injectSetup(wirespaces::transport::bits::Setup{
-                  0x77U, 0x10U, 8U, 16U}),
+                  0x77U, 0x10U, 1U, 8U, 8U}),
               DispatchResult::kAccepted);
     ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
 

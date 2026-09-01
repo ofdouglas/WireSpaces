@@ -19,6 +19,22 @@ namespace wirespaces::transport::bits {
  */
 [[nodiscard]] bool decodeControl(uint8_t encoded, Control& control) noexcept;
 
+/**
+ * Decode fields after the caller has validated the control byte and dispatched
+ * the expected message type. Length and message-specific fields remain checked.
+ */
+namespace detail {
+[[nodiscard]] bool decodeSetupKnownType(ByteSpan input, Setup& setup) noexcept;
+[[nodiscard]] bool decodeSegmentHeaderKnownType(ByteSpan input,
+                                                SegmentHeader& header) noexcept;
+[[nodiscard]] bool decodeAckKnownType(ByteSpan input, Ack& ack) noexcept;
+[[nodiscard]] bool decodeProbeKnownType(ByteSpan input, Probe& probe) noexcept;
+[[nodiscard]] bool decodeRejectKnownType(ByteSpan input, Reject& reject) noexcept;
+[[nodiscard]] bool decodeAbortKnownType(ByteSpan input, Abort& abort) noexcept;
+[[nodiscard]] bool decodeUserDatagramKnownType(ByteSpan input,
+                                              ByteSpan& payload) noexcept;
+}  // namespace detail
+
 [[nodiscard]] bool encodeSetup(const Setup& setup, MutableByteSpan output) noexcept;
 [[nodiscard]] bool decodeSetup(ByteSpan input, Setup& setup) noexcept;
 

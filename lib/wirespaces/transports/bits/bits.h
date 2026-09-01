@@ -9,6 +9,7 @@
 #include <wirespaces/core/router.h>
 #include <wirespaces/foundation/span.h>
 #include <wirespaces/transports/bits/codec.h>
+#include <wirespaces/transports/bits/receiver_engine.h>
 
 #include <cstdint>
 
@@ -29,24 +30,6 @@ struct TimingConfig {
     uint8_t max_retries{5U};
 };
 
-/** @brief Result of one bounded BITS processing step. */
-enum class ProcessResult : uint8_t {
-    kIdle = 0U,
-    kProgress,
-    kError,
-};
-
-/** @brief Observable state of a BITS segmented transfer. */
-enum class TransferState : uint8_t {
-    kIdle = 0U,
-    kStarting,
-    kActive,
-    kCompleted,
-    kRejected,
-    kAborted,
-    kError,
-};
-
 /** @brief Result of starting a transmitter-side transfer. */
 enum class StartResult : uint8_t {
     kStarted = 0U,
@@ -55,32 +38,6 @@ enum class StartResult : uint8_t {
     kPacketTooSmall,
 };
 
-/** @brief Result of an immediate BITS send request. */
-enum class SendResult : uint8_t {
-    kSent = 0U,
-    kTooLarge,
-    kNoRoute,
-    kInvalidState,
-};
-
-/** @brief Service callbacks invoked by BitsReceiver::process(). */
-class ReceiverCallbacks {
-public:
-    /**
-     * @brief Store one segment at its absolute object offset.
-     * @return True only when the sink accepted the bytes.
-     */
-    virtual bool onSegment(uint32_t object_offset, ByteSpan payload) noexcept = 0;
-    /** @brief Deliver one connection-scoped unreliable sideband datagram. */
-    virtual void onDatagram(ByteSpan payload) noexcept = 0;
-    /** @brief Notify that every object segment has been accepted by the sink. */
-    virtual void onTransferComplete() noexcept = 0;
-    /** @brief Notify that the active transfer was aborted locally or by its peer. */
-    virtual void onTransferAborted() noexcept = 0;
-
-protected:
-    ~ReceiverCallbacks() = default;
-};
 
 /** @brief Service callbacks invoked by BitsTransmitter::process(). */
 class TransmitterCallbacks {
@@ -104,7 +61,7 @@ protected:
  * Up to sixteen packet slots form the advertised receive window. receive() only validates,
  * classifies, and copies; protocol state and callbacks are advanced later by process().
  */
-class BitsReceiver final : public EndpointReceiver {
+class BitsReceiver final : public EndpointReceiver, private ReceiverPduSender {
 public:
     BitsReceiver(const ConnectionConfig& connection, Router& router, ReceiverCallbacks& callbacks,
                  foundation::Span<PacketBuffer*> segment_ingress,
@@ -114,34 +71,20 @@ public:
     [[nodiscard]] ProcessResult process() noexcept;
     [[nodiscard]] SendResult sendDatagram(ByteSpan payload) noexcept;
     [[nodiscard]] SendResult abort() noexcept;
-    [[nodiscard]] TransferState state() const noexcept { return state_; }
+    [[nodiscard]] TransferState state() const noexcept { return engine_.state(); }
 
 private:
-    [[nodiscard]] bool handleSegment(PacketBuffer& packet) noexcept;
-    [[nodiscard]] bool handleDatagram() noexcept;
-    [[nodiscard]] bool handleSetup(ByteSpan payload) noexcept;
-    [[nodiscard]] bool handleAbort(ByteSpan payload) noexcept;
-    [[nodiscard]] bool sendAck() noexcept;
-    [[nodiscard]] bool sendReject(uint8_t session_id, RejectReason reason) noexcept;
-    [[nodiscard]] bool sendAbort() noexcept;
-    [[nodiscard]] bool preparePacket(uint16_t payload_size, QoS qos) noexcept;
-    [[nodiscard]] bool forwardPacket() noexcept;
-    void updateGrant() noexcept;
+    [[nodiscard]] MutableByteSpan prepare(uint16_t payload_size) noexcept override;
+    [[nodiscard]] bool sendPrepared() noexcept override;
 
     ConnectionConfig connection_{};
     Router& router_;
-    ReceiverCallbacks& callbacks_;
     foundation::Span<PacketBuffer*> segment_ingress_{};
     PacketBuffer& datagram_ingress_;
     PacketBuffer& transmit_packet_;
     uint16_t segment_occupied_mask_{0U};
     bool datagram_occupied_{false};
-    TransferState state_{TransferState::kIdle};
-    Setup setup_{};
-    uint32_t segment_count_{0U};
-    uint32_t contiguous_count_{0U};
-    uint32_t granted_end_{0U};
-    uint16_t receive_bitmap_{0U};
+    BitsReceiverEngine engine_;
 };
 
 /**

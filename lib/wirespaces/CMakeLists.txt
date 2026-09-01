@@ -55,6 +55,7 @@ add_library(
     wirespaces_bits
     STATIC
         transports/bits/bits.cpp
+        transports/bits/receiver_engine.cpp
         transports/bits/codec.cpp
 )
 add_library(WireSpaces::bits ALIAS wirespaces_bits)
@@ -115,4 +116,26 @@ if(BUILD_TESTING AND WIRESPACES_BUILD_LIBRARY_TESTS)
 
     include(GoogleTest)
     gtest_discover_tests(wirespaces_bits_tests)
+
+    add_executable(
+        wirespaces_bits_narrow_tests
+        transports/bits/test/receiver_engine_narrow_test.cpp
+        transports/bits/receiver_engine.cpp
+        transports/bits/codec.cpp
+    )
+    target_include_directories(
+        wirespaces_bits_narrow_tests
+        PRIVATE ${WIRESPACES_INCLUDE_ROOT}
+    )
+    target_compile_definitions(
+        wirespaces_bits_narrow_tests
+        PRIVATE WIRESPACES_BITS_RECEIVER_MAX_WINDOW_WIDTH=1
+    )
+    target_link_libraries(
+        wirespaces_bits_narrow_tests
+        PRIVATE WireSpaces::foundation GTest::gtest_main
+    )
+    wirespaces_configure_host_target(wirespaces_bits_narrow_tests)
+    gtest_discover_tests(wirespaces_bits_narrow_tests)
+
 endif()

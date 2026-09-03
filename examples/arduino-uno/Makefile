@@ -19,8 +19,8 @@ OBJCOPY := avr-objcopy
 SIZE := avr-size
 AVRDUDE := avrdude
 
-PORT ?= /dev/ttyACM0
-CANTACT_PORT ?= /dev/ttyACM0
+PORT ?= /dev/arduino-uno
+CANTACT_INTERFACE ?= can0
 PROGRAMMER ?= arduino
 UPLOAD_BAUD ?= 115200
 
@@ -252,7 +252,7 @@ test-bits-boot-profile:
 
 test-mcp2515-can:
 	python3 $(HARDWARE_TEST_ROOT)/mcp2515_can_test.py \
-		--arduino-port $(PORT) --cantact-port $(CANTACT_PORT) --timeout 5
+		--arduino-port $(PORT) --cantact-interface $(CANTACT_INTERFACE) --timeout 5
 
 test-stack:
 	PYTHONPATH=$(PYTHON_ROOT) python3 $(HARDWARE_TEST_ROOT)/stack_report_test.py \

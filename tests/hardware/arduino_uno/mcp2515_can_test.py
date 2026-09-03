@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import sys
 import time
 
+import can
 import serial
 
 
@@ -33,35 +34,10 @@ ARDUINO_TO_CANTACT = (
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arduino-port", required=True)
-    parser.add_argument("--cantact-port", required=True)
+    parser.add_argument("--cantact-interface", required=True)
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=5.0)
     return parser.parse_args()
-
-
-def encode_slcan(frame: CanFrame) -> bytes:
-    if not 0 <= frame.identifier <= 0x7FF:
-        raise ValueError("standard CAN identifier is outside 0..0x7ff")
-    if len(frame.data) > 8:
-        raise ValueError("Classical CAN payload exceeds eight bytes")
-    return (
-        f"t{frame.identifier:03X}{len(frame.data)}{frame.data.hex().upper()}\r"
-    ).encode("ascii")
-
-
-def parse_slcan(line: bytes) -> CanFrame | None:
-    if len(line) < 5 or line[0:1] != b"t":
-        return None
-    try:
-        identifier = int(line[1:4], 16)
-        size = int(line[4:5], 16)
-        data_text = line[5:]
-        if size > 8 or len(data_text) != size * 2:
-            return None
-        data = bytes.fromhex(data_text.decode("ascii"))
-    except (UnicodeDecodeError, ValueError):
-        return None
-    return CanFrame(identifier, data)
 
 
 def encode_arduino_transmit(frame: CanFrame) -> bytes:
@@ -124,54 +100,48 @@ def wait_for_transmit_accept(arduino: serial.Serial, deadline: float) -> None:
     raise RuntimeError(f"timed out waiting for transmit acceptance; observed={observed!r}")
 
 
-def configure_cantact(cantact: serial.Serial) -> None:
-    cantact.reset_input_buffer()
-    for command in (b"C\r", b"S6\r", b"m0\r", b"O\r"):
-        cantact.write(command)
-        cantact.flush()
-        time.sleep(0.02)
+def read_until_can(bus: can.Bus, deadline: float, expected: CanFrame) -> None:
+    observed: list[can.Message] = []
+    while time.monotonic() < deadline:
+        message = bus.recv(timeout=0.1)
+        if message is None:
+            continue
+        observed.append(message)
+        if message.arbitration_id == expected.identifier and message.data == expected.data:
+            return
+    raise RuntimeError(f"timed out waiting for {expected}; observed={observed!r}")
 
 
 def run_test(arguments: argparse.Namespace) -> None:
-    with serial.Serial(
-        arguments.cantact_port, arguments.baud, timeout=0.1
-    ) as cantact, serial.Serial(
-        arguments.arduino_port, arguments.baud, timeout=0.1
-    ) as arduino:
-        try:
-            configure_cantact(cantact)
+    with (
+        can.interface.Bus(interface="socketcan", channel=arguments.cantact_interface, bitrate=500000) as cantact_bus, 
+        serial.Serial(arguments.arduino_port, arguments.baud, timeout=0.1) as arduino
+    ):
+        arduino.dtr = False
+        time.sleep(0.05)
+        arduino.dtr = True
+        wait_for_ready(arduino, time.monotonic() + arguments.timeout)
 
-            arduino.dtr = False
-            time.sleep(0.05)
-            arduino.dtr = True
-            wait_for_ready(arduino, time.monotonic() + arguments.timeout)
+        for frame in CANTACT_TO_ARDUINO:
+            cantact_bus.send(can.Message(arbitration_id=frame.identifier, data=frame.data, is_extended_id=False))
+            read_until(
+                arduino,
+                time.monotonic() + arguments.timeout,
+                parse_arduino_receive,
+                frame,
+            )
 
-            for frame in CANTACT_TO_ARDUINO:
-                cantact.write(encode_slcan(frame))
-                cantact.flush()
-                read_until(
-                    arduino,
-                    time.monotonic() + arguments.timeout,
-                    parse_arduino_receive,
-                    frame,
-                )
-
-            cantact.reset_input_buffer()
-            for frame in ARDUINO_TO_CANTACT:
-                arduino.write(encode_arduino_transmit(frame))
-                arduino.flush()
-                wait_for_transmit_accept(
-                    arduino, time.monotonic() + arguments.timeout
-                )
-                read_until(
-                    cantact,
-                    time.monotonic() + arguments.timeout,
-                    parse_slcan,
-                    frame,
-                )
-        finally:
-            cantact.write(b"C\r")
-            cantact.flush()
+        for frame in ARDUINO_TO_CANTACT:
+            arduino.write(encode_arduino_transmit(frame))
+            arduino.flush()
+            wait_for_transmit_accept(
+                arduino, time.monotonic() + arguments.timeout
+            )
+            read_until_can(
+                cantact_bus,
+                time.monotonic() + arguments.timeout,
+                frame,
+            )
 
 
 def main() -> int:

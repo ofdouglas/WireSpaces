@@ -39,7 +39,7 @@ REJECT_OBJECT_TOO_LARGE = 3
 REJECT_BUSY = 4
 REJECT_INVALID_ARGUMENT = 5
 
-SETUP_SIZE = 9
+SETUP_SIZE = 10
 SEGMENT_HEADER_SIZE = 4
 ACK_SIZE = 6
 PROBE_SIZE = 2
@@ -109,13 +109,18 @@ def encode_setup(
     total_size: int,
 ) -> bytes:
     """Encode one Compact SETUP message."""
+    count = _segment_count(total_size, segment_size)
+    final_segment_index = count - 1
+    final_segment_size = total_size - final_segment_index * segment_size
     return struct.pack(
-        "<BBBHI",
+        "<BBBBHHH",
         MESSAGE_SETUP,
         session_id,
         initial_sequence,
+        0,
+        final_segment_index,
         segment_size,
-        total_size,
+        final_segment_size,
     )
 
 
@@ -393,14 +398,26 @@ class CompactBitsReceiver:
         if len(payload) != SETUP_SIZE:
             session_id = payload[1] if len(payload) > 1 else 0
             return encode_reject(session_id, REJECT_INVALID_ARGUMENT)
-        _, session_id, initial, segment_size, total_size = struct.unpack(
-            "<BBBHI", payload
-        )
-        if segment_size == 0 or total_size == 0:
+        (
+            _,
+            session_id,
+            initial,
+            reserved,
+            final_segment_index,
+            segment_size,
+            final_segment_size,
+        ) = struct.unpack("<BBBBHHH", payload)
+        if (
+            reserved != 0
+            or segment_size == 0
+            or final_segment_size == 0
+            or final_segment_size > segment_size
+        ):
             return encode_reject(session_id, REJECT_INVALID_ARGUMENT)
         if segment_size > self._maximum_segment_size:
             return encode_reject(session_id, REJECT_UNSUPPORTED_SEGMENT_SIZE)
-        count = _segment_count(total_size, segment_size)
+        count = final_segment_index + 1
+        total_size = final_segment_index * segment_size + final_segment_size
         if (
             total_size > self._maximum_object_size
             or count > MAXIMUM_COMPACT_SEGMENT_COUNT

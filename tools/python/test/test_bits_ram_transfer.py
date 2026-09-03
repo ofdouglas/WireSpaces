@@ -24,6 +24,12 @@ from wirespaces.bits_ram_transfer import (
 class CompactBitsRamTransferTest(unittest.TestCase):
     """Exercise both PC protocol roles without a serial device."""
 
+    def test_setup_uses_aligned_little_endian_layout(self) -> None:
+        self.assertEqual(
+            encode_setup(0x12, 0x34, 4, 10),
+            bytes((0x00, 0x12, 0x34, 0x00, 0x02, 0x00, 0x04, 0x00, 0x02, 0x00)),
+        )
+
     # A stop-and-wait sender and 16-position RAM receiver exchange a wrapped,
     # multi-segment object including a partial final segment.
     def test_transmitter_and_receiver_complete_object(self) -> None:

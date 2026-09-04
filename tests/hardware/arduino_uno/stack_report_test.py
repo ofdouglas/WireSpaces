@@ -20,7 +20,7 @@ ATMEGA328P_SRAM_BYTES = 2048
 def parse_arguments() -> argparse.Namespace:
     """Parse hardware-test settings."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", default="/dev/ttyACM0")
+    parser.add_argument("--port", default="/dev/arduino-uno")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--reset", action="store_true")

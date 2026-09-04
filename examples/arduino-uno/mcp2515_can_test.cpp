@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "wiring_constants.h"
+
 namespace {
 
 using wirespaces::platform::avr::Mcp2515Can;
@@ -12,8 +14,9 @@ using wirespaces::platform::avr::Mcp2515CanFrame;
 using wirespaces::platform::avr::uart0ByteAvailable;
 using wirespaces::platform::avr::uart0ReadByte;
 using wirespaces::platform::avr::uart0WriteByte;
+using wirespaces::platform::avr::uart0WriteHexByte;
+using wirespaces::platform::avr::uart0WriteHexNibble;
 
-constexpr std::uint32_t kBaudRate{115200UL};
 constexpr std::size_t kCommandCapacity{24U};
 
 char g_command[kCommandCapacity]{};
@@ -25,19 +28,9 @@ void writeString(const char* text) noexcept {
     }
 }
 
-void writeHexNibble(std::uint8_t value) noexcept {
-    static constexpr char kHex[]{"0123456789ABCDEF"};
-    uart0WriteByte(static_cast<std::uint8_t>(kHex[value & 0x0FU]));
-}
-
-void writeHexByte(std::uint8_t value) noexcept {
-    writeHexNibble(static_cast<std::uint8_t>(value >> 4U));
-    writeHexNibble(value);
-}
-
 void writeHexIdentifier(std::uint16_t identifier) noexcept {
-    writeHexNibble(static_cast<std::uint8_t>(identifier >> 8U));
-    writeHexByte(static_cast<std::uint8_t>(identifier));
+    uart0WriteHexNibble(static_cast<std::uint8_t>(identifier >> 8U));
+    uart0WriteHexByte(static_cast<std::uint8_t>(identifier));
 }
 
 bool parseHexNibble(char character, std::uint8_t& value) noexcept {
@@ -122,7 +115,7 @@ void reportReceivedFrame(const Mcp2515CanFrame& frame) noexcept {
     writeHexIdentifier(frame.identifier);
     uart0WriteByte(':');
     for (std::uint8_t index{0U}; index < frame.size; ++index) {
-        writeHexByte(frame.data[index]);
+        uart0WriteHexByte(frame.data[index]);
     }
     writeString("\r\n");
 }
@@ -130,7 +123,7 @@ void reportReceivedFrame(const Mcp2515CanFrame& frame) noexcept {
 }  // namespace
 
 int main() {
-    wirespaces::platform::avr::uart0Init(kBaudRate);
+    wirespaces::platform::avr::uart0Init(wiring_constants::kUartBaudRate);
     wirespaces::platform::avr::spi0Init();
 
     if (!Mcp2515Can::initialize500Kbps8MHz()) {

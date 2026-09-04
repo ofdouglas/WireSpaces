@@ -11,18 +11,14 @@
 #include <cstdint>
 #include <cstring>
 
+#include "wiring_constants.h"
+
 #ifndef WS_BITS_BOOT_PROFILE_SIZE_ONLY
 #define WS_BITS_BOOT_PROFILE_SIZE_ONLY 0
 #endif
 
 namespace {
 
-constexpr std::uint32_t kBaudRate{115200UL};
-constexpr wirespaces::WireNumber kTestWire{1U};
-constexpr wirespaces::HostId kArduinoHost{1U};
-constexpr wirespaces::HostId kPcHost{2U};
-constexpr wirespaces::EndpointAddress kUploadEndpoint{
-    wirespaces::EndpointAddress::from(wirespaces::Namespace::kUser0, 1U)};
 constexpr std::uint16_t kMaximumObjectSize{256U};
 constexpr std::uint16_t kSegmentPayloadSize{24U};
 constexpr std::uint16_t kMaximumBitsPayloadSize{
@@ -56,10 +52,10 @@ public:
             return wirespaces::MutableByteSpan{};
         }
         wirespaces::Header& header{packet_.header()};
-        header.wire = kTestWire;
-        header.source = kArduinoHost;
-        header.destination = kPcHost;
-        header.endpoint = kUploadEndpoint;
+        header.wire = wiring_constants::kTestWire;
+        header.source = wiring_constants::kArduinoHost;
+        header.destination = wiring_constants::kPcHost;
+        header.endpoint = wiring_constants::kBitsUploadEndpoint;
         return packet_.payload();
     }
 
@@ -209,9 +205,11 @@ private:
 
 bool matchesConnection(const wirespaces::Header& header) noexcept {
     return header.transportType() == wirespaces::TransportType::kBits &&
-           !header.hasExtensions() && header.wire == kTestWire &&
-           header.source == kPcHost && header.destination == kArduinoHost &&
-           header.endpoint == kUploadEndpoint;
+           !header.hasExtensions() &&
+           header.wire == wiring_constants::kTestWire &&
+           header.source == wiring_constants::kPcHost &&
+           header.destination == wiring_constants::kArduinoHost &&
+           header.endpoint == wiring_constants::kBitsUploadEndpoint;
 }
 
 void processFrame(
@@ -251,7 +249,7 @@ void processFrame(
 }  // namespace
 
 int main() {
-    wirespaces::platform::avr::uart0Init(kBaudRate);
+    wirespaces::platform::avr::uart0Init(wiring_constants::kUartBaudRate);
 
     UartPduSender sender{};
     RamProfileCallbacks callbacks{};
@@ -274,4 +272,3 @@ int main() {
         }
     }
 }
-

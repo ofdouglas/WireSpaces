@@ -25,7 +25,7 @@ Flash through the Arduino bootloader:
 make flash
 ```
 
-The default port is `/dev/ttyACM0`. After installing the udev rule below, you can use the stable symlink `/dev/arduino-uno` instead:
+The default port is `/dev/arduino-uno`. After installing the udev rule below, you can use the stable symlink `/dev/arduino-uno` instead:
 
 ```sh
 make flash PORT=/dev/arduino-uno
@@ -83,7 +83,7 @@ formatters and handlers without changing serial/framing code.
 For a bounded live test that resets the UNO and receives one packet:
 
 ```sh
-python3 receiver.py --port /dev/ttyACM0 --baud 115200 \
+python3 receiver.py --port /dev/arduino-uno --baud 115200 \
     --reset --count 1 --timeout 5
 ```
 
@@ -119,8 +119,8 @@ Control the built-in LED through directed WireSpaces requests:
 ```sh
 make led-on
 make led-off
-PYTHONPATH=../../tools/python python3 -m wirespaces.led_control 10% --port /dev/ttyACM0
-PYTHONPATH=../../tools/python python3 -m wirespaces.led_control 128 --port /dev/ttyACM0
+PYTHONPATH=../../tools/python python3 -m wirespaces.led_control 10% --port /dev/arduino-uno
+PYTHONPATH=../../tools/python python3 -m wirespaces.led_control 128 --port /dev/arduino-uno
 make led-ramp
 ```
 

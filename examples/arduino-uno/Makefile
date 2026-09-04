@@ -26,7 +26,7 @@ UPLOAD_BAUD ?= 115200
 
 WIRESPACES_INCLUDE := $(WIRESPACES_ROOT)/lib
 TOOLCHAIN_COMPAT := $(WIRESPACES_ROOT)/platform/avr/toolchain_compat
-PYTHON_ROOT := $(WIRESPACES_ROOT)/tools/python
+PYTHON_ROOT := $(WIRESPACES_ROOT)/tools
 HARDWARE_TEST_ROOT := $(WIRESPACES_ROOT)/tests/hardware/arduino_uno
 HDLC_TEST_SOURCE := $(WIRESPACES_ROOT)/lib/wirespaces/links/uart_hdlc/test/hdlc_test.cpp
 
@@ -86,7 +86,7 @@ DEPENDENCIES := $(OBJECTS:.o=.d) $(BITS_OBJECTS:.o=.d) $(CAN_OBJECTS:.o=.d) \
 	$(BOOT_PROFILE_RAM_OBJECTS:.o=.d) $(BOOT_PROFILE_SIZE_OBJECTS:.o=.d)
 
 .PHONY: bits-boot-profile-ram bits-boot-profile-size flash-bits-boot-profile \
-	test-bits-boot-profile compile_commands
+	test-bits-boot-profile
 .PHONY: all bits-ram-transfer bits-size clean flash flash-bits flash-mcp2515-can \
 	led-off led-on led-ramp mcp2515-can-test receive size test-bits test-hdlc \
 	test-mcp2515-can test-ping test-receiver test-spi-can test-stack verify \
@@ -265,9 +265,6 @@ verify:
 verify-bits:
 	PYTHONPATH=$(PYTHON_ROOT) python3 -m wirespaces.bits_ram_transfer \
 		--port $(PORT) --baud 115200 --reset
-
-compile_commands:
-	python3 gen_compile_commands.py
 
 clean:
 	rm -rf $(BUILD_DIR)

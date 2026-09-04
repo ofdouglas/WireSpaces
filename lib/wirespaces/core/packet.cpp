@@ -23,6 +23,17 @@ bool PacketBuffer::initialize(uint16_t new_size, ControlFields control_fields) n
     return true;
 }
 
+bool PacketBuffer::initializeResponseTo(const Header& request_header, uint16_t size, ControlFields control_fields) noexcept {
+    if (!initialize(size, control_fields)) {
+        return false;
+    }
+    header_.wire = request_header.wire;
+    header_.source = request_header.destination;
+    header_.destination = request_header.source;
+    header_.endpoint = request_header.endpoint;
+    return true;
+}
+
 MutableByteSpan PacketBuffer::payload() noexcept {
     auto* bytes = reinterpret_cast<uint8_t*>(this) + sizeof(PacketBuffer);
     return MutableByteSpan{bytes, size_};

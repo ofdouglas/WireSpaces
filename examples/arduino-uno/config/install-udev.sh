@@ -18,5 +18,5 @@ sudo udevadm trigger --subsystem-match=tty
 
 echo "Installed ${DEST}"
 echo "Unplug and replug the Arduino, or run: sudo udevadm trigger --subsystem-match=tty"
-echo "Then use /dev/arduino-uno (or /dev/ttyACM0) and ensure your user is in group dialout:"
+echo "Then use /dev/arduino-uno and ensure your user is in group dialout:"
 echo "  sudo usermod -aG dialout \"${USER}\""

@@ -44,8 +44,8 @@ def _send_bits_message(uart: serial.Serial, payload: bytes) -> None:
     packet = WireSpacesPacket(
         control=NORMAL_BITS_CONTROL,
         wire_number=TEST_WIRE,
-        source_participant=PC_HOST,
-        destination_participant=ARDUINO_HOST,
+        source_host=PC_HOST,
+        destination_host=ARDUINO_HOST,
         endpoint=UPLOAD_ENDPOINT,
         payload=payload,
     )
@@ -58,8 +58,8 @@ def _is_profile_packet(packet: WireSpacesPacket) -> bool:
     return (
         packet.transport_type == BITS_TRANSPORT_TYPE
         and packet.wire_number == TEST_WIRE
-        and packet.source_participant == ARDUINO_HOST
-        and packet.destination_participant == PC_HOST
+        and packet.source_host == ARDUINO_HOST
+        and packet.destination_host == PC_HOST
         and packet.endpoint == UPLOAD_ENDPOINT
     )
 
@@ -204,4 +204,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

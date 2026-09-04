@@ -23,7 +23,7 @@ NORMAL_SIMPLE_CONTROL = 0x80
 def parse_arguments() -> argparse.Namespace:
     """Parse hardware-test settings."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", default="/dev/ttyACM0")
+    parser.add_argument("--port", default="/dev/arduino-uno")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--sequence", type=lambda value: int(value, 0), default=0x7E7D)
@@ -41,8 +41,8 @@ def main() -> int:
     request = WireSpacesPacket(
         control=NORMAL_SIMPLE_CONTROL,
         wire_number=1,
-        source_participant=2,
-        destination_participant=1,
+        source_host=2,
+        destination_host=1,
         endpoint=PING_ENDPOINT,
         payload=struct.pack("<BBH", PING_MAGIC, PING_REQUEST, arguments.sequence),
     )
@@ -80,10 +80,8 @@ def main() -> int:
                     )
                     if (
                         packet.wire_number == request.wire_number
-                        and packet.source_participant
-                        == request.destination_participant
-                        and packet.destination_participant
-                        == request.source_participant
+                        and packet.source_host == request.destination_host
+                        and packet.destination_host == request.source_host
                         and packet.endpoint == request.endpoint
                         and magic == PING_MAGIC
                         and message_type == PING_RESPONSE
@@ -91,8 +89,8 @@ def main() -> int:
                     ):
                         print(
                             f"ping response wire={packet.wire_number} "
-                            f"src={packet.source_participant} "
-                            f"dst={packet.destination_participant} "
+                            f"src={packet.source_host} "
+                            f"dst={packet.destination_host} "
                             f"endpoint=0x{packet.endpoint:04X} "
                             f"sequence=0x{sequence:04X}"
                         )

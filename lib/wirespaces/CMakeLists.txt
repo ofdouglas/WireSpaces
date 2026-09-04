@@ -7,6 +7,14 @@ target_include_directories(
     INTERFACE ${WIRESPACES_INCLUDE_ROOT}
 )
 
+add_library(wirespaces_containers INTERFACE)
+add_library(WireSpaces::containers ALIAS wirespaces_containers)
+target_include_directories(
+    wirespaces_containers
+    INTERFACE ${WIRESPACES_INCLUDE_ROOT}
+)
+target_link_libraries(wirespaces_containers INTERFACE WireSpaces::foundation)
+
 add_subdirectory(core)
 
 add_library(wirespaces_crc INTERFACE)
@@ -16,14 +24,6 @@ target_include_directories(
     INTERFACE ${WIRESPACES_INCLUDE_ROOT}
 )
 target_link_libraries(wirespaces_crc INTERFACE WireSpaces::foundation)
-
-add_library(wirespaces_containers INTERFACE)
-add_library(WireSpaces::containers ALIAS wirespaces_containers)
-target_include_directories(
-    wirespaces_containers
-    INTERFACE ${WIRESPACES_INCLUDE_ROOT}
-)
-target_link_libraries(wirespaces_containers INTERFACE WireSpaces::foundation)
 
 add_library(wirespaces_hal INTERFACE)
 add_library(WireSpaces::hal ALIAS wirespaces_hal)
@@ -89,6 +89,30 @@ target_link_libraries(
 )
 
 if(BUILD_TESTING AND WIRESPACES_BUILD_LIBRARY_TESTS)
+    add_executable(
+        wirespaces_containers_tests
+        containers/test/queue_test.cpp
+    )
+    target_link_libraries(
+        wirespaces_containers_tests
+        PRIVATE WireSpaces::containers GTest::gtest_main
+    )
+    wirespaces_configure_host_target(wirespaces_containers_tests)
+
+    include(GoogleTest)
+    gtest_discover_tests(wirespaces_containers_tests)
+
+    add_executable(
+        wirespaces_services_tests
+        services/test/polling_service_test.cpp
+    )
+    target_link_libraries(
+        wirespaces_services_tests
+        PRIVATE WireSpaces::services GTest::gtest_main
+    )
+    wirespaces_configure_host_target(wirespaces_services_tests)
+    gtest_discover_tests(wirespaces_services_tests)
+
     add_executable(
         wirespaces_uart_hdlc_tests
         links/uart_hdlc/test/hdlc_test.cpp

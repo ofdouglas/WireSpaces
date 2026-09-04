@@ -84,6 +84,10 @@ constexpr bool operator!=(EndpointAddress lhs, EndpointAddress rhs) noexcept {
 }
 
 struct ControlFields {
+    static constexpr ControlFields defaultControlFields() noexcept {
+        return ControlFields{QoS::kNormal, false, TransportType::kSimple};
+    }
+
     QoS qos{QoS::kNormal};
     bool has_extensions{false};
     TransportType transport_type{TransportType::kSimple};

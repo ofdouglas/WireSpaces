@@ -87,6 +87,8 @@ void processUartInput(const wirespaces::Dispatcher& dispatcher) {
 
         if ((frame_size >= sizeof(wirespaces::Header)) && (frame_size <= kMaximumCanonicalSize)) {
             UartReceivePacket packet{};
+            static_cast<void>(packet.resize(
+                static_cast<uint16_t>(frame_size - sizeof(wirespaces::Header))));
             std::memcpy(&packet.header(), decoded_frame.data(), frame_size);
             static_cast<void>(dispatcher.dispatch(packet));
         }
@@ -123,8 +125,8 @@ int main() {
 
     // TODO: this should be codegen eventually
     const wirespaces::DispatchTableEntry dispatch_entries[]{
-        {kArduinoHost, kPingEndpoint, &ping_service},
-        {kArduinoHost, kLedControlEndpoint, &led_control_service},
+        {kArduinoHost, kPingEndpoint, &ping_service.receiver()},
+        {kArduinoHost, kLedControlEndpoint, &led_control_service.receiver()},
     };
     const wirespaces::Dispatcher dispatcher{
         wirespaces::foundation::Span<const wirespaces::DispatchTableEntry>{dispatch_entries},
@@ -133,6 +135,8 @@ int main() {
     sei();
     for (;;) {
         processUartInput(dispatcher);
+        ping_service.run();
+        led_control_service.run();
         heartbeat_service.run();
     }
 }

@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <wirespaces/runtime/core.hpp>
@@ -27,39 +28,50 @@ struct PingMessage {
 
 WS_PACKET_BUFFER_DEFINE(PingPacketBuffer, sizeof(PingMessage));
 
-/** Ping request receiver that sends a directed response. */
-class PingService final : public wirespaces::EndpointReceiver {
+/** Poll-driven Ping service that sends a directed response for each queued request. */
+class PingService final {
 public:
+    static constexpr std::size_t kReceiveQueueCapacity{2U};
+    using ReceiverQueue = wirespaces::EndpointReceiverQueue<sizeof(PingMessage),
+                                                            kReceiveQueueCapacity>;
+
     explicit PingService(wirespaces::Router* router) noexcept : router_{router} {}
 
-    wirespaces::ReceiveResult receive(const wirespaces::PacketBuffer& packet) noexcept override {
-        if (router_ == nullptr || packet.size() != sizeof(PingMessage) ||
+    /** @brief Return the receiver registered with the Domain Dispatcher. */
+    [[nodiscard]] wirespaces::EndpointReceiver& receiver() noexcept {
+        return receive_queue_;
+    }
+
+    /** @brief Process every request currently queued for this Service. */
+    void run() noexcept {
+        PingPacketBuffer packet{};
+        while (receive_queue_.dequeue(packet)) {
+            processRequest(packet);
+        }
+    }
+
+private:
+    void processRequest(const wirespaces::PacketBuffer& packet) noexcept {
+        if ((router_ == nullptr) || (packet.size() != sizeof(PingMessage)) ||
             packet.header().destination.isBroadcast()) {
-            return wirespaces::ReceiveResult::kRejected;
+            return;
         }
 
         PingMessage request{};
         std::memcpy(&request, packet.payload().data(), sizeof(request));
-        if (request.magic != PingMessage::kMagic ||
-            request.type != static_cast<uint8_t>(PingMessage::Type::Request)) {
-            return wirespaces::ReceiveResult::kRejected;
+        if ((request.magic != PingMessage::kMagic) ||
+            (request.type != static_cast<uint8_t>(PingMessage::Type::Request))) {
+            return;
         }
 
         sendResponse(packet.header(), request.sequence_number);
-        return wirespaces::ReceiveResult::kAccepted;
     }
 
-private:
     void sendResponse(const wirespaces::Header& request_header, uint16_t sequence_number) noexcept {
         PingPacketBuffer response{};
-        static_cast<void>(response.initialize(
-            sizeof(PingMessage), wirespaces::ControlFields{wirespaces::QoS::kNormal, false,
-                                                           wirespaces::TransportType::kSimple}));
-        response.header().wire = request_header.wire;
-        response.header().source = request_header.destination;
-        response.header().destination = request_header.source;
-        response.header().endpoint = wirespaces::EndpointAddress::from(
-            wirespaces::Namespace::kCommon, WS_SERVICE_PING_ENDPOINT_ID);
+        static_cast<void>(response.initializeResponseTo(request_header,
+                                                        sizeof(PingMessage),
+                                                        wirespaces::ControlFields::defaultControlFields()));
 
         const PingMessage message{
             PingMessage::kMagic,
@@ -71,6 +83,7 @@ private:
     }
 
     wirespaces::Router* router_{nullptr};
+    ReceiverQueue receive_queue_{};
 };
 
 static_assert(sizeof(PingMessage) == 4U);

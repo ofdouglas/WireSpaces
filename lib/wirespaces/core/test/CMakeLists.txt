@@ -1,6 +1,7 @@
 add_executable(
     wirespaces_core_tests
     header_test.cpp
+    endpoint_queue_test.cpp
     mailbox_test.cpp
     packet_test.cpp
     dispatch_test.cpp

@@ -38,6 +38,7 @@ public:
 
     [[nodiscard]] bool resize(uint16_t size) noexcept;
     [[nodiscard]] bool initialize(uint16_t size, ControlFields control_fields) noexcept;
+    [[nodiscard]] bool initializeResponseTo(const Header& request_header, uint16_t size, ControlFields control_fields) noexcept;  
 
     [[nodiscard]] Header& header() noexcept {
         return header_;

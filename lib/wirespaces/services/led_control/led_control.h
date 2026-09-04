@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <wirespaces/runtime/core.hpp>
@@ -29,35 +30,50 @@ struct LedControlMessage {
 
 WS_PACKET_BUFFER_DEFINE(LedControlPacketBuffer, sizeof(LedControlMessage));
 
-/** Directed LED command receiver that acknowledges the applied brightness. */
-class LedControlService final : public wirespaces::EndpointReceiver {
+/** Poll-driven LED command service that acknowledges applied brightness. */
+class LedControlService final {
 public:
     using SetBrightness = void (*)(void* context, uint8_t brightness);
+    static constexpr std::size_t kReceiveQueueCapacity{2U};
+    using ReceiverQueue = wirespaces::EndpointReceiverQueue<sizeof(LedControlMessage),
+                                                            kReceiveQueueCapacity>;
 
     LedControlService(wirespaces::Router* router, SetBrightness set_brightness,
                       void* output_context) noexcept
         : router_{router}, set_brightness_{set_brightness}, output_context_{output_context} {}
 
-    wirespaces::ReceiveResult receive(const wirespaces::PacketBuffer& packet) noexcept override {
+    /** @brief Return the receiver registered with the Domain Dispatcher. */
+    [[nodiscard]] wirespaces::EndpointReceiver& receiver() noexcept {
+        return receive_queue_;
+    }
+
+    /** @brief Process every command currently queued for this Service. */
+    void run() noexcept {
+        LedControlPacketBuffer packet{};
+        while (receive_queue_.dequeue(packet)) {
+            processRequest(packet);
+        }
+    }
+
+private:
+    void processRequest(const wirespaces::PacketBuffer& packet) noexcept {
         if (router_ == nullptr || set_brightness_ == nullptr ||
             packet.size() != sizeof(LedControlMessage) ||
             packet.header().destination.isBroadcast()) {
-            return wirespaces::ReceiveResult::kRejected;
+            return;
         }
 
         LedControlMessage request{};
         std::memcpy(&request, packet.payload().data(), sizeof(request));
         if (request.magic != LedControlMessage::kMagic ||
             request.type != static_cast<uint8_t>(LedControlMessage::Type::Request)) {
-            return wirespaces::ReceiveResult::kRejected;
+            return;
         }
 
         set_brightness_(output_context_, request.brightness);
         sendResponse(packet.header(), request.brightness, request.sequence_number);
-        return wirespaces::ReceiveResult::kAccepted;
     }
 
-private:
     void sendResponse(const wirespaces::Header& request_header, uint8_t brightness,
                       uint8_t sequence_number) noexcept {
         LedControlPacketBuffer response{};
@@ -84,6 +100,7 @@ private:
     wirespaces::Router* router_{nullptr};
     SetBrightness set_brightness_{nullptr};
     void* output_context_{nullptr};
+    ReceiverQueue receive_queue_{};
 };
 
 static_assert(sizeof(LedControlMessage) == 4U);

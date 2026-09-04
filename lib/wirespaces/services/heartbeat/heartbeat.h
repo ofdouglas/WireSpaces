@@ -54,14 +54,8 @@ private:
         const auto now_ms{wirespaces::hal::MillisecondClock::now()};
         HeartbeatPacketBuffer packet{};
         static_cast<void>(
-            packet.initialize(sizeof(HeartbeatMessage),
-                              wirespaces::ControlFields{wirespaces::QoS::kNormal, false,
-                                                        wirespaces::TransportType::kSimple}));
-        packet.header().wire = wire_;
-        packet.header().source = source_host_;
-        packet.header().destination = destination_host_;
-        packet.header().endpoint = wirespaces::EndpointAddress::from(
-            wirespaces::Namespace::kCommon, WS_SERVICE_HEARTBEAT_ENDPOINT_ID);
+            packet.initializeResponseTo(packet.header(), sizeof(HeartbeatMessage),
+                                        wirespaces::ControlFields::defaultControlFields()));
         std::memcpy(packet.payload().data(), &now_ms, sizeof(now_ms));
 
         if (router_->forward(packet) != wirespaces::RouteResult::kForwarded) {

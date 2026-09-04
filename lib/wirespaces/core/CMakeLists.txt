@@ -20,7 +20,7 @@ target_include_directories(
 
 target_link_libraries(
     wirespaces_core
-    PUBLIC WireSpaces::foundation
+    PUBLIC WireSpaces::containers WireSpaces::foundation
 )
 
 if(MSVC)

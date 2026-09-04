@@ -82,8 +82,8 @@ def main() -> int:
     request = WireSpacesPacket(
         control=NORMAL_SIMPLE_CONTROL,
         wire_number=1,
-        source_participant=2,
-        destination_participant=1,
+        source_host=2,
+        destination_host=1,
         endpoint=LED_ENDPOINT,
         payload=struct.pack(
             "<BBBB",
@@ -119,10 +119,10 @@ def main() -> int:
                             "<BBBB", packet.payload
                         )
                         if (
-                            packet.source_participant
-                            == request.destination_participant
-                            and packet.destination_participant
-                            == request.source_participant
+                            packet.source_host
+                            == request.destination_host
+                            and packet.destination_host
+                            == request.source_host
                             and magic == LED_MAGIC
                             and message_type == LED_RESPONSE
                             and brightness == requested_brightness
@@ -133,7 +133,7 @@ def main() -> int:
                             print(
                                 f"LED brightness {brightness}/255 "
                                 f"({percentage:.1f}%) acknowledged "
-                                f"by Participant {packet.source_participant} "
+                                f"by Participant {packet.source_host} "
                                 f"sequence=0x{sequence:02X}"
                             )
                             if not arguments.wait_stack_report:

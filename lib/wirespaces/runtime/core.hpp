@@ -6,6 +6,7 @@
 #pragma once
 
 #include <wirespaces/core/dispatch.h>
+#include <wirespaces/core/endpoint_queue.h>
 #include <wirespaces/core/header.h>
 #include <wirespaces/core/host.h>
 #include <wirespaces/core/local_domain.h>

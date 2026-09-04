@@ -35,8 +35,8 @@ class WireSpacesPacket:
 
     control: int
     wire_number: int
-    source_participant: int
-    destination_participant: int
+    source_host: int
+    destination_host: int
     endpoint: int
     payload: bytes
 
@@ -79,8 +79,8 @@ class WireSpacesPacket:
         return cls(
             control=control,
             wire_number=wire,
-            source_participant=source,
-            destination_participant=destination,
+            source_host=source,
+            destination_host=destination,
             endpoint=endpoint,
             payload=frame[HEADER_SIZE:],
         )
@@ -91,8 +91,8 @@ class WireSpacesPacket:
             HEADER_FORMAT,
             self.control,
             self.wire_number,
-            self.source_participant,
-            self.destination_participant,
+            self.source_host,
+            self.destination_host,
             self.endpoint,
         ) + self.payload
 
@@ -188,13 +188,13 @@ def format_packet(packet: WireSpacesPacket) -> str:
     namespace = NAMESPACE_NAMES[packet.namespace]
     destination = (
         "broadcast"
-        if packet.destination_participant == 0xFF
-        else str(packet.destination_participant)
+        if packet.destination_host == 0xFF
+        else str(packet.destination_host)
     )
     payload = packet.payload.hex(" ") if packet.payload else "-"
     return (
         f"WS packet wire={packet.wire_number} "
-        f"src={packet.source_participant} dst={destination} "
+        f"src={packet.source_host} dst={destination} "
         f"qos={qos} transport={packet.transport_type} "
         f"extensions={str(packet.has_extensions).lower()} "
         f"namespace={namespace} endpoint={packet.endpoint_id} "

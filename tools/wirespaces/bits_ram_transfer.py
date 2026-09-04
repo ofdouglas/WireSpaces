@@ -518,8 +518,8 @@ def _send_bits_message(
     packet = WireSpacesPacket(
         control=control,
         wire_number=TEST_WIRE,
-        source_participant=PC_HOST,
-        destination_participant=ARDUINO_HOST,
+        source_host=PC_HOST,
+        destination_host=ARDUINO_HOST,
         endpoint=endpoint,
         payload=payload,
     )
@@ -563,8 +563,8 @@ def round_trip(
             if (
                 packet.transport_type != BITS_TRANSPORT_TYPE
                 or packet.wire_number != TEST_WIRE
-                or packet.source_participant != ARDUINO_HOST
-                or packet.destination_participant != PC_HOST
+                or packet.source_host != ARDUINO_HOST
+                or packet.destination_host != PC_HOST
             ):
                 continue
 

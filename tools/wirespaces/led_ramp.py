@@ -39,8 +39,8 @@ def set_brightness(
     request = WireSpacesPacket(
         control=NORMAL_SIMPLE_CONTROL,
         wire_number=1,
-        source_participant=2,
-        destination_participant=1,
+        source_host=2,
+        destination_host=1,
         endpoint=LED_ENDPOINT,
         payload=struct.pack(
             "<BBBB",
@@ -73,8 +73,8 @@ def set_brightness(
                 "<BBBB", packet.payload
             )
             if (
-                packet.source_participant == 1
-                and packet.destination_participant == 2
+                packet.source_host == 1
+                and packet.destination_host == 2
                 and magic == LED_MAGIC
                 and message_type == LED_RESPONSE
                 and applied == brightness

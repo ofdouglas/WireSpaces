@@ -23,11 +23,17 @@ using MutableByteSpan = foundation::Span<uint8_t>;
  */
 class alignas(4) PacketBuffer {
 public:
+    // Payload capacity.
     [[nodiscard]] uint16_t capacity() const noexcept {
         return capacity_;
     }
+    // Size of the payload.
     [[nodiscard]] uint16_t size() const noexcept {
         return size_;
+    }
+    // Size of the packet including the header.
+    [[nodiscard]] uint16_t totalSize() const noexcept {
+        return size_ + sizeof(Header);
     }
 
     [[nodiscard]] bool resize(uint16_t size) noexcept;
@@ -42,6 +48,7 @@ public:
 
     [[nodiscard]] MutableByteSpan payload() noexcept;
     [[nodiscard]] ByteSpan payload() const noexcept;
+    [[nodiscard]] ByteSpan headerAndPayload() const noexcept;
 
 protected:
     explicit constexpr PacketBuffer(uint16_t capacity) noexcept : capacity_{capacity} {}

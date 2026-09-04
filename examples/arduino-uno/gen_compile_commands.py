@@ -47,6 +47,7 @@ def compile_entry(source: Path, cppflags: str, cxxflags: str) -> dict[str, str]:
 def main() -> None:
     entries = [
         compile_entry(ARDUINO_DIR / "main.cpp", BASE_CPPFLAGS, BASE_CXXFLAGS),
+        compile_entry(ARDUINO_DIR / "bsp.cpp", BASE_CPPFLAGS, BASE_CXXFLAGS),
         compile_entry(
             ARDUINO_DIR / "bits_ram_transfer.cpp", BASE_CPPFLAGS, BASE_CXXFLAGS
         ),

@@ -33,4 +33,8 @@ ByteSpan PacketBuffer::payload() const noexcept {
     return ByteSpan{bytes, size_};
 }
 
+ByteSpan PacketBuffer::headerAndPayload() const noexcept {
+    return ByteSpan{reinterpret_cast<const uint8_t*>(&header()), totalSize()};
+}
+
 }  // namespace wirespaces

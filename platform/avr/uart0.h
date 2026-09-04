@@ -7,6 +7,8 @@
 
 #include <avr/io.h>
 
+#include <wirespaces/foundation/span.h>
+
 #include <cstdint>
 
 namespace wirespaces::platform::avr {
@@ -38,6 +40,17 @@ inline void uart0WriteByte(std::uint8_t byte) noexcept {
     }
 
     UDR0 = byte;
+}
+
+/**
+ * @brief Send a span of Bytes, blocking.
+ *
+ * @param[in] data Span of bytes to send.
+ */
+inline void uart0WriteSpan(wirespaces::foundation::Span<const uint8_t> data) noexcept {
+    for (const auto byte : data) {
+        uart0WriteByte(byte);
+    }
 }
 
 /**

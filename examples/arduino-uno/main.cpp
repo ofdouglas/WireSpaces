@@ -1,16 +1,12 @@
 #include <avr/interrupt.h>
-#include <platform/avr/builtin_led.h>
-#include <platform/avr/mcp2515.h>
-#include <platform/avr/millisecond_clock.h>
-#include <platform/avr/spi0.h>
-#include <platform/avr/stack_monitor.h>
+#include <platform/avr/init.h>
 #include <platform/avr/uart0.h>
+#include <platform/avr/stack_monitor.h>
 #include <wirespaces/links/uart_hdlc/decoder.h>
 #include <wirespaces/links/uart_hdlc/encoder.h>
 #include <wirespaces/services/heartbeat/heartbeat.h>
 #include <wirespaces/services/led_control/led_control.h>
 #include <wirespaces/services/ping/ping.h>
-#include <wirespaces/services/stack_report/stack_report.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -19,17 +15,20 @@
 
 namespace {
 
-constexpr std::uint32_t kBaudRate{115200UL};
+// TODO: these should be codegen eventually
 constexpr wirespaces::WireNumber kHeartbeatWire{1U};
 constexpr wirespaces::HostId kArduinoHost{1U};
 constexpr std::uint8_t kUartEgress{1U};
-constexpr std::uint16_t kStackScanIterationPeriod{4096U};
+
 constexpr std::size_t kMaximumPayloadSize{4U};
 constexpr std::size_t kMaximumCanonicalSize{sizeof(wirespaces::Header) + kMaximumPayloadSize};
 constexpr std::size_t kHdlcCrcSize{2U};
 constexpr std::size_t kMaximumFrameCapacity{(kMaximumCanonicalSize + kHdlcCrcSize) * 2U + 2U};
+
+// TODO: these should be codegen eventually
 constexpr wirespaces::EndpointAddress kPingEndpoint{
     wirespaces::EndpointAddress::from(wirespaces::Namespace::kCommon, WS_SERVICE_PING_ENDPOINT_ID)};
+
 constexpr wirespaces::EndpointAddress kLedControlEndpoint{wirespaces::EndpointAddress::from(
     wirespaces::Namespace::kCommon, WS_SERVICE_LED_CONTROL_ENDPOINT_ID)};
 
@@ -39,17 +38,13 @@ const wirespaces::RouteTableEntry route_entries[]{
 const wirespaces::HostInfo kHostInfo{kArduinoHost, 1U, {kHeartbeatWire}};
 
 
-
 WS_PACKET_BUFFER_DEFINE(UartReceivePacket, kMaximumPayloadSize);
 
 wirespaces::links::uart_hdlc::HdlcDecoder<kMaximumCanonicalSize> g_hdlc_decoder{};
 
 
 /**
- * @brief Project a canonical WireSpaces PDU onto the UART HDLC Link.
- *
- * The local packet capacity fields are not transmitted. This first-stage Link
- * sends the six-byte canonical header followed by the active payload.
+ * @brief Send a packet via the UART HDLC Link.
  */
 class UartForwarder final : public wirespaces::PacketForwarder {
 public:
@@ -60,20 +55,16 @@ public:
             return;
         }
 
-        const std::size_t canonical_size{sizeof(packet.header()) + packet.size()};
-        const auto* canonical_bytes{reinterpret_cast<const std::uint8_t*>(&packet.header())};
-
         std::uint8_t frame_storage[kMaximumFrameCapacity]{};
         const std::size_t frame_size{wirespaces::links::uart_hdlc::HdlcEncoder::encode(
-            wirespaces::foundation::Span<const std::uint8_t>{canonical_bytes, canonical_size},
+            packet.headerAndPayload(),
             frame_storage)};
         if (frame_size == 0U) {
             return;
         }
 
-        for (std::size_t index{0U}; index < frame_size; ++index) {
-            wirespaces::platform::avr::uart0WriteByte(frame_storage[index]);
-        }
+        wirespaces::platform::avr::uart0WriteSpan(
+            wirespaces::foundation::Span<const uint8_t>{frame_storage, frame_size});
     }
 };
 
@@ -93,14 +84,10 @@ void processUartInput(const wirespaces::Dispatcher& dispatcher) {
 
         const auto decoded_frame{g_hdlc_decoder.frame()};
         const std::size_t frame_size{decoded_frame.size()};
+
         if ((frame_size >= sizeof(wirespaces::Header)) && (frame_size <= kMaximumCanonicalSize)) {
             UartReceivePacket packet{};
-            const auto payload_size{
-                static_cast<std::uint16_t>(frame_size - sizeof(wirespaces::Header))};
-            static_cast<void>(packet.resize(payload_size));
-            std::memcpy(&packet.header(), decoded_frame.data(), sizeof(packet.header()));
-            std::memcpy(packet.payload().data(), decoded_frame.data() + sizeof(packet.header()),
-                        packet.size());
+            std::memcpy(&packet.header(), decoded_frame.data(), frame_size);
             static_cast<void>(dispatcher.dispatch(packet));
         }
         g_hdlc_decoder.consume();
@@ -110,15 +97,8 @@ void processUartInput(const wirespaces::Dispatcher& dispatcher) {
 }  // namespace
 
 
-
 int main() {
-    wirespaces::platform::avr::StackMonitor stack_monitor{};
-    stack_monitor.initialize();
-
-    wirespaces::platform::avr::uart0Init(kBaudRate);
-    wirespaces::platform::avr::spi0Init();
-    wirespaces::platform::avr::millisecondClockInit();
-    wirespaces::platform::avr::builtinLedInit();
+    wirespaces::platform::avr::initialize(115200UL);
 
     UartForwarder uart_forwarder{};
     wirespaces::Router router{
@@ -129,12 +109,6 @@ int main() {
     wirespaces::setLocalHostInfo(kHostInfo);
 
     heartbeat::HeartbeatService<1000U> heartbeat_service{
-        &router,
-        kHeartbeatWire,
-        kArduinoHost,
-        wirespaces::HostId{wirespaces::kBroadcastHostValue},
-    };
-    stack_report::StackReportService<1000U> stack_report_service{
         &router,
         kHeartbeatWire,
         kArduinoHost,
@@ -157,15 +131,8 @@ int main() {
     };
 
     sei();
-    std::uint16_t loop_iteration{0U};
     for (;;) {
         processUartInput(dispatcher);
         heartbeat_service.run();
-        stack_report_service.run(stack_monitor.peakUsedBytes(), stack_monitor.capacityBytes());
-
-        loop_iteration = static_cast<std::uint16_t>(loop_iteration + 1U);
-        if ((loop_iteration % kStackScanIterationPeriod) == 0U) {
-            stack_monitor.scan();
-        }
     }
 }

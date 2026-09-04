@@ -7,3 +7,11 @@ build/
 *.hex
 *.map
 *.lst
+**/.cache/
+*.pyc
+
+
+
+# Generated editor metadata
+compile_commands.json
+examples/arduino-uno/compile_commands.json

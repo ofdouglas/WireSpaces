@@ -18,7 +18,7 @@ protected:
     void SetUp() override {
         DefaultHostFixture::SetUp();
         recorder_.reset();
-        dispatch_entry_ = DispatchTableEntry{kLocalHostId, kReceiverEndpoint, &recorder_};
+        dispatch_entry_ = DispatchTableEntry{kReceiverEndpoint, &recorder_};
         route_entry_ = RouteTableEntry{kLocalWire, kNoEgress};
     }
 

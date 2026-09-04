@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <wirespaces/core/host.h>
 #include <wirespaces/transports/bits/bits.h>
 
 #include <gtest/gtest.h>
@@ -26,10 +27,18 @@ constexpr uint16_t kTestPacketCapacity{64U};
 
 WS_PACKET_BUFFER_DEFINE(TestPacket, kTestPacketCapacity);
 
+/** @brief Select the simulated host receiving the next dispatched packet. */
+inline void selectLocalHost(HostId host) noexcept {
+    setLocalHostInfo(HostInfo{host, 1U, {kTestWire}});
+}
+
 /** @brief Forwards, drops, or holds packets synchronously before a peer Dispatcher. */
 class DispatchForwarder final : public PacketForwarder {
 public:
-    void setTarget(Dispatcher& target) noexcept { target_ = &target; }
+    void setTarget(Dispatcher& target, HostId target_host) noexcept {
+        target_ = &target;
+        target_host_ = target_host;
+    }
 
     void dropNext(MessageType type, uint8_t count = 1U) noexcept {
         drop_type_ = type;
@@ -42,6 +51,7 @@ public:
         if (!held_ || target_ == nullptr) {
             return false;
         }
+        selectLocalHost(target_host_);
         last_result_ = target_->dispatch(held_packet_);
         held_ = false;
         return true;
@@ -67,6 +77,7 @@ public:
             return;
         }
         if (target_ != nullptr) {
+            selectLocalHost(target_host_);
             last_result_ = target_->dispatch(packet);
         }
     }
@@ -90,6 +101,7 @@ private:
     }
 
     Dispatcher* target_{nullptr};
+    HostId target_host_{};
     DispatchResult last_result_{DispatchResult::kNoEndpoint};
     std::array<uint32_t, 7U> message_counts_{};
     MessageType drop_type_{MessageType::kSetup};
@@ -174,8 +186,8 @@ private:
 class BitsConnectionFixture : public ::testing::Test {
 protected:
     void SetUp() override {
-        transmitter_forwarder_.setTarget(receiver_dispatcher_);
-        receiver_forwarder_.setTarget(transmitter_dispatcher_);
+        transmitter_forwarder_.setTarget(receiver_dispatcher_, kReceiverHost);
+        receiver_forwarder_.setTarget(transmitter_dispatcher_, kTransmitterHost);
     }
 
     [[nodiscard]] bool pumpUntilTerminal(uint16_t maximum_iterations = 128U) {
@@ -206,6 +218,7 @@ protected:
         packet.header().destination = kTransmitterHost;
         packet.header().endpoint = kTestEndpoint;
         EXPECT_TRUE(encodeAck(ack, packet.payload()));
+        selectLocalHost(kTransmitterHost);
         return transmitter_dispatcher_.dispatch(packet);
     }
 
@@ -220,6 +233,7 @@ protected:
         packet.header().destination = kReceiverHost;
         packet.header().endpoint = kTestEndpoint;
         EXPECT_TRUE(encodeSetup(setup, packet.payload()));
+        selectLocalHost(kReceiverHost);
         return receiver_dispatcher_.dispatch(packet);
     }
 
@@ -233,6 +247,7 @@ protected:
         packet.header().destination = kTransmitterHost;
         packet.header().endpoint = kTestEndpoint;
         EXPECT_TRUE(encodeReject(reject, packet.payload()));
+        selectLocalHost(kTransmitterHost);
         return transmitter_dispatcher_.dispatch(packet);
     }
 
@@ -277,8 +292,8 @@ protected:
                                 transmitter_callbacks_, transmitter_datagram_ingress_,
                                 transmitter_transmit_packet_};
 
-    DispatchTableEntry receiver_entry_{kReceiverHost, kTestEndpoint, &receiver_};
-    DispatchTableEntry transmitter_entry_{kTransmitterHost, kTestEndpoint, &transmitter_};
+    DispatchTableEntry receiver_entry_{kTestEndpoint, &receiver_};
+    DispatchTableEntry transmitter_entry_{kTestEndpoint, &transmitter_};
     Dispatcher receiver_dispatcher_{
         foundation::Span<const DispatchTableEntry>{&receiver_entry_, 1U}};
     Dispatcher transmitter_dispatcher_{

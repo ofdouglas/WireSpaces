@@ -46,11 +46,10 @@ protected:
         recorder_.reset();
     }
 
-    void registerEndpoint(
-        EndpointAddress endpoint,
-        EndpointReceiver& receiver,
-        HostId host = kLocalHostId) {
-        dispatch_entries_[entry_count_] = DispatchTableEntry{host, endpoint, &receiver};
+    void registerEndpoint(EndpointAddress endpoint,
+                          EndpointReceiver& receiver) {
+        dispatch_entries_[entry_count_] =
+            DispatchTableEntry{endpoint, &receiver};
         ++entry_count_;
     }
 

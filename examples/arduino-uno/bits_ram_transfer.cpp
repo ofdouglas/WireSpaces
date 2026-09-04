@@ -19,63 +19,56 @@
 
 namespace {
 
+namespace bits = wirespaces::transport::bits;
+
 constexpr std::uint16_t kMaximumObjectSize{256U};
 constexpr std::uint16_t kSegmentPayloadSize{24U};
-constexpr std::uint16_t kMaximumBitsPayloadSize{
-    wirespaces::transport::bits::kSegmentHeaderSize + kSegmentPayloadSize};
+constexpr std::uint16_t kMaximumBitsPayloadSize{bits::kSegmentHeaderSize + kSegmentPayloadSize};
 
-static_assert(kMaximumBitsPayloadSize >= wirespaces::transport::bits::kSetupSize,
-              "BITS packet storage must hold SETUP");
-static_assert(kMaximumBitsPayloadSize >= wirespaces::transport::bits::kAckSize,
-              "BITS packet storage must hold ACK");
+constexpr bits::ConnectionConfig kUploadConnection{
+    wiring_constants::kTestWire, wiring_constants::kArduinoHost, wiring_constants::kPcHost,
+    wiring_constants::kBitsUploadEndpoint};
+
+constexpr bits::ConnectionConfig kEchoConnection{
+    wiring_constants::kTestWire, wiring_constants::kArduinoHost, wiring_constants::kPcHost,
+    wiring_constants::kBitsEchoEndpoint};
+    
+constexpr bits::TimingConfig kTransferTiming{100U, 250U, 5U};
+
+static_assert(kMaximumBitsPayloadSize >= bits::kSetupSize, "BITS packet storage must hold SETUP");
+static_assert(kMaximumBitsPayloadSize >= bits::kAckSize, "BITS packet storage must hold ACK");
 
 WS_PACKET_BUFFER_DEFINE(BitsPacket, kMaximumBitsPayloadSize);
 
-BitsPacket g_receiver_segment_packet_0{};
-BitsPacket g_receiver_segment_packet_1{};
-wirespaces::PacketBuffer* g_receiver_segment_slots[]{
-    &g_receiver_segment_packet_0,
-    &g_receiver_segment_packet_1,
-};
-BitsPacket g_receiver_datagram_packet{};
-BitsPacket g_receiver_transmit_packet{};
-BitsPacket g_transmitter_datagram_packet{};
-BitsPacket g_transmitter_transmit_packet{};
-std::uint8_t g_receive_object[kMaximumObjectSize]{};
-std::uint8_t g_echo_object[kMaximumObjectSize]{};
+using UartForwarder = wirespaces::examples::arduino_uno::UartHdlcForwarder<kMaximumBitsPayloadSize>;
+using UartReceiver = wirespaces::examples::arduino_uno::UartHdlcReceiver<BitsPacket>;
+using PacketBuffer = wirespaces::PacketBuffer;
+using PacketSlotSpan = wirespaces::foundation::Span<wirespaces::PacketBuffer*>;
+using RouteSpan = wirespaces::foundation::Span<const wirespaces::RouteTableEntry>;
+using DispatchSpan = wirespaces::foundation::Span<const wirespaces::DispatchTableEntry>;
 
 /**
  * @brief Store one complete incoming BITS object in fixed application RAM.
  */
-class RamReceiverCallbacks final
-    : public wirespaces::transport::bits::ReceiverCallbacks {
+class RamReceiverCallbacks final : public bits::ReceiverCallbacks {
 public:
-    explicit RamReceiverCallbacks(
-        wirespaces::MutableByteSpan storage) noexcept
-        : storage_{storage} {}
+    explicit RamReceiverCallbacks(wirespaces::MutableByteSpan storage) noexcept : storage_{storage} {}
 
-    bool onSegment(std::uint32_t object_offset,
-                   wirespaces::ByteSpan payload) noexcept override {
+    bool onSegment(std::uint32_t object_offset, wirespaces::ByteSpan payload) noexcept override {
         if ((object_offset + payload.size()) > storage_.size()) {
             return false;
         }
-        std::memcpy(storage_.data() + object_offset, payload.data(),
-                    payload.size());
-        const std::uint16_t segment_end{
-            static_cast<std::uint16_t>(object_offset + payload.size())};
+        std::memcpy(storage_.data() + object_offset, payload.data(), payload.size());
+        const auto segment_end{static_cast<std::uint16_t>(object_offset + payload.size())};
         if (segment_end > received_size_) {
             received_size_ = segment_end;
         }
         return true;
     }
 
-    void onDatagram(wirespaces::ByteSpan payload) noexcept override {
-        (void)payload;
-    }
+    void onDatagram(wirespaces::ByteSpan payload) noexcept override { (void)payload; }
 
-    void onTransferComplete() noexcept override {
-        object_complete_ = true;
-    }
+    void onTransferComplete() noexcept override { object_complete_ = true; }
 
     void onTransferAborted() noexcept override {
         received_size_ = 0U;
@@ -87,9 +80,8 @@ public:
     }
 
     [[nodiscard]] wirespaces::ByteSpan completedObject() const noexcept {
-        return object_complete_
-                   ? wirespaces::ByteSpan{storage_.data(), received_size_}
-                   : wirespaces::ByteSpan{};
+        return object_complete_ ? wirespaces::ByteSpan{storage_.data(), received_size_}
+                                : wirespaces::ByteSpan{};
     }
 
     void releaseCompletedObject() noexcept {
@@ -106,117 +98,113 @@ private:
 /**
  * @brief Record terminal transmitter events without adding a test-control protocol.
  */
-class RamTransmitterCallbacks final
-    : public wirespaces::transport::bits::TransmitterCallbacks {
+class RamTransmitterCallbacks final : public bits::TransmitterCallbacks {
 public:
-    void onDatagram(wirespaces::ByteSpan payload) noexcept override {
-        (void)payload;
-    }
+    void onDatagram(wirespaces::ByteSpan payload) noexcept override { (void)payload; }
 
     void onTransferComplete() noexcept override {}
 
-    void onTransferRejected(
-        wirespaces::transport::bits::RejectReason reason) noexcept override {
+    void onTransferRejected(bits::RejectReason reason) noexcept override {
         (void)reason;
     }
 
     void onTransferAborted() noexcept override {}
 };
 
-[[nodiscard]] bool transmitterBusy(
-    wirespaces::transport::bits::TransferState state) noexcept {
-    return state == wirespaces::transport::bits::TransferState::kStarting ||
-           state == wirespaces::transport::bits::TransferState::kActive;
+[[nodiscard]] bool transmitterBusy(bits::TransferState state) noexcept {
+    return state == bits::TransferState::kStarting || state == bits::TransferState::kActive;
+}
+
+/**
+ * @brief Own and poll the complete RAM-backed Compact BITS loopback image.
+ *
+ * All fixed-capacity packet and object storage is held by this application so
+ * its RAM cost and lifetime are visible at the composition boundary.
+ */
+class BitsRamTransferApplication final {
+public:
+    BitsRamTransferApplication() noexcept = default;
+    BitsRamTransferApplication(const BitsRamTransferApplication&) = delete;
+    BitsRamTransferApplication(BitsRamTransferApplication&&) = delete;
+    BitsRamTransferApplication& operator=(const BitsRamTransferApplication&) = delete;
+    BitsRamTransferApplication& operator=(BitsRamTransferApplication&&) = delete;
+
+    /** @brief Initialize target peripherals and process-wide host identity. */
+    void initialize() noexcept;
+
+    /** @brief Poll ingress and advance both Compact BITS roles once. */
+    void runOnce() noexcept;
+
+private:
+    /** @brief Copy a completed receive object into stable storage and begin its echo transfer. */
+    void startEcho(wirespaces::ByteSpan received_object) noexcept;
+
+    BitsPacket segment_packets_[2U]{};
+    PacketBuffer* segment_slots_[2U]{&segment_packets_[0], &segment_packets_[1]};
+    BitsPacket receiver_datagram_packet_{};
+    BitsPacket receiver_transmit_packet_{};
+    BitsPacket transmitter_datagram_packet_{};
+    BitsPacket transmitter_transmit_packet_{};
+    std::uint8_t receive_object_[kMaximumObjectSize]{};
+    std::uint8_t echo_storage_[kMaximumObjectSize]{};
+
+    UartForwarder uart_forwarder_{};
+    UartReceiver uart_receiver_{};
+    wirespaces::Router router_{RouteSpan{&wiring_constants::kUartRoute, 1U}, uart_forwarder_};
+    RamReceiverCallbacks receiver_callbacks_{wirespaces::MutableByteSpan{receive_object_}};
+    RamTransmitterCallbacks transmitter_callbacks_{};
+    bits::BitsReceiver receiver_{kUploadConnection, router_, receiver_callbacks_,
+                                PacketSlotSpan{segment_slots_}, receiver_datagram_packet_,
+                                receiver_transmit_packet_};
+    bits::BitsTransmitter transmitter_{kEchoConnection, kTransferTiming, router_, transmitter_callbacks_,
+                                      transmitter_datagram_packet_, transmitter_transmit_packet_};
+    wirespaces::DispatchTableEntry dispatch_entries_[2U]{
+        {wiring_constants::kBitsUploadEndpoint, &receiver_},
+        {wiring_constants::kBitsEchoEndpoint, &transmitter_}};
+    wirespaces::Dispatcher dispatcher_{DispatchSpan{dispatch_entries_}};
+    std::uint8_t session_id_{0x80U};
+};
+
+// --- BitsRamTransferApplication implementations ---
+
+void BitsRamTransferApplication::initialize() noexcept {
+    wirespaces::platform::avr::uart0Init(wiring_constants::kUartBaudRate);
+    wirespaces::platform::avr::millisecondClockInit();
+    wirespaces::setLocalHostInfo(wiring_constants::kArduinoHostInfo);
+}
+
+void BitsRamTransferApplication::runOnce() noexcept {
+    uart_receiver_.process(dispatcher_);
+    (void)receiver_.process();
+
+    if (receiver_callbacks_.hasCompletedObject() && !transmitterBusy(transmitter_.state())) {
+        startEcho(receiver_callbacks_.completedObject());
+    }
+
+    (void)transmitter_.process(wirespaces::hal::MillisecondClock::now());
+}
+
+void BitsRamTransferApplication::startEcho(wirespaces::ByteSpan received_object) noexcept {
+    std::memcpy(echo_storage_, received_object.data(), received_object.size());
+
+    const wirespaces::ByteSpan echo{echo_storage_, received_object.size()};
+    const auto sequence{static_cast<std::uint8_t>(wirespaces::hal::MillisecondClock::now())};
+    const auto result{transmitter_.startTransfer(echo, kSegmentPayloadSize, session_id_, sequence)};
+    if (result != bits::StartResult::kStarted) {
+        return;
+    }
+
+    receiver_callbacks_.releaseCompletedObject();
+    session_id_ = static_cast<std::uint8_t>(session_id_ + 1U);
 }
 
 }  // namespace
 
 int main() {
-    wirespaces::platform::avr::uart0Init(wiring_constants::kUartBaudRate);
-    wirespaces::platform::avr::millisecondClockInit();
-
-    wirespaces::examples::arduino_uno::UartHdlcForwarder<
-        kMaximumBitsPayloadSize>
-        uart_forwarder{};
-    wirespaces::examples::arduino_uno::UartHdlcReceiver<BitsPacket>
-        uart_receiver{};
-    wirespaces::Router router{
-        wirespaces::foundation::Span<const wirespaces::RouteTableEntry>{
-            &wiring_constants::kUartRoute, 1U},
-        uart_forwarder,
-    };
-    wirespaces::setLocalHostInfo(wiring_constants::kArduinoHostInfo);
-
-    RamReceiverCallbacks receiver_callbacks{
-        wirespaces::MutableByteSpan{g_receive_object}};
-    RamTransmitterCallbacks transmitter_callbacks{};
-
-    const wirespaces::transport::bits::ConnectionConfig receiver_connection{
-        wiring_constants::kTestWire, wiring_constants::kArduinoHost,
-        wiring_constants::kPcHost, wiring_constants::kBitsUploadEndpoint};
-    const wirespaces::transport::bits::ConnectionConfig transmitter_connection{
-        wiring_constants::kTestWire, wiring_constants::kArduinoHost,
-        wiring_constants::kPcHost, wiring_constants::kBitsEchoEndpoint};
-    const wirespaces::transport::bits::TimingConfig timing{
-        100U,
-        250U,
-        5U,
-    };
-    wirespaces::transport::bits::BitsReceiver receiver{
-        receiver_connection,
-        router,
-        receiver_callbacks,
-        wirespaces::foundation::Span<wirespaces::PacketBuffer*>{
-            g_receiver_segment_slots},
-        g_receiver_datagram_packet,
-        g_receiver_transmit_packet,
-    };
-    wirespaces::transport::bits::BitsTransmitter transmitter{
-        transmitter_connection,
-        timing,
-        router,
-        transmitter_callbacks,
-        g_transmitter_datagram_packet,
-        g_transmitter_transmit_packet,
-    };
-    const wirespaces::DispatchTableEntry dispatch_entries[]{
-        {wiring_constants::kArduinoHost, wiring_constants::kBitsUploadEndpoint,
-         &receiver},
-        {wiring_constants::kArduinoHost, wiring_constants::kBitsEchoEndpoint,
-         &transmitter},
-    };
-    const wirespaces::Dispatcher dispatcher{
-        wirespaces::foundation::Span<const wirespaces::DispatchTableEntry>{
-            dispatch_entries},
-    };
-
-    std::uint8_t echo_session_id{0x80U};
+    static BitsRamTransferApplication application{};
+    application.initialize();
     sei();
     for (;;) {
-        uart_receiver.process(dispatcher);
-        (void)receiver.process();
-
-        if (receiver_callbacks.hasCompletedObject() &&
-            !transmitterBusy(transmitter.state())) {
-            const wirespaces::ByteSpan received_object{
-                receiver_callbacks.completedObject()};
-            std::memcpy(g_echo_object, received_object.data(),
-                        received_object.size());
-            const auto start_result{transmitter.startTransfer(
-                wirespaces::ByteSpan{g_echo_object, received_object.size()},
-                kSegmentPayloadSize,
-                echo_session_id,
-                static_cast<std::uint8_t>(
-                    wirespaces::hal::MillisecondClock::now()))};
-            if (start_result ==
-                wirespaces::transport::bits::StartResult::kStarted) {
-                receiver_callbacks.releaseCompletedObject();
-                echo_session_id =
-                    static_cast<std::uint8_t>(echo_session_id + 1U);
-            }
-        }
-
-        (void)transmitter.process(
-            wirespaces::hal::MillisecondClock::now());
+        application.runOnce();
     }
 }

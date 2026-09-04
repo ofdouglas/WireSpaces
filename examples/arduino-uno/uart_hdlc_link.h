@@ -24,15 +24,12 @@ namespace wirespaces::examples::arduino_uno {
 template <std::size_t kMaximumPayloadSize>
 class UartHdlcForwarder final : public PacketForwarder {
 public:
-    void forward(const PacketBuffer& packet,
-                 EgressSet egress_set) noexcept override;
+    void forward(const PacketBuffer& packet, EgressSet egress_set) noexcept override;
 
 private:
-    static constexpr std::size_t kMaximumCanonicalSize{
-        sizeof(Header) + kMaximumPayloadSize};
+    static constexpr std::size_t kMaximumCanonicalSize{sizeof(Header) + kMaximumPayloadSize};
     static constexpr std::size_t kHdlcCrcSize{2U};
-    static constexpr std::size_t kMaximumFrameCapacity{
-        (kMaximumCanonicalSize + kHdlcCrcSize) * 2U + 2U};
+    static constexpr std::size_t kMaximumFrameCapacity{(kMaximumCanonicalSize + kHdlcCrcSize) * 2U + 2U};
 };
 
 /**
@@ -47,8 +44,7 @@ public:
     void process(const Dispatcher& dispatcher) noexcept;
 
 private:
-    static constexpr std::size_t kMaximumCanonicalSize{
-        sizeof(Header) + PacketBufferType::kPayloadCapacity};
+    static constexpr std::size_t kMaximumCanonicalSize{sizeof(Header) + PacketBufferType::kPayloadCapacity};
 
     links::uart_hdlc::HdlcDecoder<kMaximumCanonicalSize> decoder_{};
 };
@@ -56,16 +52,14 @@ private:
 // --- UartHdlcForwarder implementations ---
 
 template <std::size_t kMaximumPayloadSize>
-void UartHdlcForwarder<kMaximumPayloadSize>::forward(
-    const PacketBuffer& packet, EgressSet egress_set) noexcept {
+void UartHdlcForwarder<kMaximumPayloadSize>::forward(const PacketBuffer& packet, EgressSet egress_set) noexcept {
     static_cast<void>(egress_set);
     if (packet.size() > kMaximumPayloadSize) {
         return;
     }
 
     std::uint8_t frame_storage[kMaximumFrameCapacity]{};
-    const std::size_t frame_size{links::uart_hdlc::HdlcEncoder::encode(
-        packet.headerAndPayload(), frame_storage)};
+    const std::size_t frame_size{links::uart_hdlc::HdlcEncoder::encode(packet.headerAndPayload(), frame_storage)};
     if (frame_size == 0U) {
         return;
     }
@@ -85,16 +79,13 @@ void UartHdlcReceiver<PacketBufferType>::process(
         }
 
         const auto frame{decoder_.frame()};
-        if ((frame.size() >= sizeof(Header)) &&
-            (frame.size() <= kMaximumCanonicalSize)) {
+        if ((frame.size() >= sizeof(Header)) && (frame.size() <= kMaximumCanonicalSize)) {
             PacketBufferType packet{};
-            const auto payload_size{static_cast<std::uint16_t>(
-                frame.size() - sizeof(Header))};
+            const auto payload_size{static_cast<std::uint16_t>(frame.size() - sizeof(Header))};
             if (packet.resize(payload_size)) {
                 std::memcpy(&packet.header(), frame.data(), sizeof(Header));
                 if (payload_size > 0U) {
-                    std::memcpy(packet.payload().data(),
-                                frame.data() + sizeof(Header), payload_size);
+                    std::memcpy(packet.payload().data(), frame.data() + sizeof(Header), payload_size);
                 }
                 static_cast<void>(dispatcher.dispatch(packet));
             }

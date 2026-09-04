@@ -46,10 +46,10 @@ DispatchResult Dispatcher::dispatch(const PacketBuffer& packet) const noexcept {
 
     DispatchResult aggregate{DispatchResult::kNoEndpoint};
     for (const DispatchTableEntry& entry : entries_) {
-        if (entry.endpoint != header.endpoint || entry.receiver == nullptr) {
+        if ((entry.endpoint != header.endpoint) || (entry.receiver == nullptr)) {
             continue;
         }
-        if (!broadcast && entry.host != header.destination) {
+        if (!broadcast && (localHostInfo().id != header.destination)) {
             continue;
         }
 

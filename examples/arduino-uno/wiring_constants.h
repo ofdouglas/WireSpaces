@@ -22,6 +22,7 @@ constexpr wirespaces::EgressSet kUartEgress{1U};
 constexpr wirespaces::RouteTableEntry kUartRoute{kTestWire, kUartEgress};
 constexpr wirespaces::HostInfo kArduinoHostInfo{kArduinoHost, 1U, {kTestWire}};
 
+// TODO: should services / endpoints be separate from the above?
 constexpr wirespaces::EndpointAddress kPingEndpoint{
     wirespaces::EndpointAddress::from(wirespaces::Namespace::kCommon, WS_SERVICE_PING_ENDPOINT_ID)};
 

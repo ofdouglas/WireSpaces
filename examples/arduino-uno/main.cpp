@@ -16,53 +16,74 @@ constexpr std::size_t kMaximumPayloadSize{4U};
 
 WS_PACKET_BUFFER_DEFINE(UartReceivePacket, kMaximumPayloadSize);
 
-}  // namespace
-
-
 using wirespaces::examples::arduino_uno::UartHdlcForwarder;
 using wirespaces::examples::arduino_uno::UartHdlcReceiver;
 using wirespaces::foundation::Span;
 
-int main() {
-    wirespaces::platform::avr::initialize(wiring_constants::kUartBaudRate);
+/**
+ * @brief Own and poll the complete Arduino UNO demonstration application.
+ *
+ * Member declaration order records the lifetime dependencies between the Link,
+ * Router, Services, endpoint bindings, and Dispatcher.
+ */
+class DemoApplication final {
+public:
+    DemoApplication() noexcept = default;
+    DemoApplication(const DemoApplication&) = delete;
+    DemoApplication(DemoApplication&&) = delete;
+    DemoApplication& operator=(const DemoApplication&) = delete;
+    DemoApplication& operator=(DemoApplication&&) = delete;
 
-    UartHdlcForwarder<kMaximumPayloadSize> uart_forwarder{};
-    UartHdlcReceiver<UartReceivePacket> uart_receiver{};
-    wirespaces::Router router{
-        Span<const wirespaces::RouteTableEntry>{
-            &wiring_constants::kUartRoute, 1U}, uart_forwarder};
+    /** @brief Initialize target hardware and process-wide host identity. */
+    void initialize() noexcept;
 
-    wirespaces::setLocalHostInfo(wiring_constants::kArduinoHostInfo);
+    /** @brief Poll ingress and run each Service once. */
+    void runOnce() noexcept;
 
-    heartbeat::HeartbeatService<1000U> heartbeat_service{
-        &router,
-        wiring_constants::kTestWire,
-        wiring_constants::kArduinoHost,
-        wirespaces::HostId{wirespaces::kBroadcastHostValue},
-    };
-    ping::PingService ping_service{&router};
-    led_control::LedControlService led_control_service{
-        &router,
-        wirespaces::platform::avr::setBuiltinLedBrightness,
-        nullptr,
-    };
+private:
+    // Links
+    UartHdlcForwarder<kMaximumPayloadSize> uart_forwarder_{};
+    UartHdlcReceiver<UartReceivePacket> uart_receiver_{};
+    wirespaces::Router router_{Span<const wirespaces::RouteTableEntry>{&wiring_constants::kUartRoute, 1U},
+                               uart_forwarder_};
 
+    // Services
+    heartbeat::HeartbeatService<1000U> heartbeat_service_{
+        &router_, wiring_constants::kTestWire, wiring_constants::kArduinoHost,
+        wirespaces::HostId{wirespaces::kBroadcastHostValue}};
+    ping::PingService ping_service_{&router_};
+    led_control::LedControlService led_control_service_{
+        &router_, wirespaces::platform::avr::setBuiltinLedBrightness, nullptr};
+
+    // Dispatch Table
     // TODO: this should be codegen eventually
-    const wirespaces::DispatchTableEntry dispatch_entries[]{
-        {wiring_constants::kArduinoHost, wiring_constants::kPingEndpoint,
-         &ping_service.receiver()},
-        {wiring_constants::kArduinoHost, wiring_constants::kLedControlEndpoint,
-         &led_control_service.receiver()},
-    };
-    const wirespaces::Dispatcher dispatcher{
-        wirespaces::foundation::Span<const wirespaces::DispatchTableEntry>{dispatch_entries},
-    };
+    wirespaces::DispatchTableEntry dispatch_entries_[2U]{
+        {wiring_constants::kPingEndpoint, &ping_service_.receiver()},
+        {wiring_constants::kLedControlEndpoint, &led_control_service_.receiver()}};
+    wirespaces::Dispatcher dispatcher_{Span<const wirespaces::DispatchTableEntry>{dispatch_entries_}};
+};
 
+// --- DemoApplication implementations ---
+
+void DemoApplication::initialize() noexcept {
+    wirespaces::platform::avr::initialize(wiring_constants::kUartBaudRate);
+    wirespaces::setLocalHostInfo(wiring_constants::kArduinoHostInfo);
+}
+
+void DemoApplication::runOnce() noexcept {
+    uart_receiver_.process(dispatcher_);
+    ping_service_.run();
+    led_control_service_.run();
+    heartbeat_service_.run();
+}
+
+}  // namespace
+
+int main() {
+    static DemoApplication application{};
+    application.initialize();
     sei();
     for (;;) {
-        uart_receiver.process(dispatcher);
-        ping_service.run();
-        led_control_service.run();
-        heartbeat_service.run();
+        application.runOnce();
     }
 }

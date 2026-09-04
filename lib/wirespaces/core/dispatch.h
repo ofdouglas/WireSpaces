@@ -27,7 +27,6 @@ protected:
 };
 
 struct DispatchTableEntry {
-    HostId host{};
     EndpointAddress endpoint{};
     EndpointReceiver* receiver{nullptr};
 };

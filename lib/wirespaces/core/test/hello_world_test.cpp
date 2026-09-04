@@ -24,7 +24,7 @@ using support::TestPacket;
 class HelloWorldTest : public support::DefaultHostFixture {
 protected:
     HelloReceiver receiver_{};
-    DispatchTableEntry dispatch_entry_{kLocalHostId, kHelloReceiverEndpoint, &receiver_};
+    DispatchTableEntry dispatch_entry_{kHelloReceiverEndpoint, &receiver_};
     Dispatcher dispatcher_{foundation::Span<const DispatchTableEntry>{&dispatch_entry_, 1U}};
     LocalDomainForwarder local_forwarder_{dispatcher_};
     RouteTableEntry route_entry_{kLocalWire, kNoEgress};

@@ -51,10 +51,10 @@ TEST_F(DispatchTest, RejectsUnicastToRemoteHost) {
     EXPECT_EQ(dispatch(packet), DispatchResult::kNoEndpoint);
 }
 
-// Broadcast on a joined wire fans out to every host binding for the endpoint.
+// Broadcast on a joined wire fans out to every binding for the endpoint.
 TEST_F(DispatchTest, FansOutBroadcastOnMemberWire) {
     support::DispatchRecorder second{};
-    registerEndpoint(kReceiverEndpoint, second, kRemoteHostId);
+    registerEndpoint(kReceiverEndpoint, second);
     TestPacket packet{PacketBuilder{}
                           .withDestination(HostId{kBroadcastHostValue})
                           .withWire(kLocalWire)

@@ -612,7 +612,7 @@ def parse_arguments() -> argparse.Namespace:
         default=UNO_SEGMENT_SIZE,
         help=f"PC upload segment size, 1..{UNO_SEGMENT_SIZE} (default: {UNO_SEGMENT_SIZE})",
     )
-    parser.add_argument("--port", default="/dev/ttyACM0")
+    parser.add_argument("--port", default="/dev/arduino-uno")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument(

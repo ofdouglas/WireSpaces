@@ -7,6 +7,8 @@ project(
     LANGUAGES CXX
 )
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 include(CTest)
 
 function(wirespaces_configure_host_target target_name)

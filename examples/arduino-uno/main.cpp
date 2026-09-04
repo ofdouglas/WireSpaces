@@ -33,22 +33,17 @@ constexpr wirespaces::EndpointAddress kPingEndpoint{
 constexpr wirespaces::EndpointAddress kLedControlEndpoint{wirespaces::EndpointAddress::from(
     wirespaces::Namespace::kCommon, WS_SERVICE_LED_CONTROL_ENDPOINT_ID)};
 
+const wirespaces::RouteTableEntry route_entries[]{
+    {kHeartbeatWire, kUartEgress},
+};
+const wirespaces::HostInfo kHostInfo{kArduinoHost, 1U, {kHeartbeatWire}};
+
+
+
 WS_PACKET_BUFFER_DEFINE(UartReceivePacket, kMaximumPayloadSize);
 
 wirespaces::links::uart_hdlc::HdlcDecoder<kMaximumCanonicalSize> g_hdlc_decoder{};
-volatile std::uint8_t g_mcp2515_canstat{0U};
 
-void uart0WriteHexNibble(std::uint8_t nibble) noexcept {
-    static constexpr char kHexDigits[]{'0', '1', '2', '3', '4', '5', '6', '7',
-                                       '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
-    wirespaces::platform::avr::uart0WriteByte(
-        static_cast<std::uint8_t>(kHexDigits[nibble & 0x0FU]));
-}
-
-void uart0WriteHexByte(std::uint8_t value) noexcept {
-    uart0WriteHexNibble(static_cast<std::uint8_t>(value >> 4U));
-    uart0WriteHexNibble(value);
-}
 
 /**
  * @brief Project a canonical WireSpaces PDU onto the UART HDLC Link.
@@ -114,6 +109,8 @@ void processUartInput(const wirespaces::Dispatcher& dispatcher) {
 
 }  // namespace
 
+
+
 int main() {
     wirespaces::platform::avr::StackMonitor stack_monitor{};
     stack_monitor.initialize();
@@ -123,25 +120,13 @@ int main() {
     wirespaces::platform::avr::millisecondClockInit();
     wirespaces::platform::avr::builtinLedInit();
 
-    std::uint8_t canstat{0U};
-    const bool mcp2515_ok{wirespaces::platform::avr::Mcp2515::probeCanstat(canstat)};
-    g_mcp2515_canstat = canstat;
-    wirespaces::platform::avr::uart0WriteByte(mcp2515_ok ? 'C' : 'E');
-    wirespaces::platform::avr::uart0WriteByte(':');
-    uart0WriteHexByte(canstat);
-    wirespaces::platform::avr::uart0WriteByte('\r');
-    wirespaces::platform::avr::uart0WriteByte('\n');
-
-    const wirespaces::RouteTableEntry route_entries[]{
-        {kHeartbeatWire, kUartEgress},
-    };
     UartForwarder uart_forwarder{};
     wirespaces::Router router{
         wirespaces::foundation::Span<const wirespaces::RouteTableEntry>{route_entries},
         uart_forwarder,
     };
-    const wirespaces::HostInfo host_info{kArduinoHost, 1U, {kHeartbeatWire}};
-    wirespaces::setLocalHostInfo(host_info);
+
+    wirespaces::setLocalHostInfo(kHostInfo);
 
     heartbeat::HeartbeatService<1000U> heartbeat_service{
         &router,
@@ -161,6 +146,8 @@ int main() {
         wirespaces::platform::avr::setBuiltinLedBrightness,
         nullptr,
     };
+
+    // TODO: this should be codegen eventually
     const wirespaces::DispatchTableEntry dispatch_entries[]{
         {kArduinoHost, kPingEndpoint, &ping_service},
         {kArduinoHost, kLedControlEndpoint, &led_control_service},
@@ -172,9 +159,6 @@ int main() {
     sei();
     std::uint16_t loop_iteration{0U};
     for (;;) {
-        volatile bool mcp2515_probe_result{
-            wirespaces::platform::avr::Mcp2515::probeCanstat(canstat)};
-
         processUartInput(dispatcher);
         heartbeat_service.run();
         stack_report_service.run(stack_monitor.peakUsedBytes(), stack_monitor.capacityBytes());

@@ -41,6 +41,28 @@ inline void uart0WriteByte(std::uint8_t byte) noexcept {
 }
 
 /**
+ * @brief Write a hexadecimal nibble to the USART0.
+ *
+ * @param[in] nibble Nibble to send.
+ */
+inline void uart0WriteHexNibble(std::uint8_t nibble) noexcept {
+    static constexpr char kHexDigits[]{'0', '1', '2', '3', '4', '5', '6', '7',
+                                       '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+    wirespaces::platform::avr::uart0WriteByte(
+        static_cast<std::uint8_t>(kHexDigits[nibble & 0x0FU]));
+}
+
+/**
+ * @brief Write a hexadecimal byte to the USART0.
+ *
+ * @param[in] value Byte to send.
+ */
+inline void uart0WriteHexByte(std::uint8_t value) noexcept {
+    uart0WriteHexNibble(static_cast<std::uint8_t>(value >> 4U));
+    uart0WriteHexNibble(value);
+}
+
+/**
  * @brief Return whether USART0 has a received byte waiting.
  */
 inline bool uart0ByteAvailable() noexcept {

@@ -28,7 +28,7 @@ def parse_arguments() -> argparse.Namespace:
         "brightness",
         help="brightness as 0..255, 0%..100%, or 'on'/'off'",
     )
-    parser.add_argument("--port", default="/dev/ttyACM0")
+    parser.add_argument("--port", default="/dev/arduino-uno")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument(

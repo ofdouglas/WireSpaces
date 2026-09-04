@@ -23,7 +23,7 @@ from .receiver import HdlcStreamDecoder, WireSpacesPacket, encode_hdlc_frame
 def parse_arguments() -> argparse.Namespace:
     """Parse serial settings."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", default="/dev/ttyACM0")
+    parser.add_argument("--port", default="/dev/arduino-uno")
     parser.add_argument("--baud", type=int, default=115200)
     return parser.parse_args()
 

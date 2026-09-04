@@ -240,8 +240,8 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--port",
-        default="/dev/ttyACM0",
-        help="serial device (default: /dev/ttyACM0)",
+        default="/dev/arduino-uno",
+        help="serial device (default: /dev/arduino-uno)",
     )
     parser.add_argument(
         "--baud",

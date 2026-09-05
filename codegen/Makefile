@@ -1,4 +1,6 @@
 PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
+INPUT ?= examples/packaging_line.yaml
+OUTPUT ?= build/topology.html
 
 .PHONY: test schema
 test:
@@ -6,3 +8,8 @@ test:
 
 schema:
 	$(PYTHON) wiring_structure.py --output wiring.schema.json
+
+.PHONY: viewer
+viewer:
+	mkdir -p "$(dir $(OUTPUT))"
+	$(PYTHON) wiring_viewer.py "$(INPUT)" --output "$(OUTPUT)"

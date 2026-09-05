@@ -114,11 +114,15 @@ def read_until_can(bus: can.Bus, deadline: float, expected: CanFrame) -> None:
 
 def run_test(arguments: argparse.Namespace) -> None:
     with (
-        can.interface.Bus(interface="socketcan", channel=arguments.cantact_interface, bitrate=500000) as cantact_bus, 
+        # SocketCAN timing is configured by the OS/slcand, not this constructor.
+        can.interface.Bus(interface="socketcan", channel=arguments.cantact_interface) as cantact_bus,
         serial.Serial(arguments.arduino_port, arguments.baud, timeout=0.1) as arduino
     ):
         arduino.dtr = False
         time.sleep(0.05)
+        # After flashing, a previous boot's READY may still be queued by USB.
+        # Drain it before triggering the new boot.
+        arduino.reset_input_buffer()
         arduino.dtr = True
         wait_for_ready(arduino, time.monotonic() + arguments.timeout)
 
@@ -148,7 +152,7 @@ def main() -> int:
     arguments = parse_arguments()
     try:
         run_test(arguments)
-    except (RuntimeError, serial.SerialException) as error:
+    except (RuntimeError, serial.SerialException, can.CanError) as error:
         print(f"MCP2515 CAN test failed: {error}", file=sys.stderr)
         return 1
 

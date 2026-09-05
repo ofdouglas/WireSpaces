@@ -255,6 +255,13 @@ test-ping:
 	PYTHONPATH=$(PYTHON_ROOT) python3 $(HARDWARE_TEST_ROOT)/ping_test.py \
 		--port $(PORT) --baud 115200 --reset --timeout 5
 
+.PHONY: test-ingress test-can-harness
+test-ingress:
+	PYTHONPATH=$(PYTHON_ROOT) python3 $(HARDWARE_TEST_ROOT)/ingress_test.py --port $(PORT)
+
+test-can-harness:
+	python3 -m unittest discover -s $(HARDWARE_TEST_ROOT)/test -p 'test_*.py' -v
+
 test-spi-can:
 	PYTHONPATH=$(PYTHON_ROOT) python3 $(HARDWARE_TEST_ROOT)/mcp2515_spi_test.py \
 		--port $(PORT) --baud 115200 --timeout 5

@@ -9,5 +9,6 @@ From the repository root:
     codegen/.venv/bin/python codegen/wiring_codegen.py hardware/bench/topology.yaml --local-host Gateway --explain
 
 See ../../codegen/README.md for dependency setup and schema documentation.
-These are static local-origin projections; ingress forwarding and hardware
-multi-hop verification are not implemented by this configuration.
+The runtime can validate/exclude ingress on these static route masks. A Link driver
+must call Router::receive with the receiving host's generated ingress index.
+The planned multi-hop PCB and its Links have not been verified on hardware.

@@ -99,6 +99,12 @@ Ping the Arduino and require a matching response:
 make test-ping
 ```
 
+The demo's route/destination rejection and ingress reflection checks are available
+with `make test-ingress`. The MCP2515 test harness has a host-only reset/readiness
+regression in `make test-can-harness`; it requires the same pyserial/python-can
+dependencies as the hardware test. See `codegen/deployment_studies.md` at the
+repository root for the latest hardware verification scope and results.
+
 The hardware test sends a directed request from PC Participant 2 to Arduino
 Participant 1. Its default sequence, `0x7E7D`, deliberately contains both HDLC
 reserved bytes so the exchange tests byte stuffing in both directions.

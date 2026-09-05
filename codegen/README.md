@@ -36,6 +36,10 @@ language example, not the source used to build the Uno project.
 
 ## Structural validation and editor support
 
+For interactive inspection, see [Read-only viewer](#read-only-viewer). The
+[deployment studies](deployment_studies.md) exercise the current decisions against
+a multicore gateway and a 40-host packaging line, including known limitations.
+
 The strict Pydantic models in wiring_structure.py are the single source for field
 shapes and the generated JSON Schema in wiring.schema.json. Unknown keys are
 rejected at every object level; integers are not coerced from strings, booleans or
@@ -370,3 +374,47 @@ its queue later. Driver-context or router-task execution is chosen by the integr
 as is required synchronization. This iteration does not add threads, memory pools
 or zero-copy ownership. Multi-node hardware validation awaits the bench/Link drivers;
 host runtime tests do not claim hardware timing or arbitration coverage.
+
+## Read-only viewer
+
+Generate a self-contained HTML file from the same parser and resolver:
+
+    make -C codegen viewer
+    make -C codegen viewer INPUT=examples/studies/multicore_gateway.yaml OUTPUT=build/multicore.html
+
+Equivalent CLI from the repo root:
+
+    codegen/.venv/bin/python codegen/wiring_viewer.py codegen/examples/packaging_line.yaml -o /tmp/line.html
+
+Open the generated file in a browser. It needs no server, CDN, network access,
+JavaScript packages, or additional Python dependencies. Nothing is sent from the
+viewer. There are no editing, save, transmission or runtime-control actions.
+YAML remains the source; regenerate the HTML after editing it externally.
+
+The physical graph has explicit shared-Link nodes and interface edges. Choose a
+Wire to highlight its exact selected attachments, then optionally hide everything
+outside its tree. Host styling distinguishes members, transit participants and
+excluded hosts. Select a host or Link to inspect identities, timing, selected
+attachments, generated masks, egress bits/ingress indices and authored provenance.
+Use the host and arrival selectors for an attachment-level forwarding preview;
+unselected ingress shows rejection. Pan/zoom and Fit change only presentation.
+Large overviews may need zoom or a Wire filter to read every label; the host picker
+and inspector remain available independently of graph position.
+
+Resolution failures retain the physical graph but do not invent a tree. If a
+resolved deployment exceeds the target's membership limit, the viewer displays
+the diagnostic and exact attachments with **no generated masks or indices**.
+This is not a bypass for firmware generation. Structurally invalid YAML and broken
+cross-references still fail the export. The exporter also rejects output paths
+aliasing its input, including symlinks and hardlinks.
+
+`make -C codegen test` covers rendering, escaping, immutability, diagnostics and
+compiled runtime probes. With Node.js available, it also exercises the viewer's
+pure layout/selection functions; set `NODE=/path/to/node` if it is not on PATH.
+No DOM/browser automation dependency is installed by these tests.
+
+Editing is deliberately deferred. A later editor should manipulate authored
+declarations, preserve YAML comments/order/shorthand, show compiler diagnostics
+before writes and offer a reviewed diff/undo. Derived routes must never become
+the editable source. Device/domain grouping and read-only observation semantics
+need explicit decisions first; see the deployment studies.

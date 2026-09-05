@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=../../wiring.schema.json
+# Faithful topology study of sketches_b/05_multicore_gateway.md, NOT a deployable profile.
+# Control needs seven local memberships (current target limit: six).
+# Host membership on operational Wires approximates receipt, NOT an observation-only policy.
+# SHM coherency, restart ownership, device grouping and endpoint authority are not encoded.
+Hosts:
+  - {Name: Control, HostId: 1, Interfaces: [ShmControlIo, ShmHostControl]}
+  - {Name: FieldIo, HostId: 2, Interfaces: [ShmControlIo, ShmHostIo, DriveBus, SafetyBus, SensorBus, VisionBus]}
+  - {Name: Host, HostId: 3, Interfaces: [Upstream, ShmHostControl, ShmHostIo]}
+  - {Name: Plant, HostId: 4, Interfaces: [Upstream]}
+  - {Name: Workstation, HostId: 5, Interfaces: [Upstream]}
+  - {Name: DriveA, HostId: 6, Interfaces: [DriveBus]}
+  - {Name: DriveB, HostId: 7, Interfaces: [DriveBus]}
+  - {Name: SafetyA, HostId: 8, Interfaces: [SafetyBus]}
+  - {Name: SafetyB, HostId: 9, Interfaces: [SafetyBus]}
+  - {Name: SensorA, HostId: 10, Interfaces: [SensorBus]}
+  - {Name: SensorB, HostId: 11, Interfaces: [SensorBus]}
+  - {Name: Vision, HostId: 12, Interfaces: [VisionBus]}
+Links:
+  - {Name: Upstream, LinkType: ETHERNET}
+  - {Name: ShmControlIo, LinkType: SHM}
+  - {Name: ShmHostControl, LinkType: SHM}
+  - {Name: ShmHostIo, LinkType: SHM}
+  - {Name: DriveBus, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: SafetyBus, LinkType: CAN, ArbitrationBitrate: 500000}
+  - {Name: SensorBus, LinkType: RS485, BaudRate: 115200}
+  - {Name: VisionBus, LinkType: ETHERNET}
+Groups:
+  GatewayDomains: [Control, FieldIo, Host]
+  Drives: [DriveA, DriveB]
+  SafetyDevices: [SafetyA, SafetyB]
+  Sensors: [SensorA, SensorB]
+  FieldDevices: [DriveA, DriveB, SafetyA, SafetyB, SensorA, SensorB, Vision]
+Realizations:
+  DriveTree:
+    Attachments: [Control.ShmControlIo, FieldIo.ShmControlIo, FieldIo.ShmHostIo, Host.ShmHostIo,
+                  FieldIo.DriveBus, DriveA.DriveBus, DriveB.DriveBus]
+  SafetyTree:
+    Attachments: [Control.ShmControlIo, FieldIo.ShmControlIo, FieldIo.ShmHostIo, Host.ShmHostIo,
+                  FieldIo.SafetyBus, SafetyA.SafetyBus, SafetyB.SafetyBus]
+  SensorTree:
+    Attachments: [Control.ShmControlIo, FieldIo.ShmControlIo, FieldIo.ShmHostIo, Host.ShmHostIo,
+                  FieldIo.SensorBus, SensorA.SensorBus, SensorB.SensorBus]
+  VisionTree:
+    Attachments: [Control.ShmControlIo, FieldIo.ShmControlIo, FieldIo.ShmHostIo, Host.ShmHostIo,
+                  FieldIo.VisionBus, Vision.VisionBus]
+  PlantTree:
+    Attachments: [Plant.Upstream, Host.Upstream, Host.ShmHostControl, Control.ShmHostControl]
+  MaintenanceTree:
+    Attachments: [Workstation.Upstream, Host.Upstream, Host.ShmHostControl, Control.ShmHostControl,
+                  Host.ShmHostIo, FieldIo.ShmHostIo, FieldIo.DriveBus, DriveA.DriveBus, DriveB.DriveBus,
+                  FieldIo.SafetyBus, SafetyA.SafetyBus, SafetyB.SafetyBus,
+                  FieldIo.SensorBus, SensorA.SensorBus, SensorB.SensorBus, FieldIo.VisionBus, Vision.VisionBus]
+  SupervisionTree:
+    Attachments: [FieldIo.ShmControlIo, Control.ShmControlIo, Control.ShmHostControl, Host.ShmHostControl]
+Wires:
+  - {Name: DriveControl, WireId: 10, Hosts: [Control, Host], Groups: [Drives], Realization: DriveTree}
+  - {Name: SafetyIo, WireId: 20, Hosts: [Control, Host], Groups: [SafetyDevices], Realization: SafetyTree}
+  - {Name: SensorAcquisition, WireId: 30, Hosts: [Control, Host], Groups: [Sensors], Realization: SensorTree}
+  - {Name: VisionControl, WireId: 40, Hosts: [Control, Host, Vision], Realization: VisionTree}
+  - {Name: PlantSupervision, WireId: 50, Hosts: [Plant, Control], Realization: PlantTree}
+  - {Name: Maintenance, WireId: 60, Hosts: [Workstation], Groups: [GatewayDomains, FieldDevices], Realization: MaintenanceTree}
+  - {Name: GatewaySupervision, WireId: 70, Groups: [GatewayDomains], Realization: SupervisionTree}

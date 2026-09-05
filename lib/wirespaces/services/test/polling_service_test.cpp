@@ -9,6 +9,14 @@
 
 #include <wirespaces/services/led_control/led_control.h>
 #include <wirespaces/services/ping/ping.h>
+#include <wirespaces/services/heartbeat/heartbeat.h>
+
+namespace wirespaces::hal {
+namespace {
+MillisecondClock::TimePoint test_now_ms{0U};
+}
+MillisecondClock::TimePoint MillisecondClock::now() noexcept { return test_now_ms; }
+}  // namespace wirespaces::hal
 
 namespace wirespaces::test {
 namespace {
@@ -51,6 +59,32 @@ void initializeRequest(PacketBuffer& packet, EndpointAddress endpoint) {
     packet.header().source = kRemoteHost;
     packet.header().destination = kLocalHost;
     packet.header().endpoint = endpoint;
+}
+
+// Heartbeats originate on the configured route, with complete identity and uptime metadata.
+TEST(PollingServiceTest, HeartbeatUsesConfiguredHeaderAndPeriod) {
+    hal::test_now_ms = 0U;
+    ResponseRecorder responses{};
+    const RouteTableEntry route{kWire, kEgress};
+    Router router{foundation::Span<const RouteTableEntry>{&route, 1U}, responses};
+    heartbeat::HeartbeatService<1000U> service{&router, kWire, kLocalHost, HostId{kBroadcastHostValue}};
+    hal::test_now_ms = 999U;
+    service.run();
+    EXPECT_EQ(responses.count(), 0U);
+    hal::test_now_ms = 1000U;
+    service.run();
+    ASSERT_EQ(responses.count(), 1U);
+    EXPECT_EQ(responses.header().wire, kWire);
+    EXPECT_EQ(responses.header().source, kLocalHost);
+    EXPECT_TRUE(responses.header().destination.isBroadcast());
+    EXPECT_EQ(responses.header().endpoint,
+              EndpointAddress::from(Namespace::kCommon, WS_SERVICE_HEARTBEAT_ENDPOINT_ID));
+    uint32_t uptime{};
+    ASSERT_EQ(responses.payload().size(), sizeof(uptime));
+    std::memcpy(&uptime, responses.payload().data(), sizeof(uptime));
+    EXPECT_EQ(uptime, 1000U);
+    service.run();
+    EXPECT_EQ(responses.count(), 1U);
 }
 
 // Dispatch-time receipt only queues Ping work; run() later emits the response.

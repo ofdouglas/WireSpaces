@@ -4,8 +4,24 @@
  */
 
 #include <wirespaces/core/packet.h>
+#include <cstring>
 
 namespace wirespaces {
+
+bool PacketBuffer::copyFrom(const PacketBuffer& source) noexcept {
+    if (source.size_ > capacity_) {
+        return false;
+    }
+    if (this == &source) {
+        return true;
+    }
+    header_ = source.header_;
+    size_ = source.size_;
+    if (size_ > 0U) {
+        std::memcpy(payload().data(), source.payload().data(), size_);
+    }
+    return true;
+}
 
 bool PacketBuffer::resize(uint16_t new_size) noexcept {
     if (new_size > capacity_) {

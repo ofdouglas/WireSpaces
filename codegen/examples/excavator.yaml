@@ -1,0 +1,88 @@
+# Topology only: no endpoints or authorization policy.
+Hosts:
+  - Name: Vcu
+    HostId: 1
+    Interfaces:
+      - {Name: OperatorEthernet, Link: OperatorEthernet}
+      - {Name: ChassisCan, Link: ChassisCan}
+      - {Name: PowertrainCan, Link: PowertrainCan}
+  - Name: Hmi
+    HostId: 2
+    Interfaces:
+      - {Name: OperatorEthernet, Link: OperatorEthernet}
+  - Name: Safety
+    HostId: 3
+    Interfaces:
+      - {Name: ChassisCan, Link: ChassisCan}
+      - {Name: SafetyCan, Link: SafetyCan}
+  - Name: Brake
+    HostId: 4
+    Interfaces:
+      - {Name: ChassisCan, Link: ChassisCan}
+  - Name: HydraulicGateway
+    HostId: 5
+    Interfaces:
+      - {Name: ChassisCan, Link: ChassisCan}
+      - {Name: HydraulicCan, Link: HydraulicCan}
+  - Name: Bms
+    HostId: 6
+    Interfaces:
+      - {Name: PowertrainCan, Link: PowertrainCan}
+  - Name: DriveA
+    HostId: 7
+    Interfaces:
+      - {Name: PowertrainCan, Link: PowertrainCan}
+  - Name: DriveB
+    HostId: 8
+    Interfaces:
+      - {Name: PowertrainCan, Link: PowertrainCan}
+  - Name: ValveA
+    HostId: 9
+    Interfaces:
+      - {Name: HydraulicCan, Link: HydraulicCan}
+  - Name: ValveB
+    HostId: 10
+    Interfaces:
+      - {Name: HydraulicCan, Link: HydraulicCan}
+  - Name: Pump
+    HostId: 11
+    Interfaces:
+      - {Name: HydraulicCan, Link: HydraulicCan}
+  - Name: SafetyIo
+    HostId: 12
+    Interfaces:
+      - {Name: SafetyCan, Link: SafetyCan}
+
+Links:
+  - {Name: OperatorEthernet, LinkType: ETHERNET}
+  - {Name: ChassisCan, LinkType: CAN_FD}
+  - {Name: PowertrainCan, LinkType: CAN_FD}
+  - {Name: HydraulicCan, LinkType: CAN_FD}
+  - {Name: SafetyCan, LinkType: CAN_FD}
+
+Groups:
+  Drives: [DriveA, DriveB]
+  HydraulicDevices: [ValveA, ValveB, Pump]
+  PlatformHosts: [Vcu, Safety, Brake, HydraulicGateway, Bms, DriveA, DriveB, ValveA, ValveB, Pump, SafetyIo]
+
+Wires:
+  - Name: Operator
+    WireId: 1
+    Hosts: [Vcu, Hmi]
+  - Name: ChassisCoordination
+    WireId: 2
+    Hosts: [Vcu, Safety, Brake, HydraulicGateway]
+  - Name: PowertrainControl
+    WireId: 3
+    Hosts: [Vcu, Safety, Bms]
+    Groups: [Drives]
+  - Name: HydraulicControl
+    WireId: 4
+    Hosts: [Vcu, Safety, HydraulicGateway]
+    Groups: [HydraulicDevices]
+  - Name: SafetyIoControl
+    WireId: 5
+    Hosts: [Safety, SafetyIo]
+  - Name: MachinePlatform
+    WireId: 6
+    Groups: [PlatformHosts]

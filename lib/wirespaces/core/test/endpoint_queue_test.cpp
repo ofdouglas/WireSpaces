@@ -22,6 +22,7 @@ constexpr std::size_t kQueueCapacity{2U};
 using TestReceiverQueue =
     EndpointReceiverQueue<kQueuePayloadCapacity, kQueueCapacity>;
 WS_PACKET_BUFFER_DEFINE(DequeuedPacket, kQueuePayloadCapacity);
+WS_PACKET_BUFFER_DEFINE(TinyPacket, 1U);
 
 // Accepted packets are copied and remain valid after the ingress packet changes.
 TEST(EndpointReceiverQueueTest, CopiesAndDequeuesPacket) {
@@ -36,6 +37,7 @@ TEST(EndpointReceiverQueueTest, CopiesAndDequeuesPacket) {
     EXPECT_EQ(output.header().wire, expected_header.wire);
     EXPECT_EQ(output.header().source, expected_header.source);
     EXPECT_EQ(output.size(), 5U);
+    EXPECT_EQ(output.capacity(), kQueuePayloadCapacity);
     EXPECT_EQ(std::memcmp(output.payload().data(), "first", 5U), 0);
 }
 
@@ -74,7 +76,42 @@ TEST(EndpointReceiverQueueTest, RejectsOversizedPayload) {
 TEST(EndpointReceiverQueueTest, EmptyDequeueLeavesOutputUnavailable) {
     TestReceiverQueue receiver{};
     DequeuedPacket output{};
+    ASSERT_TRUE(output.resize(1U));
+    output.payload()[0] = 42U;
     EXPECT_FALSE(receiver.dequeue(output));
+    EXPECT_EQ(output.size(), 1U);
+    EXPECT_EQ(output.payload()[0], 42U);
+}
+
+// An undersized output does not consume the packet; reuse wraps slots without changing capacities.
+TEST(EndpointReceiverQueueTest, PreservesPacketOnSmallOutputAndReusesSlots) {
+    TestReceiverQueue receiver{};
+    TinyPacket tiny{};
+    ASSERT_TRUE(tiny.resize(1U));
+    tiny.payload()[0] = 42U;
+    TestPacket source{PacketBuilder{}.withPayload("12345678").packet()};
+    TestPacket output{};
+    for (unsigned iteration{0U}; iteration < 5U; ++iteration) {
+        ASSERT_EQ(receiver.receive(source), ReceiveResult::kAccepted);
+        EXPECT_FALSE(receiver.dequeue(tiny));
+        EXPECT_EQ(tiny.payload()[0], 42U);
+        ASSERT_TRUE(receiver.dequeue(output));
+        EXPECT_EQ(output.capacity(), kDefaultEndpointStorageCapacity);
+        EXPECT_EQ(output.size(), 8U);
+        EXPECT_EQ(std::memcmp(output.payload().data(), "12345678", 8U), 0);
+    }
+}
+
+// Header-only endpoints retain a complete packet prefix with zero payload capacity.
+TEST(EndpointReceiverQueueTest, SupportsHeaderOnlyQueue) {
+    EndpointReceiverQueue<0U, 1U> receiver{};
+    TestPacket source{};
+    source.header().wire = WireNumber{13U};
+    ASSERT_EQ(receiver.receive(source), ReceiveResult::kAccepted);
+    TestPacket output{};
+    ASSERT_TRUE(receiver.dequeue(output));
+    EXPECT_EQ(output.size(), 0U);
+    EXPECT_EQ(output.header().wire, WireNumber{13U});
 }
 
 }  // namespace

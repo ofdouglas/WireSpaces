@@ -11,18 +11,17 @@
 
 #include <cstdint>
 
+#include "demo_wiring.h"
+
 namespace wiring_constants {
 
-constexpr wirespaces::WireNumber kTestWire{1U};
-constexpr wirespaces::HostId kArduinoHost{1U};
-constexpr wirespaces::HostId kPcHost{2U};
-constexpr std::uint32_t kUartBaudRate{115200UL};
-constexpr wirespaces::EgressSet kUartEgress{1U};
+using demo_wiring::kTestWire;
+using demo_wiring::kArduinoHost;
+using demo_wiring::kPcHost;
+using demo_wiring::kUartBaudRate;
+using demo_wiring::kArduinoHostInfo;
 
-constexpr wirespaces::RouteTableEntry kUartRoute{kTestWire, kUartEgress};
-constexpr wirespaces::HostInfo kArduinoHostInfo{kArduinoHost, 1U, {kTestWire}};
-
-// TODO: should services / endpoints be separate from the above?
+// Endpoint assignments remain application-owned; deployment wiring is generated above.
 constexpr wirespaces::EndpointAddress kPingEndpoint{
     wirespaces::EndpointAddress::from(wirespaces::Namespace::kCommon, WS_SERVICE_PING_ENDPOINT_ID)};
 

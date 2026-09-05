@@ -37,6 +37,14 @@ public:
     }
 
     [[nodiscard]] bool resize(uint16_t size) noexcept;
+    /**
+     * @brief Copy packet contents into this buffer without changing its capacity.
+     *
+     * Copies the header, active payload size and active payload bytes. Self-copy
+     * succeeds. Insufficient capacity leaves this buffer unchanged. Source and
+     * destination must be distinct nonoverlapping buffers unless they are identical.
+     */
+    [[nodiscard]] bool copyFrom(const PacketBuffer& source) noexcept;
     [[nodiscard]] bool initialize(uint16_t size, ControlFields control_fields) noexcept;
     [[nodiscard]] bool initializeResponseTo(const Header& request_header, uint16_t size, ControlFields control_fields) noexcept;  
 

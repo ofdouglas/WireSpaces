@@ -1,0 +1,78 @@
+# Topology only: no endpoints or authorization policy.
+Hosts:
+  - Name: Autonomy
+    HostId: 1
+    Interfaces:
+      - {Name: PlantEthernet, Link: PlantEthernet}
+  - Name: Motion
+    HostId: 2
+    Interfaces:
+      - {Name: PlantEthernet, Link: PlantEthernet}
+      - {Name: ChassisCan, Link: ChassisCan}
+  - Name: Safety
+    HostId: 3
+    Interfaces:
+      - {Name: ChassisCan, Link: ChassisCan}
+  - Name: Payload
+    HostId: 4
+    Interfaces:
+      - {Name: PlantEthernet, Link: PlantEthernet}
+      - {Name: PayloadCan, Link: PayloadCan}
+  - Name: Bms
+    HostId: 5
+    Interfaces:
+      - {Name: ChassisCan, Link: ChassisCan}
+      - {Name: ChargeCan, Link: ChargeCan}
+  - Name: SensorIo
+    HostId: 6
+    Interfaces:
+      - {Name: ChassisCan, Link: ChassisCan}
+  - Name: Lift
+    HostId: 7
+    Interfaces:
+      - {Name: PayloadCan, Link: PayloadCan}
+  - Name: Gripper
+    HostId: 8
+    Interfaces:
+      - {Name: PayloadCan, Link: PayloadCan}
+  - Name: ChargeInterface
+    HostId: 9
+    Interfaces:
+      - {Name: ChargeCan, Link: ChargeCan}
+
+Links:
+  - {Name: PlantEthernet, LinkType: ETHERNET}
+  - {Name: ChassisCan, LinkType: CAN_FD}
+  - {Name: PayloadCan, LinkType: CAN_FD}
+  - {Name: ChargeCan, LinkType: CAN_FD}
+
+Groups:
+  PayloadDevices: [Lift, Gripper]
+  PlatformHosts: [Autonomy, Motion, Safety, Payload, Bms, SensorIo, Lift, Gripper, ChargeInterface]
+
+Wires:
+  - Name: Plant
+    WireId: 10
+    Hosts: [Autonomy, Motion, Payload]
+  - Name: SafetyControl
+    WireId: 20
+    Hosts: [Motion, Safety, Payload]
+  - Name: Power
+    WireId: 30
+    Hosts: [Motion, Payload, Bms, Autonomy]
+  - Name: Bumper
+    WireId: 40
+    Hosts: [Motion, Safety, SensorIo, Autonomy]
+  - Name: NavSense
+    WireId: 50
+    Hosts: [Autonomy, SensorIo, Motion]
+  - Name: PayloadAct
+    WireId: 60
+    Hosts: [Payload]
+    Groups: [PayloadDevices]
+  - Name: Charge
+    WireId: 70
+    Hosts: [Bms, ChargeInterface]
+  - Name: Platform
+    WireId: 80
+    Groups: [PlatformHosts]

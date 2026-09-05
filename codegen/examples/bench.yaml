@@ -1,0 +1,85 @@
+# Topology only: no endpoints or authorization policy.
+Hosts:
+  - Name: Pc
+    HostId: 1
+    Interfaces:
+      - {Name: UartVcp, Link: UartVcp}
+  - Name: Gateway
+    HostId: 2
+    Interfaces:
+      - {Name: UartVcp, Link: UartVcp}
+      - {Name: CanA, Link: CanA}
+      - {Name: CanB, Link: CanB}
+      - {Name: Multidrop, Link: Multidrop}
+  - Name: LeafA
+    HostId: 3
+    Interfaces:
+      - {Name: CanA, Link: CanA}
+      - {Name: CanB, Link: CanB}
+      - {Name: Multidrop, Link: Multidrop}
+      - {Name: RingA, Link: RingA}
+      - {Name: RingC, Link: RingC}
+  - Name: LeafB
+    HostId: 4
+    Interfaces:
+      - {Name: CanA, Link: CanA}
+      - {Name: CanB, Link: CanB}
+      - {Name: Multidrop, Link: Multidrop}
+      - {Name: RingA, Link: RingA}
+      - {Name: RingB, Link: RingB}
+  - Name: LeafC
+    HostId: 5
+    Interfaces:
+      - {Name: CanA, Link: CanA}
+      - {Name: CanB, Link: CanB}
+      - {Name: Multidrop, Link: Multidrop}
+      - {Name: RingB, Link: RingB}
+      - {Name: RingC, Link: RingC}
+
+Links:
+  - {Name: UartVcp, LinkType: UART_HDLC, BaudRate: 115200}
+  - {Name: CanA, LinkType: CAN_FD}
+  - {Name: CanB, LinkType: CAN_FD}
+  - {Name: Multidrop, LinkType: UART_HDLC, BaudRate: 115200}
+  - {Name: RingA, LinkType: UART_HDLC, BaudRate: 115200}
+  - {Name: RingB, LinkType: UART_HDLC, BaudRate: 115200}
+  - {Name: RingC, LinkType: UART_HDLC, BaudRate: 115200}
+
+Groups:
+  Leaves: [LeafA, LeafB, LeafC]
+
+Paths:
+  LongBenchPath:
+    - Pc.UartVcp
+    - Gateway.UartVcp
+    - Gateway.CanA
+    - LeafA.CanA
+    - LeafA.RingA
+    - LeafB.RingA
+    - LeafB.RingB
+    - LeafC.RingB
+
+Wires:
+  - Name: LongBenchTest
+    WireId: 40
+    Hosts: [Pc, LeafC]
+    Path: LongBenchPath
+  - Name: CanATest
+    WireId: 2
+    Hosts: [Pc]
+    Groups: [Leaves]
+    Links: [UartVcp, CanA]
+  - Name: CanBTest
+    WireId: 3
+    Hosts: [Pc]
+    Groups: [Leaves]
+    Links: [UartVcp, CanB]
+  - Name: MultidropTest
+    WireId: 4
+    Hosts: [Pc]
+    Groups: [Leaves]
+    Links: [UartVcp, Multidrop]
+  - Name: RingCTest
+    WireId: 5
+    Hosts: [LeafA, LeafC]
+    Links: [RingC]

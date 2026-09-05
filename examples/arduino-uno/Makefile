@@ -94,6 +94,18 @@ DEPENDENCIES := $(OBJECTS:.o=.d) $(BITS_OBJECTS:.o=.d) $(CAN_OBJECTS:.o=.d) \
 
 all: $(HEX) size
 
+.PHONY: generate-wiring test-codegen
+generate-wiring: demo_wiring.h
+
+demo_wiring.h: $(WIRESPACES_ROOT)/codegen/demo.yaml $(wildcard $(WIRESPACES_ROOT)/codegen/wiring_*.py)
+	python3 $(WIRESPACES_ROOT)/codegen/wiring_codegen.py $< --local-host Arduino -o $@
+
+$(BUILD_DIR)/main.o $(BUILD_DIR)/bits_ram_transfer.o $(BUILD_DIR)/mcp2515_can_test.o \
+$(BOOT_PROFILE_BUILD_DIR)/ram_test.o $(BOOT_PROFILE_BUILD_DIR)/size_profile.o: demo_wiring.h
+
+test-codegen:
+	python3 -m unittest discover -s $(WIRESPACES_ROOT)/codegen -p 'test_*.py' -v
+
 $(BOOT_PROFILE_BUILD_DIR):
 	mkdir -p $@
 

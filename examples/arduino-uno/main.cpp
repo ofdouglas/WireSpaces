@@ -44,8 +44,10 @@ private:
     // Links
     UartHdlcForwarder<kMaximumPayloadSize> uart_forwarder_{};
     UartHdlcReceiver<UartReceivePacket> uart_receiver_{};
-    wirespaces::Router router_{Span<const wirespaces::RouteTableEntry>{&wiring_constants::kUartRoute, 1U},
-                               uart_forwarder_};
+
+    // Routes
+    demo_wiring::Forwarder egress_forwarder_{uart_forwarder_};
+    wirespaces::Router router_{demo_wiring::routes(), egress_forwarder_};
 
     // Services
     heartbeat::HeartbeatService<1000U> heartbeat_service_{

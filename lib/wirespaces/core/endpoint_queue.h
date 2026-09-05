@@ -11,7 +11,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 
 namespace wirespaces {
 
@@ -50,10 +49,14 @@ public:
     [[nodiscard]] bool dequeue(PacketBuffer& output) noexcept;
 
 private:
-    struct StoredPacket {
-        Header header{};
-        foundation::Array<uint8_t, kPayloadCapacity> payload{};
-        uint16_t size{0U};
+    /** @brief Queue-owned packet storage using the common PacketBuffer layout. */
+    class StoredPacket final : public PacketBuffer {
+    public:
+        constexpr StoredPacket() noexcept : PacketBuffer{static_cast<uint16_t>(kPayloadCapacity)} {}
+
+    private:
+        // Array also supplies backing storage for a zero-payload endpoint.
+        foundation::Array<uint8_t, kPayloadCapacity> payload_storage_{};
     };
 
     containers::Queue<StoredPacket, kQueueCapacity, LockType> queue_;
@@ -71,15 +74,9 @@ template <std::size_t kPayloadCapacity, std::size_t kQueueCapacity,
           typename LockType>
 ReceiveResult EndpointReceiverQueue<kPayloadCapacity, kQueueCapacity, LockType>::receive(
     const PacketBuffer& packet) noexcept {
-    if (packet.size() > kPayloadCapacity) {
-        return ReceiveResult::kRejected;
-    }
-
     StoredPacket stored{};
-    stored.header = packet.header();
-    stored.size = packet.size();
-    if (stored.size > 0U) {
-        std::memcpy(stored.payload.data(), packet.payload().data(), stored.size);
+    if (!stored.copyFrom(packet)) {
+        return ReceiveResult::kRejected;
     }
     return queue_.enqueue(stored) ? ReceiveResult::kAccepted : ReceiveResult::kFull;
 }
@@ -97,12 +94,7 @@ bool EndpointReceiverQueue<kPayloadCapacity, kQueueCapacity, LockType>::dequeue(
         return false;
     }
 
-    static_cast<void>(output.resize(stored.size));
-    output.header() = stored.header;
-    if (stored.size > 0U) {
-        std::memcpy(output.payload().data(), stored.payload.data(), stored.size);
-    }
-    return true;
+    return output.copyFrom(stored);
 }
 
 }  // namespace wirespaces

@@ -32,7 +32,7 @@ constexpr bits::ConnectionConfig kUploadConnection{
 constexpr bits::ConnectionConfig kEchoConnection{
     wiring_constants::kTestWire, wiring_constants::kArduinoHost, wiring_constants::kPcHost,
     wiring_constants::kBitsEchoEndpoint};
-    
+
 constexpr bits::TimingConfig kTransferTiming{100U, 250U, 5U};
 
 static_assert(kMaximumBitsPayloadSize >= bits::kSetupSize, "BITS packet storage must hold SETUP");
@@ -44,7 +44,6 @@ using UartForwarder = wirespaces::examples::arduino_uno::UartHdlcForwarder<kMaxi
 using UartReceiver = wirespaces::examples::arduino_uno::UartHdlcReceiver<BitsPacket>;
 using PacketBuffer = wirespaces::PacketBuffer;
 using PacketSlotSpan = wirespaces::foundation::Span<wirespaces::PacketBuffer*>;
-using RouteSpan = wirespaces::foundation::Span<const wirespaces::RouteTableEntry>;
 using DispatchSpan = wirespaces::foundation::Span<const wirespaces::DispatchTableEntry>;
 
 /**
@@ -150,14 +149,19 @@ private:
 
     UartForwarder uart_forwarder_{};
     UartReceiver uart_receiver_{};
-    wirespaces::Router router_{RouteSpan{&wiring_constants::kUartRoute, 1U}, uart_forwarder_};
+
+    demo_wiring::Forwarder egress_forwarder_{uart_forwarder_};
+    wirespaces::Router router_{demo_wiring::routes(), egress_forwarder_};
+    
     RamReceiverCallbacks receiver_callbacks_{wirespaces::MutableByteSpan{receive_object_}};
     RamTransmitterCallbacks transmitter_callbacks_{};
+
     bits::BitsReceiver receiver_{kUploadConnection, router_, receiver_callbacks_,
                                 PacketSlotSpan{segment_slots_}, receiver_datagram_packet_,
                                 receiver_transmit_packet_};
     bits::BitsTransmitter transmitter_{kEchoConnection, kTransferTiming, router_, transmitter_callbacks_,
                                       transmitter_datagram_packet_, transmitter_transmit_packet_};
+
     wirespaces::DispatchTableEntry dispatch_entries_[2U]{
         {wiring_constants::kBitsUploadEndpoint, &receiver_},
         {wiring_constants::kBitsEchoEndpoint, &transmitter_}};

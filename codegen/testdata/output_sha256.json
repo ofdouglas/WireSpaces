@@ -1,0 +1,126 @@
+{
+  "Legacy/Arduino": {
+    "explain": "5d50fea7f3e7dc55f21f703488af653fe396c1466465f25a7c949a7dcf9846b7",
+    "header": "db6465925837681d54364c651edb4dc19b8894eef6b8681b6bb0d5129e66d514"
+  },
+  "Legacy/Pc": {
+    "explain": "97c02b777b2de91b2e5d9c6ffa4b8d6ef226b8f6344254aece3f7166fe5bfc6e",
+    "header": "084900353456c0813c39d8254280c479bb9e7ceb5071891d0cfca801aa9f135b"
+  },
+  "Legacy/Sensor": {
+    "explain": "2815eb38e24819ea9f66283e734dde59a9affaa0c5624f57dbb8ad019d95b1b0",
+    "header": "0ae4ee67627c4763a87e17bae98f95e9cda56826cd441f76d61e6b75173dd294"
+  },
+  "amr/Autonomy": {
+    "explain": "738b864478a400f76117786c43aa4bb79f5c89d0f05bbc2426a231ac4143cd6f",
+    "header": "480d90c326f5040afa5ccdc0e1fc46322bb5796631622b8fe750ef8134b59cbf"
+  },
+  "amr/Bms": {
+    "explain": "c61d953b5851bb7a9edd2c0852f8a02156f5e4c37428ce0a3b6b060341aed9b0",
+    "header": "643da9c73e882a4feaca6a55319422b2312af815add5cd016f20f984337d8c75"
+  },
+  "amr/ChargeInterface": {
+    "explain": "d5aa21278ee715d6fb8325d975f96ed293579a518191179134f4bbfd66ef97c1",
+    "header": "41a4b30b72f29c21072c3b5046b6ec040f09deb16110f914f54b8be40252d0c8"
+  },
+  "amr/Gripper": {
+    "explain": "b999c8bf793ccf250eb00aa3339ec19ad65299867a0da235b8ce26f78c76c1b0",
+    "header": "2ad1e523e207358b48a998b7c7c0b8581459273fe11f2bb515aa22c878358070"
+  },
+  "amr/Lift": {
+    "explain": "770d4fd4e5af5490de93afb2a1f71240468a88f8dfef33522666b05507c20d5b",
+    "header": "269d70d687ec6af594b4015e9fbcb16d5d88aad900dd6354d3d011bf78fc3a28"
+  },
+  "amr/Motion": {
+    "explain": "54962eb24585ca8c238f676132448fe78e4837a3b153ae17c18c1554afd02280",
+    "header": "b18f6ba0062a9e6b6b8522a45ed8985ea82bdd2adc3d719af75628381f503d6a"
+  },
+  "amr/Payload": {
+    "explain": "c43f5712abd6bf8bbc6f8bd6b56d5eab7cf0096465edc697d04a2d9bb70725f7",
+    "header": "62d906ddd2a8220ddf16bfd6d38ec11b8c954fa956d163eae3f47997adccb246"
+  },
+  "amr/Safety": {
+    "explain": "5c0dc2116738799ba0b258befb8ea4c3f60b6de4b8eafd79620caef5f65055b0",
+    "header": "368dd5a13e66992aef7fabe334dfa50013f67c004ad035f7e0164f0ca4733641"
+  },
+  "amr/SensorIo": {
+    "explain": "a636dd1356c14f3228e8a8d50c1a25a02ee31cd8e1a9e200558bd7cef977fe1b",
+    "header": "d0b5be30469b2c4b569b3478cccba255ce93283c45c3f761d5d0d2891fc94de6"
+  },
+  "bench/Gateway": {
+    "explain": "592ceafb9b3b8b08397ff531a2f319c15cf5f91804516313ebebf39042702d4f",
+    "header": "e87bb3b2b39a138911d179788919135b30eb281246866ad15f9683ff781af35c"
+  },
+  "bench/LeafA": {
+    "explain": "54d9e13b2fa2ffebe51d9cac2809ad3231d4ac45c88a5c794b8b7f1610f6a019",
+    "header": "de2d56c2bb52f95ed8e821a2824c945aabc075a2c0750a07130a86687913fb34"
+  },
+  "bench/LeafB": {
+    "explain": "a6f5054c25f2e211d721c2b140d5ac5aa901725f542f8a68f4fabf679f38b491",
+    "header": "7ac66d19d6917c582a413c66ad40ff06b5e8a887185bae1eed8926057fc590bd"
+  },
+  "bench/LeafC": {
+    "explain": "17ecf8436d063148ddd3dc986e370c413fa6f84e4f6a4855e5f91d6dec7e67c3",
+    "header": "bbcc0f95bca0a931c759faf6871e3997be78870e3ae4b18f81f3839c7e045003"
+  },
+  "bench/Pc": {
+    "explain": "656ad44bff05d26d3a4f832faadeccd9d38b30f98e7aecd5a9b06fba129356d8",
+    "header": "65516319205c8016d175f7e59502199a592fd8b12c92f3ba234c6030ce1fa0dc"
+  },
+  "demo/Arduino": {
+    "explain": "28f62c8f91a37594801bc41310ba5dc0e0fe2d1a3c6bf8800b479c0d3346c579",
+    "header": "f86ddf8d73cbee2f7c8176bffeacf62a34e97dfe281990d90d459f89b4056cbc"
+  },
+  "demo/Pc": {
+    "explain": "37a19c3005126b22b22aca70df14dae771c1e9b7413b23135240e11ce4ba78ed",
+    "header": "41d113ddade691ea9c149e15f4604d4140199b47ec74c003e6902a212a851d67"
+  },
+  "excavator/Bms": {
+    "explain": "9197e4577795efc49b84e503e9ce746543cd63bb22fbdac33f15e6bcda559b1e",
+    "header": "b56bbb4fa2d556159fdb8ffa3f0bc6791aa0fbd8990badcc2f870b7dea027856"
+  },
+  "excavator/Brake": {
+    "explain": "03e0ad26a3048966929adb70e0d423fd42e73842d07270d5600774f7f11fa0c4",
+    "header": "43447a4c9411d627248603349644227b9c10e3c83edcad1fda5a64f2aca21bf0"
+  },
+  "excavator/DriveA": {
+    "explain": "67309c1ac9b7bae60f2b96e257ff9a1718b25b68e55781ec0e7c01d044d60ea4",
+    "header": "c9f5a8ce02b8238c48f0cf9ba317fc88f3da75dc6e9bd9b85b7a36dc3f00d76f"
+  },
+  "excavator/DriveB": {
+    "explain": "c26ff2b8d064d8b83b205ccf06c7227d5f387fd73d3a406e439274ee66eb05f7",
+    "header": "e8524d8a81e3029a2f2a47bec3ac25d2474e97e3c1cc5bc3f11de6c5947c6b9c"
+  },
+  "excavator/Hmi": {
+    "explain": "8761a3e941b1ffbdc28f5d3942ac520ec65a69ca738f18d0639e0defa32725e0",
+    "header": "984d343098fa2bab0e8c8b1ad27e5d053f3a3eda45fd49fbfc8617587ec1cb5f"
+  },
+  "excavator/HydraulicGateway": {
+    "explain": "495c97f76e1dbafa99f83cc6d5dd63716cbc908b950d390b89b0a521f33f6e10",
+    "header": "169ffd89e4ef39f8294b5395b58a8ce3f3c5c33b55f7a7c43ef76fbf0ffeb5cc"
+  },
+  "excavator/Pump": {
+    "explain": "56cf29c183d68ded5de1aa38112a88a956505f72b7784ed25b3ea73e95d3a12d",
+    "header": "62c911321013fe6b0d49eed547ae6911058c6a1a1f7a7dd67c72858a599651a5"
+  },
+  "excavator/Safety": {
+    "explain": "07bfd767e470321901136c84535b691b16f0b171fe8b0ee482af6405aa5f7980",
+    "header": "1f5573e74c24d115a7ae92e512663a1047c2975494116d09d01378fae0c86f59"
+  },
+  "excavator/SafetyIo": {
+    "explain": "8d929ed7415d3ef83e74084b15e52656a90903e06f3a38a1577d7d435425e931",
+    "header": "d893e989ad82fa1291d4b0cbd6349e06b35179b6c967470c8c2eaf8969c6e469"
+  },
+  "excavator/ValveA": {
+    "explain": "259a050520bde014b3874a5bbce5feca9173097a7b778fb47893952331f6cedc",
+    "header": "8eae990e956d21dab1d339f67e115271302ef05437fb445695ef65dbbb28f3cc"
+  },
+  "excavator/ValveB": {
+    "explain": "e2fb43dde8a92dd45bec25e080a008664fd9f7fb8853d790c29547ef72b65491",
+    "header": "8a44bf88af011e7a456adb2eacc84c497d2a0ed07cad6dffa522b1e770606c70"
+  },
+  "excavator/Vcu": {
+    "explain": "e715f04f0f5e9e3a53c3393f99200a7d775e96636ef861260f1fc0fd7f1e86f4",
+    "header": "ebe50dcbf201a432b88bef78c9d951b41994932ff9ad77c6ad8da7d749167df1"
+  }
+}

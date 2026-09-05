@@ -22,7 +22,8 @@ class WiringTest(unittest.TestCase):
                                header_name="generated.h", local_host_name=host)
 
     def test_demo_is_reproducible(self):
-        self.assertEqual(self.generate(), (ROOT / "examples/arduino-uno/demo_wiring.h").read_text())
+        project = yaml.safe_load((ROOT / "examples/arduino-uno/demo.yaml").read_text())
+        self.assertEqual(self.generate(project), (ROOT / "examples/arduino-uno/demo_wiring.h").read_text())
         self.assertIn("kPcHostInfo", self.generate(host="Pc"))
 
     def test_invalid_schema(self):
@@ -49,7 +50,7 @@ class WiringTest(unittest.TestCase):
         data = copy.deepcopy(self.data)
         data["Hosts"][0]["Interfaces"][0]["EgressBit"] = 0
         data["Wires"][0]["Links"] = ["VcpUart"]
-        data["Links"].append(dict(Name="CanBus", LinkType="CAN"))
+        data["Links"].append(dict(Name="CanBus", LinkType="CAN", ArbitrationBitrate=500000))
         data["Hosts"][0]["Interfaces"].append(dict(Name="Can", Link="CanBus", EgressBit=3))
         data["Hosts"].append(dict(Name="Sensor", HostId=3, Interfaces=[
             dict(Name="Can", Link="CanBus", EgressBit=0)]))

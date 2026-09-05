@@ -1,50 +1,39 @@
 # Topology only: no endpoints or authorization policy.
+# CAN rates are illustrative: confirm arbitration/data timing for the actual system.
 Hosts:
   - Name: Autonomy
     HostId: 1
-    Interfaces:
-      - {Name: PlantEthernet, Link: PlantEthernet}
+    Interfaces: [PlantEthernet]
   - Name: Motion
     HostId: 2
-    Interfaces:
-      - {Name: PlantEthernet, Link: PlantEthernet}
-      - {Name: ChassisCan, Link: ChassisCan}
+    Interfaces: [PlantEthernet, ChassisCan]
   - Name: Safety
     HostId: 3
-    Interfaces:
-      - {Name: ChassisCan, Link: ChassisCan}
+    Interfaces: [ChassisCan]
   - Name: Payload
     HostId: 4
-    Interfaces:
-      - {Name: PlantEthernet, Link: PlantEthernet}
-      - {Name: PayloadCan, Link: PayloadCan}
+    Interfaces: [PlantEthernet, PayloadCan]
   - Name: Bms
     HostId: 5
-    Interfaces:
-      - {Name: ChassisCan, Link: ChassisCan}
-      - {Name: ChargeCan, Link: ChargeCan}
+    Interfaces: [ChassisCan, ChargeCan]
   - Name: SensorIo
     HostId: 6
-    Interfaces:
-      - {Name: ChassisCan, Link: ChassisCan}
+    Interfaces: [ChassisCan]
   - Name: Lift
     HostId: 7
-    Interfaces:
-      - {Name: PayloadCan, Link: PayloadCan}
+    Interfaces: [PayloadCan]
   - Name: Gripper
     HostId: 8
-    Interfaces:
-      - {Name: PayloadCan, Link: PayloadCan}
+    Interfaces: [PayloadCan]
   - Name: ChargeInterface
     HostId: 9
-    Interfaces:
-      - {Name: ChargeCan, Link: ChargeCan}
+    Interfaces: [ChargeCan]
 
 Links:
   - {Name: PlantEthernet, LinkType: ETHERNET}
-  - {Name: ChassisCan, LinkType: CAN_FD}
-  - {Name: PayloadCan, LinkType: CAN_FD}
-  - {Name: ChargeCan, LinkType: CAN_FD}
+  - {Name: ChassisCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: PayloadCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: ChargeCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
 
 Groups:
   PayloadDevices: [Lift, Gripper]

@@ -8,6 +8,7 @@ BOOT_PROFILE_RAM_FLASH_LIMIT := 4096
 BOOT_PROFILE_SIZE_FLASH_LIMIT := 3350
 BUILD_DIR := build
 WIRESPACES_ROOT := ../..
+CODEGEN_PYTHON ?= $(if $(wildcard $(WIRESPACES_ROOT)/codegen/.venv/bin/python),$(WIRESPACES_ROOT)/codegen/.venv/bin/python,python3)
 
 MCU := atmega328p
 F_CPU := 16000000UL
@@ -97,14 +98,14 @@ all: $(HEX) size
 .PHONY: generate-wiring test-codegen
 generate-wiring: demo_wiring.h
 
-demo_wiring.h: $(WIRESPACES_ROOT)/codegen/demo.yaml $(wildcard $(WIRESPACES_ROOT)/codegen/wiring_*.py)
-	python3 $(WIRESPACES_ROOT)/codegen/wiring_codegen.py $< --local-host Arduino -o $@
+demo_wiring.h: demo.yaml $(wildcard $(WIRESPACES_ROOT)/codegen/wiring_*.py) $(WIRESPACES_ROOT)/codegen/requirements.txt
+	$(CODEGEN_PYTHON) $(WIRESPACES_ROOT)/codegen/wiring_codegen.py $< --local-host Arduino -o $@
 
 $(BUILD_DIR)/main.o $(BUILD_DIR)/bits_ram_transfer.o $(BUILD_DIR)/mcp2515_can_test.o \
 $(BOOT_PROFILE_BUILD_DIR)/ram_test.o $(BOOT_PROFILE_BUILD_DIR)/size_profile.o: demo_wiring.h
 
 test-codegen:
-	python3 -m unittest discover -s $(WIRESPACES_ROOT)/codegen -p 'test_*.py' -v
+	$(CODEGEN_PYTHON) -m unittest discover -s $(WIRESPACES_ROOT)/codegen -p 'test_*.py' -v
 
 $(BOOT_PROFILE_BUILD_DIR):
 	mkdir -p $@

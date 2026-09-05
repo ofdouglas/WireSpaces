@@ -1,64 +1,49 @@
 # Topology only: no endpoints or authorization policy.
+# CAN rates are illustrative: confirm arbitration/data timing for the actual system.
 Hosts:
   - Name: Vcu
     HostId: 1
-    Interfaces:
-      - {Name: OperatorEthernet, Link: OperatorEthernet}
-      - {Name: ChassisCan, Link: ChassisCan}
-      - {Name: PowertrainCan, Link: PowertrainCan}
+    Interfaces: [OperatorEthernet, ChassisCan, PowertrainCan]
   - Name: Hmi
     HostId: 2
-    Interfaces:
-      - {Name: OperatorEthernet, Link: OperatorEthernet}
+    Interfaces: [OperatorEthernet]
   - Name: Safety
     HostId: 3
-    Interfaces:
-      - {Name: ChassisCan, Link: ChassisCan}
-      - {Name: SafetyCan, Link: SafetyCan}
+    Interfaces: [ChassisCan, SafetyCan]
   - Name: Brake
     HostId: 4
-    Interfaces:
-      - {Name: ChassisCan, Link: ChassisCan}
+    Interfaces: [ChassisCan]
   - Name: HydraulicGateway
     HostId: 5
-    Interfaces:
-      - {Name: ChassisCan, Link: ChassisCan}
-      - {Name: HydraulicCan, Link: HydraulicCan}
+    Interfaces: [ChassisCan, HydraulicCan]
   - Name: Bms
     HostId: 6
-    Interfaces:
-      - {Name: PowertrainCan, Link: PowertrainCan}
+    Interfaces: [PowertrainCan]
   - Name: DriveA
     HostId: 7
-    Interfaces:
-      - {Name: PowertrainCan, Link: PowertrainCan}
+    Interfaces: [PowertrainCan]
   - Name: DriveB
     HostId: 8
-    Interfaces:
-      - {Name: PowertrainCan, Link: PowertrainCan}
+    Interfaces: [PowertrainCan]
   - Name: ValveA
     HostId: 9
-    Interfaces:
-      - {Name: HydraulicCan, Link: HydraulicCan}
+    Interfaces: [HydraulicCan]
   - Name: ValveB
     HostId: 10
-    Interfaces:
-      - {Name: HydraulicCan, Link: HydraulicCan}
+    Interfaces: [HydraulicCan]
   - Name: Pump
     HostId: 11
-    Interfaces:
-      - {Name: HydraulicCan, Link: HydraulicCan}
+    Interfaces: [HydraulicCan]
   - Name: SafetyIo
     HostId: 12
-    Interfaces:
-      - {Name: SafetyCan, Link: SafetyCan}
+    Interfaces: [SafetyCan]
 
 Links:
   - {Name: OperatorEthernet, LinkType: ETHERNET}
-  - {Name: ChassisCan, LinkType: CAN_FD}
-  - {Name: PowertrainCan, LinkType: CAN_FD}
-  - {Name: HydraulicCan, LinkType: CAN_FD}
-  - {Name: SafetyCan, LinkType: CAN_FD}
+  - {Name: ChassisCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: PowertrainCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: HydraulicCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: SafetyCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
 
 Groups:
   Drives: [DriveA, DriveB]

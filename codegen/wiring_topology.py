@@ -1,152 +1,76 @@
-"""Resolve authored topology into selected interface attachments, without runtime policy."""
+"""Resolve WireSpaces topology policy over a NetworkX host/Link graph."""
 
-from collections import deque
-from dataclasses import dataclass
+from __future__ import annotations
 
+from collections.abc import Mapping
+
+import networkx as nx
+
+from wiring_models import (
+    Attachment, AuthoredDeployment, HostDeclaration, PathDeclaration,
+    ResolvedDeployment, ResolvedWire, WireDeclaration, frozen_mapping,
+)
 from wiring_schema import parse_deployment, require
 
-
-@dataclass
-class ResolvedDeployment:
-    hosts: dict
-    links: dict
-    wires: dict
-    groups: dict
-    paths: dict
-
-    def route_masks(self, wire):
-        masks = {host: 0 for host in wire["Members"]}
-        for host, declaration in self.hosts.items():
-            for interface in declaration["Interfaces"]:
-                if f"{host}.{interface['Name']}" in wire["Attachments"]:
-                    masks[host] = masks.get(host, 0) | (1 << interface["EgressBit"])
-        return dict(sorted(masks.items()))
-
-    def explain(self, local_host):
-        """Stable inspection with named source declarations, independent of YAML list order."""
-        hosts = {}
-        for name, host in sorted(self.hosts.items()):
-            interfaces = {}
-            for interface in sorted(host["Interfaces"], key=lambda i: i["EgressBit"]):
-                interfaces[interface["Name"]] = {
-                    "link": interface["Link"], "egress_bit": interface["EgressBit"],
-                    "assignment": interface["BitAssignment"],
-                    "source": f"Hosts.{name}.Interfaces.{interface['Name']}",
-                    "link_declaration": self.links[interface["Link"]],
-                }
-            hosts[name] = {"host_id": host["HostId"], "source": f"Hosts.{name}", "interfaces": interfaces,
-                           "memberships": sorted(w["Name"] for w in self.wires.values() if name in w["Members"])}
-        wires = {}
-        for name, wire in sorted(self.wires.items()):
-            source = {"wire": {k: wire[k] for k in ("Name", "WireId", "Hosts", "Groups", "Links", "Path")
-                               if k in wire},
-                      "groups": {g: self.groups[g] for g in wire.get("Groups", [])}}
-            if "Path" in wire:
-                source["path"] = {wire["Path"]: self.paths[wire["Path"]]}
-            # Membership and legacy Link declarations are sets, not ordered paths.
-            for key in ("Hosts", "Groups", "Links"):
-                if key in source["wire"]:
-                    source["wire"][key] = sorted(source["wire"][key])
-            source["groups"] = {g: sorted(members) for g, members in source["groups"].items()}
-            wires[name] = {
-                "wire_id": wire["WireId"], "members": wire["Members"],
-                "transit_hosts": wire["TransitHosts"], "selection": wire["Selection"],
-                "attachments": wire["Attachments"], "route_masks": self.route_masks(wire),
-                "source": source,
-            }
-        return {"local_host": local_host, "route_semantics": "local-origin; ingress participation is not enforced",
-                "hosts": hosts, "wires": wires}
+Node = tuple[str, str]
 
 
 class PhysicalGraph:
-    """Bipartite host/Link graph; each edge is one physical interface attachment."""
+    """Shared Links are nodes, and interfaces are edges, not pairwise bus connections."""
 
-    def __init__(self, hosts):
-        self.adj = {("host", name): {} for name in hosts}
-        self.interfaces = {}
+    def __init__(self, hosts: Mapping[str, HostDeclaration]):
+        self.graph = nx.Graph()
+        self.interfaces: dict[str, Attachment] = {}
+        self.graph.add_nodes_from(("host", name) for name in sorted(hosts))
         for name, host in sorted(hosts.items()):
-            for interface in sorted(host["Interfaces"], key=lambda i: i["Name"]):
-                ref = f"{name}.{interface['Name']}"
-                a, b = ("host", name), ("link", interface["Link"])
-                self.interfaces[ref] = (a, b)
-                self.adj[a][b] = ref
-                self.adj.setdefault(b, {})[a] = ref
-        self.bridges = self.find_bridges()
+            for interface in sorted(host.interfaces, key=lambda i: i.name):
+                attachment = Attachment(name, interface.name, interface.link)
+                self.interfaces[attachment.reference] = attachment
+                self.graph.add_edge(("host", name), ("link", interface.link), attachment=attachment)
+        self.bridges = {self.attachment(a, b) for a, b in nx.bridges(self.graph)}
 
-    def find_bridges(self):
-        # Iterative Tarjan traversal also handles long chains without Python recursion limits.
-        entered, low, bridges = {}, {}, set()
-        for root in sorted(self.adj):
-            if root in entered:
-                continue
-            entered[root] = low[root] = len(entered)
-            stack = [(root, None, iter(sorted(self.adj[root])))]
-            while stack:
-                node, parent, peers = stack[-1]
-                peer = next(peers, None)
-                if peer is None:
-                    stack.pop()
-                    if parent is not None:
-                        low[parent] = min(low[parent], low[node])
-                        if low[node] > entered[parent]:
-                            bridges.add(self.adj[node][parent])
-                elif peer != parent:
-                    if peer in entered:
-                        low[node] = min(low[node], entered[peer])
-                    else:
-                        entered[peer] = low[peer] = len(entered)
-                        stack.append((peer, node, iter(sorted(self.adj[peer]))))
-        return bridges
+    def attachment(self, a: Node, b: Node) -> Attachment:
+        return self.graph.edges[a, b]["attachment"]
 
-    def infer(self, wire):
-        members = wire["Members"]
+    def infer(self, wire: WireDeclaration, members: tuple[str, ...]) -> set[Attachment]:
         if len(members) == 1:
             return set()
         root = ("host", members[0])
-        parents = {root: None}
-        queue = deque([root])
-        while queue:
-            node = queue.popleft()
-            for peer in sorted(self.adj[node]):
-                if peer not in parents:
-                    parents[peer] = node
-                    queue.append(peer)
-        selected = set()
+        # BFS only supplies a witness path. Every edge must be a bridge: a shorter
+        # path is never preferred over an alternative, even a much longer one.
+        parents = {root: None, **dict(nx.bfs_predecessors(self.graph, root, sort_neighbors=sorted))}
+        selected: set[Attachment] = set()
         for member in members[1:]:
             node = ("host", member)
-            require(node in parents, f"Wire {wire['Name']}: disconnected members {members[0]} and {member}")
+            require(node in parents, f"Wire {wire.name}: disconnected members {members[0]} and {member}")
             while parents[node] is not None:
                 parent = parents[node]
-                ref = self.adj[node][parent]
-                if ref not in self.bridges:
-                    alternative = self.alternative_path(node, parent, ref)
+                attachment = self.attachment(node, parent)
+                if attachment not in self.bridges:
+                    alternative = self.alternative_path(node, parent, attachment)
                     raise ValueError(
-                        f"Wire {wire['Name']}: ambiguous connectivity from {members[0]} to {member}; "
-                        f"{ref} on Link {self.interfaces[ref][1][1]} conflicts with "
+                        f"Wire {wire.name}: ambiguous connectivity from {members[0]} to {member}; "
+                        f"{attachment.reference} on Link {attachment.link} conflicts with "
                         f"attachments {' -> '.join(alternative)}. Choose an explicit Path or Links selection.")
-                selected.add(ref)
+                selected.add(attachment)
                 node = parent
         return selected
 
-    def alternative_path(self, start, end, excluded):
-        """Return a concrete ambiguity witness, excluding the disputed attachment."""
-        parents = {start: None}
-        queue = deque([start])
-        while queue and end not in parents:
-            node = queue.popleft()
-            for peer, ref in sorted(self.adj[node].items()):
-                if ref != excluded and peer not in parents:
-                    parents[peer] = node
-                    queue.append(peer)
+    def alternative_path(self, start: Node, end: Node, excluded: Attachment) -> list[str]:
+        """Get a deterministic ambiguity witness without changing the physical graph."""
+        graph = nx.subgraph_view(
+            self.graph, filter_edge=lambda a, b: self.attachment(a, b) != excluded)
+        parents = dict(nx.bfs_predecessors(graph, start, sort_neighbors=sorted))
         path, node = [], end
-        while parents[node] is not None:
+        while node != start:
             parent = parents[node]
-            path.append(self.adj[node][parent])
+            path.append(self.attachment(node, parent).reference)
             node = parent
         return list(reversed(path))
 
-    def chain(self, name, chain):
-        label = f"Path {name}"
+    def chain(self, path: PathDeclaration) -> tuple[set[Attachment], set[str]]:
+        # These are WireSpaces chain grammar rules, not generic graph traversal.
+        chain, label = path.interfaces, f"Path {path.name}"
         require(len(chain) >= 2 and len(chain) % 2 == 0, f"{label}: requires complete hop pairs (at least one hop)")
         for ref in chain:
             require(ref in self.interfaces, f"{label}: unknown interface {ref}")
@@ -154,59 +78,60 @@ class PhysicalGraph:
         previous_host = previous_interface = None
         for index in range(0, len(chain), 2):
             left, right = chain[index:index + 2]
-            (a, link), (b, other_link) = self.interfaces[left], self.interfaces[right]
-            require(link == other_link and a != b, f"{label}: invalid hop pair {left}, {right}")
+            a, b = self.interfaces[left], self.interfaces[right]
+            require(a.link == b.link and a.host != b.host, f"{label}: invalid hop pair {left}, {right}")
             if previous_host is None:
-                visited_hosts.add(a[1])
+                visited_hosts.add(a.host)
             else:
-                require(a == previous_host, f"{label}: consecutive hops must join through the same host")
+                require(a.host == previous_host, f"{label}: consecutive hops must join through the same host")
                 require(left != previous_interface, f"{label}: transit host must use distinct interfaces")
-            require(b[1] not in visited_hosts and link[1] not in visited_links,
+            require(b.host not in visited_hosts and a.link not in visited_links,
                     f"{label}: repeated host or Link creates a cycle")
-            visited_hosts.add(b[1])
-            visited_links.add(link[1])
-            previous_host, previous_interface = b, right
-        return set(chain), visited_hosts
+            visited_hosts.add(b.host)
+            visited_links.add(a.link)
+            previous_host, previous_interface = b.host, right
+        return {self.interfaces[ref] for ref in chain}, visited_hosts
 
-    def legacy(self, wire):
-        selected_links = set(wire["Links"])
-        selected = {ref for ref, (_, link) in self.interfaces.items() if link[1] in selected_links}
-        graph = {("host", name): set() for name in wire["Members"]}
-        for link in selected_links:
+    def legacy(self, wire: WireDeclaration, members: tuple[str, ...]) -> set[Attachment]:
+        selected_links = set(wire.links or ())
+        selected = {a for a in self.interfaces.values() if a.link in selected_links}
+        graph = nx.Graph()
+        graph.add_nodes_from(("host", name) for name in members)
+        for link in sorted(selected_links):
             node = ("link", link)
-            require(len(self.adj.get(node, {})) >= 2,
-                    f"Wire {wire['Name']}: Link {link} needs at least two attached hosts")
-        for ref in selected:
-            a, b = self.interfaces[ref]
-            graph.setdefault(a, set()).add(b)
-            graph.setdefault(b, set()).add(a)
-        seen, stack = set(), [(min(graph), None)]
-        while stack:
-            node, parent = stack.pop()
-            require(node not in seen, f"Wire {wire['Name']} contains a propagation loop")
-            seen.add(node)
-            stack.extend((peer, node) for peer in sorted(graph[node]) if peer != parent)
-        require(len(seen) == len(graph), f"Wire {wire['Name']} is disconnected")
+            require(node in self.graph and self.graph.degree(node) >= 2,
+                    f"Wire {wire.name}: Link {link} needs at least two attached hosts")
+        graph.add_edges_from((("host", a.host), ("link", a.link)) for a in selected)
+        # Preserve legacy diagnostic precedence: examine the root component for
+        # cycles before reporting other disconnected components.
+        component = graph.subgraph(nx.node_connected_component(graph, min(graph)))
+        require(nx.is_tree(component), f"Wire {wire.name} contains a propagation loop")
+        require(nx.is_connected(graph), f"Wire {wire.name} is disconnected")
         return selected
 
 
-def resolve_deployment(data):
-    """Validate once, then resolve each Wire without granting membership to transit hosts."""
-    hosts, links, wires, groups, paths = parse_deployment(data)
-    graph = PhysicalGraph(hosts)
-    chains = {name: graph.chain(name, chain) for name, chain in sorted(paths.items())}
-    for wire in wires.values():
-        if "Path" in wire:
-            selected, visited = chains[wire["Path"]]
-            require(set(wire["Members"]) <= visited,
-                    f"Wire {wire['Name']}: Path {wire['Path']} is missing members "
-                    f"{sorted(set(wire['Members']) - visited)}")
+def resolve_deployment(data: AuthoredDeployment | dict) -> ResolvedDeployment:
+    """Expand membership and resolve attachments; never assign target egress bits."""
+    authored = data if isinstance(data, AuthoredDeployment) else parse_deployment(data)
+    graph = PhysicalGraph(authored.hosts)
+    chains = {name: graph.chain(path) for name, path in authored.paths.items()}
+    wires = {}
+    for wire in authored.wires.values():
+        expanded = set(wire.hosts or ())
+        for group in wire.groups or ():
+            expanded.update(authored.groups[group].hosts)
+        require(expanded, f"Wire {wire.name} requires at least one member host")
+        members = tuple(sorted(expanded))
+        if wire.path is not None:
+            selected, visited = chains[wire.path]
+            require(expanded <= visited,
+                    f"Wire {wire.name}: Path {wire.path} is missing members {sorted(expanded - visited)}")
             mode = "path"
-        elif "Links" in wire:
-            selected, mode = graph.legacy(wire), "links"
+        elif wire.links is not None:
+            selected, mode = graph.legacy(wire, members), "links"
         else:
-            selected, mode = graph.infer(wire), "inferred"
-        wire["Selection"] = mode
-        wire["Attachments"] = sorted(selected)
-        wire["TransitHosts"] = sorted({graph.interfaces[ref][0][1] for ref in selected} - set(wire["Members"]))
-    return ResolvedDeployment(hosts, links, wires, groups, paths)
+            selected, mode = graph.infer(wire, members), "inferred"
+        wires[wire.name] = ResolvedWire(
+            wire, members, tuple(sorted({a.host for a in selected} - expanded)),
+            tuple(sorted(selected, key=lambda a: a.reference)), mode)
+    return ResolvedDeployment(authored, frozen_mapping(wires))

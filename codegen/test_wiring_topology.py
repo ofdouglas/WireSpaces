@@ -10,10 +10,26 @@ from pathlib import Path
 
 import yaml
 
-from wiring_codegen import generate_header
+from wiring_codegen import generate_header, compile_deployment
+from wiring_inspection import explain_deployment
+from wiring_projection import project_deployment
 from wiring_topology import resolve_deployment
 
 ROOT = Path(__file__).resolve().parent
+PROJECT_SCHEMAS = (
+    ROOT.parent / "hardware/bench/topology.yaml",
+    ROOT.parent / "sketches_b/topologies/amr.yaml",
+    ROOT.parent / "sketches_b/topologies/excavator.yaml",
+)
+
+
+def attachment_refs(wire):
+    return [a.reference for a in wire.attachments]
+
+
+def route_masks(model, wire):
+    return {name: route.egress_mask for name, host in project_deployment(model).hosts.items()
+            for route in host.routes if route.wire.name == wire.declaration.name}
 
 
 def topology(links, members):
@@ -23,7 +39,7 @@ def topology(links, members):
         "Hosts": [{"Name": host, "HostId": index, "Interfaces": [
             {"Name": link, "Link": link} for link, attached in links.items() if host in attached]}
             for index, host in enumerate(names)],
-        "Links": [{"Name": link, "LinkType": "CAN"} for link in links],
+        "Links": [{"Name": link, "LinkType": "CAN", "ArbitrationBitrate": 500000} for link in links],
         "Wires": [{"Name": "Test", "WireId": 1, "Hosts": members}],
     }
 
@@ -38,10 +54,10 @@ class TopologyTest(unittest.TestCase):
     def test_tree_and_shared_bus_selection(self):
         model = self.resolved()
         wire = model.wires["Test"]
-        self.assertEqual(wire["Members"], ["A", "C"])
-        self.assertEqual(wire["TransitHosts"], ["B"])
-        self.assertEqual(wire["Attachments"], ["A.Bus", "B.Bus", "B.Tail", "C.Tail"])
-        self.assertEqual(model.route_masks(wire), {"A": 1, "B": 3, "C": 1})
+        self.assertEqual(list(wire.members), ["A", "C"])
+        self.assertEqual(list(wire.transit_hosts), ["B"])
+        self.assertEqual(attachment_refs(wire), ["A.Bus", "B.Bus", "B.Tail", "C.Tail"])
+        self.assertEqual(route_masks(model, wire), {"A": 1, "B": 3, "C": 1})
         header = generate_header(self.data, namespace="test", header_name="", local_host_name="Listener")
         self.assertIn("return {};", header)
         self.assertIn("kListenerHostInfo{kListenerHost, 0U, {}}", header)
@@ -51,9 +67,9 @@ class TopologyTest(unittest.TestCase):
     def test_groups_union_and_references(self):
         self.data["Groups"] = {"Ends": ["A", "C"], "Overlap": ["C"]}
         self.data["Wires"][0].update(Hosts=["A"], Groups=["Ends", "Overlap"])
-        self.assertEqual(self.resolved().wires["Test"]["Members"], ["A", "C"])
+        self.assertEqual(list(self.resolved().wires["Test"].members), ["A", "C"])
         del self.data["Wires"][0]["Hosts"]
-        self.assertEqual(self.resolved().wires["Test"]["Members"], ["A", "C"])
+        self.assertEqual(list(self.resolved().wires["Test"].members), ["A", "C"])
         for groups in ({"Ends": ["Missing"]}, {"Ends": ["Overlap"], "Overlap": ["A"]},
                        {"bad-name": ["A"]}, []):
             data = copy.deepcopy(self.data)
@@ -67,8 +83,8 @@ class TopologyTest(unittest.TestCase):
     def test_local_only_even_on_cycle(self):
         data = topology({"Bus": ["A", "B"], "Parallel": ["A", "B"]}, ["A"])
         wire = self.resolved(data).wires["Test"]
-        self.assertEqual(wire["Attachments"], [])
-        self.assertEqual(self.resolved(data).route_masks(wire), {"A": 0})
+        self.assertEqual(attachment_refs(wire), [])
+        self.assertEqual(route_masks(self.resolved(data), wire), {"A": 0})
         data["Wires"][0].pop("Hosts")
         with self.assertRaisesRegex(ValueError, "member"):
             self.resolved(data)
@@ -76,7 +92,7 @@ class TopologyTest(unittest.TestCase):
     def test_irrelevant_cycle(self):
         data = topology({"Main": ["A", "B", "C"], "Branch": ["B", "D"], "Parallel": ["B", "D"]},
                         ["A", "C"])
-        self.assertEqual(self.resolved(data).wires["Test"]["Attachments"], ["A.Main", "C.Main"])
+        self.assertEqual(attachment_refs(self.resolved(data).wires["Test"]), ["A.Main", "C.Main"])
 
     def test_disconnection_parallel_and_ring(self):
         for links, pattern in [
@@ -92,17 +108,17 @@ class TopologyTest(unittest.TestCase):
     def test_legacy_includes_every_attachment(self):
         self.data["Wires"][0]["Links"] = ["Bus", "Tail"]
         model = self.resolved()
-        self.assertIn("Listener.Bus", model.wires["Test"]["Attachments"])
-        self.assertEqual(model.wires["Test"]["TransitHosts"], ["B", "Listener"])
-        self.assertEqual(model.route_masks(model.wires["Test"])["Listener"], 1)
+        self.assertIn("Listener.Bus", attachment_refs(model.wires["Test"]))
+        self.assertEqual(list(model.wires["Test"].transit_hosts), ["B", "Listener"])
+        self.assertEqual(route_masks(model, model.wires["Test"])["Listener"], 1)
 
     def test_explicit_bits_reserved_before_automatic(self):
         data = topology({"Zulu": ["A"], "Alpha": ["A"], "Middle": ["A"]}, ["A"])
         data["Hosts"][0]["Interfaces"][0]["EgressBit"] = 0
         expected = {"Zulu": 0, "Alpha": 1, "Middle": 2}
         for _ in range(2):
-            interfaces = self.resolved(data).hosts["A"]["Interfaces"]
-            self.assertEqual({i["Name"]: i["EgressBit"] for i in interfaces}, expected)
+            interfaces = project_deployment(self.resolved(data)).hosts["A"].interfaces
+            self.assertEqual({i.declaration.name: i.egress_bit for i in interfaces}, expected)
             data["Hosts"][0]["Interfaces"].reverse()
         with self.assertRaisesRegex(ValueError, "eight"):
             self.resolved(topology({f"Link{i}": ["A"] for i in range(9)}, ["A"]))
@@ -115,8 +131,8 @@ class TopologyTest(unittest.TestCase):
 
     def test_explicit_transit_and_bus_selection(self):
         data = self.path_data()
-        self.assertEqual(self.resolved(data).wires["Test"]["Attachments"],
-                         self.resolved().wires["Test"]["Attachments"])
+        self.assertEqual(attachment_refs(self.resolved(data).wires["Test"]),
+                         attachment_refs(self.resolved().wires["Test"]))
         data["Wires"][0]["Hosts"].append("Listener")
         with self.assertRaisesRegex(ValueError, "Wire Test.*missing members"):
             self.resolved(data)
@@ -158,7 +174,7 @@ class TopologyTest(unittest.TestCase):
         data = self.path_data()
         data["Groups"] = {"Ends": ["C", "A"]}
         data["Wires"][0].update(Groups=["Ends"], Hosts=["A"])
-        expected = self.resolved(data).explain("B")
+        expected = explain_deployment(compile_deployment(data), "B")
         wire = expected["wires"]["Test"]
         self.assertEqual(wire["source"]["path"]["ViaB"], data["Paths"]["ViaB"])
         self.assertEqual(wire["source"]["groups"]["Ends"], ["A", "C"])
@@ -170,7 +186,7 @@ class TopologyTest(unittest.TestCase):
         for host in data["Hosts"]:
             host["Interfaces"].reverse()
         self.assertEqual(json.dumps(expected, sort_keys=True),
-                         json.dumps(self.resolved(data).explain("B"), sort_keys=True))
+                         json.dumps(explain_deployment(compile_deployment(data), "B"), sort_keys=True))
         command = [sys.executable, str(ROOT / "wiring_codegen.py"), str(ROOT / "demo.yaml"),
                    "--local-host", "Arduino", "--explain"]
         first = subprocess.run(command, check=True, capture_output=True, text=True).stdout
@@ -180,7 +196,7 @@ class TopologyTest(unittest.TestCase):
                                           capture_output=True).returncode, 0)
 
     def test_examples_generate_for_every_host(self):
-        for path in sorted((ROOT / "examples").glob("*.yaml")):
+        for path in PROJECT_SCHEMAS:
             data = yaml.safe_load(path.read_text())
             for host in data["Hosts"]:
                 with self.subTest(example=path.name, host=host["Name"]):

@@ -1,45 +1,26 @@
 # Topology only: no endpoints or authorization policy.
+# CAN rates are illustrative: confirm arbitration/data timing for the actual system.
 Hosts:
   - Name: Pc
     HostId: 1
-    Interfaces:
-      - {Name: UartVcp, Link: UartVcp}
+    Interfaces: [UartVcp]
   - Name: Gateway
     HostId: 2
-    Interfaces:
-      - {Name: UartVcp, Link: UartVcp}
-      - {Name: CanA, Link: CanA}
-      - {Name: CanB, Link: CanB}
-      - {Name: Multidrop, Link: Multidrop}
+    Interfaces: [UartVcp, CanA, CanB, Multidrop]
   - Name: LeafA
     HostId: 3
-    Interfaces:
-      - {Name: CanA, Link: CanA}
-      - {Name: CanB, Link: CanB}
-      - {Name: Multidrop, Link: Multidrop}
-      - {Name: RingA, Link: RingA}
-      - {Name: RingC, Link: RingC}
+    Interfaces: [CanA, CanB, Multidrop, RingA, RingC]
   - Name: LeafB
     HostId: 4
-    Interfaces:
-      - {Name: CanA, Link: CanA}
-      - {Name: CanB, Link: CanB}
-      - {Name: Multidrop, Link: Multidrop}
-      - {Name: RingA, Link: RingA}
-      - {Name: RingB, Link: RingB}
+    Interfaces: [CanA, CanB, Multidrop, RingA, RingB]
   - Name: LeafC
     HostId: 5
-    Interfaces:
-      - {Name: CanA, Link: CanA}
-      - {Name: CanB, Link: CanB}
-      - {Name: Multidrop, Link: Multidrop}
-      - {Name: RingB, Link: RingB}
-      - {Name: RingC, Link: RingC}
+    Interfaces: [CanA, CanB, Multidrop, RingB, RingC]
 
 Links:
   - {Name: UartVcp, LinkType: UART_HDLC, BaudRate: 115200}
-  - {Name: CanA, LinkType: CAN_FD}
-  - {Name: CanB, LinkType: CAN_FD}
+  - {Name: CanA, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: CanB, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
   - {Name: Multidrop, LinkType: UART_HDLC, BaudRate: 115200}
   - {Name: RingA, LinkType: UART_HDLC, BaudRate: 115200}
   - {Name: RingB, LinkType: UART_HDLC, BaudRate: 115200}

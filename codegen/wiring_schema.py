@@ -1,9 +1,13 @@
 """Parsing and structural validation for deployment authoring."""
 
-import copy
 import re
 
 import yaml
+
+from wiring_models import (
+    AuthoredDeployment, GroupDeclaration, HostDeclaration, InterfaceDeclaration,
+    LinkDeclaration, PathDeclaration, WireDeclaration, frozen_mapping,
+)
 
 class SchemaLoader(yaml.SafeLoader):
     """Reject duplicate mapping keys instead of silently overriding configuration."""
@@ -62,9 +66,22 @@ def references(items, known, label):
     require(set(items) <= known.keys(), f"Unknown reference in {label}: {set(items) - known.keys()}")
 
 
-def parse_deployment(data):
+def interface_declarations(items):
+    """Normalize string and Link-only shorthand without modifying the input."""
+    require(isinstance(items, list), "Interfaces must be a list")
+    declarations = []
+    for item in items:
+        if isinstance(item, str):
+            declarations.append({"Name": item, "Link": item})
+        else:
+            fields(item, ("Link",), ("Name", "EgressBit"))
+            declarations.append({**item, "Name": item.get("Name", item["Link"])})
+    return named(declarations, "Interfaces")
+
+
+def parse_deployment(data) -> AuthoredDeployment:
+    """Validate the existing YAML syntax and take a typed snapshot, without derived fields."""
     fields(data, ("Hosts", "Links", "Wires"), ("Groups", "Paths"))
-    data = copy.deepcopy(data)
     hosts = named(data["Hosts"], "Hosts")
     links = named(data["Links"], "Links")
     wires = named(data["Wires"], "Wires")
@@ -80,12 +97,14 @@ def parse_deployment(data):
         require(isinstance(chain, list) and all(isinstance(ref, str) for ref in chain),
                 f"Path {name} must list interface references")
     used_ids = set()
+    host_interfaces = {}
     for host in hosts.values():
         fields(host, ("Name", "HostId", "Interfaces"))
         integer(host["HostId"], 0, 254, "HostId")
         require(host["HostId"] not in used_ids, "Duplicate HostId")
         used_ids.add(host["HostId"])
-        interfaces = named(host["Interfaces"], "Interfaces")
+        interfaces = interface_declarations(host["Interfaces"])
+        host_interfaces[host["Name"]] = interfaces
         require(len(interfaces) <= 8, f"Host {host['Name']} exceeds eight interfaces")
         bits, attached = set(), set()
         for interface in interfaces.values():
@@ -97,16 +116,20 @@ def parse_deployment(data):
             require(isinstance(interface["Link"], str) and interface["Link"] in links, "Unknown interface Link")
             require(interface["Link"] not in attached, "A host may attach to a Link only once")
             attached.add(interface["Link"])
-        for name in sorted(interfaces):
-            interface = interfaces[name]
-            interface["BitAssignment"] = "explicit" if "EgressBit" in interface else "automatic"
-            if "EgressBit" not in interface:
-                bit = next(bit for bit in range(8) if bit not in bits)
-                interface["EgressBit"] = bit
-                bits.add(bit)
     for link in links.values():
-        fields(link, ("Name", "LinkType"), ("BaudRate",))
+        fields(link, ("Name", "LinkType"), ("BaudRate", "ArbitrationBitrate", "DataBitrate"))
         identifier(link["LinkType"])
+        label = f"Link {link['Name']}"
+        is_can = link["LinkType"] in ("CAN", "CAN_FD")
+        if is_can:
+            require("ArbitrationBitrate" in link, f"{label}: {link['LinkType']} requires ArbitrationBitrate")
+            require("BaudRate" not in link, f"{label}: use ArbitrationBitrate, not BaudRate, for CAN")
+        if "ArbitrationBitrate" in link:
+            require(is_can, f"{label}: ArbitrationBitrate is only valid for CAN or CAN_FD")
+            integer(link["ArbitrationBitrate"], 1, 0xFFFFFFFF, f"{label} ArbitrationBitrate")
+        if "DataBitrate" in link:
+            require(link["LinkType"] == "CAN_FD", f"{label}: DataBitrate is only valid for CAN_FD")
+            integer(link["DataBitrate"], 1, 0xFFFFFFFF, f"{label} DataBitrate")
         if "BaudRate" in link:
             integer(link["BaudRate"], 1, 0xFFFFFFFF, "BaudRate")
         if link["LinkType"] == "UART_HDLC":
@@ -125,13 +148,24 @@ def parse_deployment(data):
             references(wire["Links"], links, f"{label} Links")
         if "Path" in wire:
             require(isinstance(wire["Path"], str) and wire["Path"] in paths, f"{label}: unknown Path")
-        members = set(wire.get("Hosts", []))
-        for group in wire.get("Groups", []):
-            members.update(groups[group])
-        require(members, f"{label} requires at least one member host")
-        wire["Members"] = sorted(members)
-    for host in hosts:
-        require(sum(host in w["Members"] for w in wires.values()) <= 6,
-                f"Host {host} exceeds six membership Wires")
-    return hosts, links, wires, groups, paths
-
+    return AuthoredDeployment(
+        hosts=frozen_mapping({
+            name: HostDeclaration(name, host["HostId"], tuple(
+                InterfaceDeclaration(i["Name"], i["Link"], i.get("EgressBit"))
+                for i in host_interfaces[name].values()))
+            for name, host in hosts.items()}),
+        links=frozen_mapping({
+            name: LinkDeclaration(name, link["LinkType"], link.get("BaudRate"),
+                                  link.get("ArbitrationBitrate"), link.get("DataBitrate"))
+            for name, link in links.items()}),
+        wires=frozen_mapping({
+            name: WireDeclaration(
+                name, wire["WireId"],
+                tuple(wire["Hosts"]) if "Hosts" in wire else None,
+                tuple(wire["Groups"]) if "Groups" in wire else None,
+                tuple(wire["Links"]) if "Links" in wire else None,
+                wire.get("Path"))
+            for name, wire in wires.items()}),
+        groups=frozen_mapping({name: GroupDeclaration(name, tuple(members)) for name, members in groups.items()}),
+        paths=frozen_mapping({name: PathDeclaration(name, tuple(chain)) for name, chain in paths.items()}),
+    )

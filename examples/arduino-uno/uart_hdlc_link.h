@@ -33,15 +33,15 @@ private:
 };
 
 /**
- * @brief Poll USART0 and dispatch every valid packet.
+ * @brief Poll USART0 and route/dispatch every valid packet through its selected ingress.
  *
  * PacketBufferType supplies the fixed payload storage used while dispatching.
- * Dispatch must copy accepted data before process() reuses that stack storage.
+ * Forwarders and receivers must copy accepted data before process() reuses that stack storage.
  */
 template <typename PacketBufferType>
 class UartHdlcReceiver final {
 public:
-    void process(const Dispatcher& dispatcher) noexcept;
+    void process(const Router& router, const Dispatcher& dispatcher, std::uint8_t ingress_index) noexcept;
 
 private:
     static constexpr std::size_t kMaximumCanonicalSize{sizeof(Header) + PacketBufferType::kPayloadCapacity};
@@ -71,7 +71,7 @@ void UartHdlcForwarder<kMaximumPayloadSize>::forward(const PacketBuffer& packet,
 
 template <typename PacketBufferType>
 void UartHdlcReceiver<PacketBufferType>::process(
-    const Dispatcher& dispatcher) noexcept {
+    const Router& router, const Dispatcher& dispatcher, std::uint8_t ingress_index) noexcept {
     while (platform::avr::uart0ByteAvailable()) {
         const std::uint8_t byte{platform::avr::uart0ReadByte()};
         if (!decoder_.push(byte)) {
@@ -87,7 +87,7 @@ void UartHdlcReceiver<PacketBufferType>::process(
                 if (payload_size > 0U) {
                     std::memcpy(packet.payload().data(), frame.data() + sizeof(Header), payload_size);
                 }
-                static_cast<void>(dispatcher.dispatch(packet));
+                static_cast<void>(router.receive(packet, ingress_index, dispatcher));
             }
         }
         decoder_.consume();

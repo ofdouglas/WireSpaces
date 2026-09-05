@@ -27,12 +27,14 @@ TEST(PacketTest, CopiesContentsWithoutCapacityOrUnusedBytes) {
     source.header().source = HostId{2U};
     source.header().destination = HostId{3U};
     source.header().endpoint = EndpointAddress{123U};
+    source.setIngressIndex(8U);
     std::memcpy(source.payload().data(), "abc", 3U);
     ASSERT_TRUE(output.resize(8U));
     std::memset(output.payload().data(), 0xAA, 8U);
     ASSERT_TRUE(output.copyFrom(source));
     EXPECT_EQ(output.capacity(), 8U);
     EXPECT_EQ(output.size(), 3U);
+    EXPECT_EQ(output.ingressIndex(), 8U);
     EXPECT_EQ(std::memcmp(&output.header(), &source.header(), sizeof(Header)), 0);
     EXPECT_EQ(std::memcmp(output.payload().data(), "abc", 3U), 0);
     ASSERT_TRUE(output.resize(8U));
@@ -50,11 +52,13 @@ TEST(PacketTest, FailedCopyPreservesDestination) {
     ASSERT_TRUE(source.resize(9U));
     ASSERT_TRUE(output.resize(8U));
     output.header().wire = WireNumber{17U};
+    output.setIngressIndex(4U);
     std::memset(output.payload().data(), 0xAA, 8U);
     EXPECT_FALSE(output.copyFrom(source));
     EXPECT_EQ(output.capacity(), 8U);
     EXPECT_EQ(output.size(), 8U);
     EXPECT_EQ(output.header().wire, WireNumber{17U});
+    EXPECT_EQ(output.ingressIndex(), 4U);
     for (const auto byte : output.payload()) {
         EXPECT_EQ(byte, 0xAAU);
     }
@@ -64,16 +68,42 @@ TEST(PacketTest, FailedCopyPreservesDestination) {
 TEST(PacketTest, CopiesSelfAndEmptyPayload) {
     SmallPacket packet{};
     ASSERT_TRUE(packet.resize(8U));
+    packet.setIngressIndex(3U);
     std::memset(packet.payload().data(), 0xAA, 8U);
     ASSERT_TRUE(packet.copyFrom(packet));
+    EXPECT_EQ(packet.ingressIndex(), 3U);
     EXPECT_EQ(packet.size(), 8U);
     EXPECT_EQ(packet.payload()[7], 0xAAU);
     TestPacket empty{};
     empty.header().wire = WireNumber{9U};
     ASSERT_TRUE(packet.copyFrom(empty));
     EXPECT_EQ(packet.size(), 0U);
+    EXPECT_EQ(packet.ingressIndex(), 0U);
     EXPECT_EQ(packet.header().wire, WireNumber{9U});
     EXPECT_EQ(packet.capacity(), 8U);
+}
+
+// Ingress is host-local: resize preserves it; successful initialization/replies clear it.
+TEST(PacketTest, IngressMetadataLifecycleAndSerialization) {
+    SmallPacket packet{};
+    EXPECT_EQ(sizeof(PacketBuffer), 12U);
+    EXPECT_EQ(packet.ingressIndex(), 0U);
+    ASSERT_TRUE(packet.initialize(3U, support::defaultControlFields()));
+    std::memcpy(packet.payload().data(), "abc", 3U);
+    uint8_t canonical[sizeof(Header) + 3U]{};
+    std::memcpy(canonical, packet.headerAndPayload().data(), sizeof(canonical));
+    packet.setIngressIndex(8U);
+    EXPECT_EQ(std::memcmp(canonical, packet.headerAndPayload().data(), sizeof(canonical)), 0);
+    ASSERT_TRUE(packet.resize(2U));
+    EXPECT_EQ(packet.ingressIndex(), 8U);
+    EXPECT_FALSE(packet.initialize(9U, support::defaultControlFields()));
+    EXPECT_EQ(packet.ingressIndex(), 8U);
+    ASSERT_TRUE(packet.initialize(3U, support::defaultControlFields()));
+    EXPECT_EQ(packet.ingressIndex(), 0U);
+    packet.setIngressIndex(2U);
+    const Header request{packet.header()};
+    ASSERT_TRUE(packet.initializeResponseTo(request, 1U, support::defaultControlFields()));
+    EXPECT_EQ(packet.ingressIndex(), 0U);
 }
 
 // Initialization sets size and canonical control fields without changing capacity.

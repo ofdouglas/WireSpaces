@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 import unittest
 
+import test_support  # Make compiler modules importable for standalone runs.
+
 from test_wiring_topology import topology
 from wiring_codegen import compile_deployment, emit_header
 from wiring_inspection import explain_deployment
@@ -96,7 +98,7 @@ class LinkConfigTest(unittest.TestCase):
                     source = Path(directory) / "check.cpp"
                     source.write_text(header.replace("#pragma once\n", "") + "\n".join(assertions))
                     subprocess.run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
-                                    "-I", str(Path(__file__).resolve().parents[1] / "lib"), str(source)],
+                                    "-I", str(Path(__file__).resolve().parents[2] / "lib"), str(source)],
                                    check=True, capture_output=True)
 
     def test_can_requires_positive_integer_rates_and_rejects_unrelated_fields(self):

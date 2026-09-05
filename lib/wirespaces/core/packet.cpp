@@ -17,6 +17,7 @@ bool PacketBuffer::copyFrom(const PacketBuffer& source) noexcept {
     }
     header_ = source.header_;
     size_ = source.size_;
+    ingress_index_ = source.ingress_index_;
     if (size_ > 0U) {
         std::memcpy(payload().data(), source.payload().data(), size_);
     }
@@ -36,6 +37,7 @@ bool PacketBuffer::initialize(uint16_t new_size, ControlFields control_fields) n
         return false;
     }
     header_.setControlFields(control_fields);
+    ingress_index_ = 0U;
     return true;
 }
 

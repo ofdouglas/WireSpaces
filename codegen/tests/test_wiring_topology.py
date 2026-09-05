@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import test_support  # Make the compiler modules importable from this test directory.
 import yaml
 
 from wiring_codegen import generate_header, compile_deployment
@@ -15,11 +16,11 @@ from wiring_inspection import explain_deployment
 from wiring_projection import project_deployment
 from wiring_topology import resolve_deployment
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 PROJECT_SCHEMAS = (
     ROOT.parent / "hardware/bench/topology.yaml",
-    ROOT.parent / "sketches_b/topologies/amr.yaml",
-    ROOT.parent / "sketches_b/topologies/excavator.yaml",
+    ROOT / "examples/amr.yaml",
+    ROOT / "examples/excavator.yaml",
 )
 
 
@@ -97,7 +98,7 @@ class TopologyTest(unittest.TestCase):
     def test_disconnection_parallel_and_ring(self):
         for links, pattern in [
             ({"One": ["A", "B"], "Two": ["C", "D"]}, "disconnected"),
-            ({"One": ["A", "C"], "Two": ["A", "C"]}, "ambiguous.*Path or Links"),
+            ({"One": ["A", "C"], "Two": ["A", "C"]}, "ambiguous.*Path, Realization or Links"),
             ({"One": ["A", "B"], "Two": ["B", "C"], "Three": ["C", "A"]}, "ambiguous"),
             ({"Short": ["A", "C"], "Ab": ["A", "B"], "Bd": ["B", "D"], "Dc": ["D", "C"]},
              "ambiguous"),  # A shorter route is not a reason to select it automatically.
@@ -120,7 +121,7 @@ class TopologyTest(unittest.TestCase):
             interfaces = project_deployment(self.resolved(data)).hosts["A"].interfaces
             self.assertEqual({i.declaration.name: i.egress_bit for i in interfaces}, expected)
             data["Hosts"][0]["Interfaces"].reverse()
-        with self.assertRaisesRegex(ValueError, "eight"):
+        with self.assertRaisesRegex(ValueError, "at most 8"):
             self.resolved(topology({f"Link{i}": ["A"] for i in range(9)}, ["A"]))
 
     def path_data(self):
@@ -139,7 +140,7 @@ class TopologyTest(unittest.TestCase):
 
     def test_invalid_chains(self):
         cases = [
-            ([], "hop pairs"), (["A.Bus"], "hop pairs"),
+            ([], "at least 2"), (["A.Bus"], "at least 2"),
             (["A.Bus", "Unknown.Bus"], "unknown interface"),
             (["A.Bus", "C.Tail"], "invalid hop"),
             (["A.Bus", "A.Bus"], "invalid hop"),

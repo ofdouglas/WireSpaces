@@ -51,6 +51,12 @@ class PathDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class RealizationDeclaration:
+    name: str
+    attachments: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class WireDeclaration:
     name: str
     wire_id: int
@@ -59,6 +65,7 @@ class WireDeclaration:
     groups: tuple[str, ...] | None = None
     links: tuple[str, ...] | None = None
     path: str | None = None
+    realization: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +75,7 @@ class AuthoredDeployment:
     wires: Mapping[str, WireDeclaration]
     groups: Mapping[str, GroupDeclaration]
     paths: Mapping[str, PathDeclaration]
+    realizations: Mapping[str, RealizationDeclaration]
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +95,7 @@ class ResolvedWire:
     members: tuple[str, ...]
     transit_hosts: tuple[str, ...]
     attachments: tuple[Attachment, ...]
-    selection: Literal["inferred", "links", "path"]
+    selection: Literal["inferred", "links", "path", "realization"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +127,10 @@ class InterfaceProjection:
     @property
     def mask(self) -> int:
         return 1 << self.egress_bit
+
+    @property
+    def ingress_index(self) -> int:
+        return self.egress_bit + 1
 
     @property
     def assignment(self) -> str:

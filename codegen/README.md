@@ -5,7 +5,8 @@ Run from examples/arduino-uno:
     make generate-wiring
     make test-codegen
 
-Python 3.11+ with PyYAML and NetworkX is required. Install the pinned compiler
+Python 3.11+ with PyYAML, Pydantic and NetworkX is required (jsonschema tests editor
+contract parity). Install the pinned compiler
 dependencies in a local environment, from the repository root:
 
     python3 -m venv codegen/.venv
@@ -32,6 +33,41 @@ Deployment YAML belongs to its project: in the project directory or a sibling or
 child configuration directory. There is no compiler-owned configuration registry
 and no special meaning to the input filename. codegen/demo.yaml is a standalone
 language example, not the source used to build the Uno project.
+
+## Structural validation and editor support
+
+The strict Pydantic models in wiring_structure.py are the single source for field
+shapes and the generated JSON Schema in wiring.schema.json. Unknown keys are
+rejected at every object level; integers are not coerced from strings, booleans or
+floats. Optional fields may be omitted, but explicit null is rejected. Duplicate
+YAML mapping keys and duplicate membership references are errors. Semantic checks
+then resolve identities/references, normalized interface uniqueness, bit collisions,
+membership limits and topology. Even unused Paths and Realizations must be valid.
+
+YAML editors with YAML Language Server support can use the included modeline:
+
+```yaml
+# yaml-language-server: $schema=../wiring.schema.json
+```
+
+Use a path relative to the YAML file (project configurations point back to codegen).
+This supplies field completion, descriptions, structural diagnostics and LinkType
+variants without a second hand-maintained schema. Cross-reference and graph errors
+require running the compiler; JSON Schema does not resolve host or Link names.
+JSON numbers have no separate lexical integer/float types, so the compiler also
+rejects YAML `1.0` where an integer is required even if an editor accepts it.
+
+Regenerate the checked-in editor schema and run the Python tests from the repo root:
+
+    make -C codegen schema
+    make -C codegen test
+
+Equivalent schema command from the repo root:
+
+    codegen/.venv/bin/python codegen/wiring_structure.py --output codegen/wiring.schema.json
+
+The tests fail if the generated schema is stale
+and check accepted/rejected structures against both validation implementations.
 
 Names must start with an uppercase ASCII letter, contain only letters, digits,
 and underscores, and must not contain double underscores. They are used verbatim:
@@ -99,7 +135,7 @@ Links:
 
 Migration: existing CAN/CAN_FD declarations must now provide ArbitrationBitrate.
 No bitrate is silently chosen for an authored deployment. The bench and machine
-sketch examples use explicitly labelled illustrative 500 kbit/s arbitration and
+reference examples use explicitly labelled illustrative 500 kbit/s arbitration and
 2 Mbit/s data rates; confirm these for the actual systems.
 
 Wires keep explicit WireId values and list Hosts, named Groups, or both. Membership
@@ -116,7 +152,7 @@ Wires:
     Groups: [Drives]
 ```
 
-With neither Links nor Path, the resolver infers the unique minimal tree connecting
+With no Links, Path or Realization, the resolver infers the unique minimal tree connecting
 members. Physical Links are graph nodes, not pairwise connections between every
 bus listener. Starting with the alphabetically first member, it finds paths to
 the other members and requires every selected interface edge to be a graph bridge.
@@ -134,6 +170,7 @@ When connectivity is ambiguous, choose one of:
   **all** attachments on those Links, including nonmember hosts. The resulting
   propagation graph must be connected and acyclic; each Link needs two hosts.
 - Path: a reusable named interface chain. It selects only the listed attachments.
+- Realization: a reusable exact set of interface attachments, supporting branches.
 
 ```yaml
 Paths:
@@ -156,10 +193,43 @@ Each pair is one hop over the same Link between different hosts. Consecutive
 pairs join at the same transit host using different interfaces. A chain needs
 at least one hop, cannot revisit a host or Link, and must include every Wire
 member. Transit hosts need not be members. All named paths are validated,
-including unused ones. Links and Path cannot be combined on a Wire.
+including unused ones. Links, Path and Realization are mutually exclusive on a Wire.
 
-There are no nested groups, wildcards, generated identities, branched explicit
-paths, endpoint declarations, or authorization policies.
+### Exact branched realizations
+
+```yaml
+Realizations:
+  TestTree:
+    Attachments:
+      - Root.Uplink
+      - Gateway.Uplink
+      - Gateway.Bus
+      - LeafA.Bus
+      - LeafB.Bus
+      - Gateway.Tail
+      - LeafC.Tail
+Wires:
+  - Name: Test
+    WireId: 1
+    Hosts: [Root, LeafA, LeafB, LeafC]
+    Realization: TestTree
+```
+
+Attachments name exact `Host.Interface` edges of the physical host/Link graph;
+their order is immaterial. At least two distinct valid attachments are required.
+Their graph must be connected and acyclic, and every selected Link needs at least
+two selected attachments. Every Wire member must occur in the tree. Extra hosts
+are propagation participants, not local members. Nonmember leaves are permitted
+when explicitly selected; the resolver does not prune authored selections.
+
+Branches can occur at a host (Gateway) or a shared Link (Bus). Other listeners on
+Bus are excluded unless listed. The complete runnable example is
+codegen/examples/branched.yaml, including an unselected physical bypass. Multiple
+Wires may reuse one realization with different membership; reuse never grants
+service authority. Branched Paths are not added: Paths remain linear chains.
+
+There are no nested groups, wildcards, generated identities, endpoint declarations,
+or authorization policies.
 
 ## Inspection and examples
 
@@ -169,21 +239,22 @@ Inspect resolution without generating C++:
 
 The deterministic JSON includes all hosts' egress assignments and memberships,
 expanded Wire members, transit hosts, selected interface attachments, and route
-masks. Each result links back to named Wire, Group, Path, interface, and Link
+masks and ingress indices. Each result links back to named Wire, Group, Path,
+Realization, interface, and Link
 declarations. Absent host route entries mean no participation; a member with a
 zero mask is local-only. --explain cannot be combined with --output.
 
 - codegen/demo.yaml: standalone inferred two-host UART example.
-- examples/arduino-uno/demo.yaml: application-owned deployment used by its Makefile;
-  the generated header is unchanged.
+- examples/arduino-uno/demo.yaml: application-owned deployment used by its Makefile.
 - hardware/bench/topology.yaml: all seven planned PCB Links, including two shared CAN-FD
   buses, UART multidrop and three ring Links. LongBenchPath deliberately travels
   through Gateway, LeafA, and LeafB to LeafC. Other test Wires exercise the other
   Links using explicit selections. UART rates are example settings, not hardware
   validation; LinkType labels do not implement drivers or arbitration.
-- sketches_b/topologies/amr.yaml and sketches_b/topologies/excavator.yaml: topology-only adaptations of
-  sketches_b/07_amr.md and 08_excavator.md, using HostId, groups and inferred trees.
+- codegen/examples/amr.yaml and codegen/examples/excavator.yaml: durable topology-only
+  reference models using HostId, groups and inferred trees.
   Native non-WireSpaces RS-485/LIN peripherals are outside these graphs.
+- codegen/examples/branched.yaml: exact host/bus branches with a bypass and bus listener excluded.
 
 ## Compiler stages
 
@@ -197,7 +268,8 @@ The frozen records in wiring_models.py separate three representations:
 3. TargetProjection: per-host interface bits, membership tables and route masks
    for the current runtime. Constructor binding order is fixed here, not by the emitter.
 
-Parsing/validation lives in wiring_schema.py, topology resolution in
+Structural shapes live in wiring_structure.py; parsing/reference validation in
+wiring_schema.py, topology resolution in
 wiring_topology.py, target lowering in wiring_projection.py, inspection serialization
 in wiring_inspection.py and C++ emission in wiring_codegen.py. compile_deployment()
 composes the stages; emit_header() consumes an existing projection. The original
@@ -206,7 +278,7 @@ generate_header() convenience entry point and CLI remain available.
 Collections are immutable snapshots. Dictionaries are used at YAML/JSON boundaries
 and for temporary indexes, not as mixed authored/resolved packet-routing records.
 The current eight-interface and six-membership restrictions remain unchanged.
-This iteration does not add Pydantic, JSON Schema, ingress forwarding or zero-copy.
+Zero-copy remains outside this iteration.
 
 NetworkX owns bridge discovery, breadth-first traversal, connectivity and tree
 checks. WireSpaces retains the shared-bus model, explicit chain rules, legacy Link
@@ -215,16 +287,22 @@ ambiguity witnesses deterministic. No shortest-path routing policy is introduced
 
 Tests retain compiled generated-forwarder checks and pre-refactor C++/inspection
 output hashes for every example host plus a legacy explicit-bit deployment.
-New CAN timing/format fields are excluded from those legacy hashes and checked
+New CAN timing/format fields and ingress constants/annotations are excluded from those legacy hashes and checked
 separately through validation, inspection, and compiled constant assertions.
 An exhaustive 512-graph corpus cross-checks inference against enumerated simple
 paths. Additional tests cover immutable stage boundaries and process-independent
-inspection output.
+inspection output. Python unit tests and their fixtures live in codegen/tests.
+The compiled branched-network test binds every generated Forwarder to queued
+simulated Links and runs the real Router, Dispatcher and EndpointReceiverQueue.
+It checks all member-to-member unicast directions and broadcasts, one transmission
+per selected Link, no reflection, unselected ingress rejection, transit membership
+and exclusion of the extra bus listener. Core tests cover ingress bounds, metadata
+copy/lifecycle/serialization, zero-mask compatibility and leaf delivery.
 
 ## Generated API
 
 Output contains deployment HostIds and WireNumbers, the selected host's HostInfo,
-interface masks and baud rates, routes(), and a Forwarder class. Constructor
+interface masks, ingress indices and baud rates, routes(), and a Forwarder class. Constructor
 arguments follow ascending EgressBit order. Supply an application-owned
 PacketForwarder for each interface. Each selected bit invokes its bound forwarder
 once, passing that interface's single-bit mask. Zero and unknown bits do nothing.
@@ -242,6 +320,53 @@ the derived CAN transmission settings (including bitrate_switch).
 Routes combine all applicable local interface masks into one entry per Wire.
 Local-only Wires have a zero mask; local delivery remains the application's
 responsibility. An empty route set returns an empty span.
-These routes are for locally originated traffic. The current Router API lacks
-ingress identity, so this output does not implement gateway ingress forwarding
-or reflection suppression.
+
+## Ingress and propagation contract
+
+Each generated `k{Name}IngressIndex` equals its host-local egress bit + 1 (1..8).
+PacketBuffer stores the index in one byte of its existing alignment padding;
+the prefix remains 12 bytes, payload alignment and canonical wire bytes are unchanged.
+Zero means no ingress/local origin and is the default. `copyFrom` (including
+EndpointReceiverQueue copying) preserves ingress; `resize` also preserves it.
+Successful `initialize` and `initializeResponseTo` clear it. Failed operations
+leave the previous packet unchanged. Reusing a received buffer for a new outbound
+packet requires initialization or an explicit `setIngressIndex(0)`.
+
+After validating Link framing and canonical packet length, the receiving driver
+calls `router.receive(packet, k{Name}IngressIndex, dispatcher)`. A router task may
+call the same API after dequeueing. Always stamp the **receiving host's** index,
+including in-memory/zero-copy Links; indices have no meaning across hosts and are
+never trusted from transmitted bytes. The current UART examples use this boundary.
+
+For an admitted packet, the route's local-origin mask also describes its permitted
+ingress attachments. Receive rejects index zero, indices above eight, missing Wire
+routes and unselected ingress before any effects. It forwards to `route_mask &
+~ingress_mask`, never back to the ingress Link. At a leaf this is zero: no forwarder
+call, `kNoEgress`, but local delivery can still succeed. Each selected bus is sent
+once, irrespective of how many hosts are attached. Local delivery requires local
+Wire membership and the Dispatcher's unicast/broadcast destination checks. Transit
+participation alone never causes delivery, even for a packet addressed to that host.
+
+This is static tree flooding for both unicast and broadcast, not destination-pruned
+routing. Arrival addressed to a local member does not stop propagation to other
+selected branches. A physical bus can still deliver bits to unselected listeners;
+their receive boundary drops packets without a selected route. This is routing
+configuration, **not authentication or a security boundary**: ingress cannot prove
+which physical peer sent a bus frame, and local-origin `forward` trusts its caller.
+There is no duplicate cache or TTL; all hosts must use a consistent acyclic deployment.
+
+`Router::forward` accepts zero-tagged local origin and validates/excludes nonzero
+tags, but does not itself dispatch locally. For compatibility, a local-origin zero
+route mask is still offered to a custom forwarder (e.g. LocalDomainForwarder);
+the generated Forwarder emits nothing for it. Direct Dispatcher calls retain their
+existing semantics; external Link drivers should use `Router::receive` to enforce
+ingress and membership. Routing and endpoint delivery report independent results;
+Link forwarders currently return void, so `kForwarded` means offered, not guaranteed
+physical delivery. Queue-full endpoint results do not undo propagation.
+
+Router/Dispatcher borrow packet storage synchronously. Outbound Links and endpoint
+receivers must copy or acquire ownership before returning; service work may poll
+its queue later. Driver-context or router-task execution is chosen by the integrator,
+as is required synchronization. This iteration does not add threads, memory pools
+or zero-copy ownership. Multi-node hardware validation awaits the bench/Link drivers;
+host runtime tests do not claim hardware timing or arbitration coverage.

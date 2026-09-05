@@ -8,7 +8,7 @@ import networkx as nx
 
 from wiring_models import (
     Attachment, AuthoredDeployment, HostDeclaration, PathDeclaration,
-    ResolvedDeployment, ResolvedWire, WireDeclaration, frozen_mapping,
+    RealizationDeclaration, ResolvedDeployment, ResolvedWire, WireDeclaration, frozen_mapping,
 )
 from wiring_schema import parse_deployment, require
 
@@ -51,7 +51,7 @@ class PhysicalGraph:
                     raise ValueError(
                         f"Wire {wire.name}: ambiguous connectivity from {members[0]} to {member}; "
                         f"{attachment.reference} on Link {attachment.link} conflicts with "
-                        f"attachments {' -> '.join(alternative)}. Choose an explicit Path or Links selection.")
+                        f"attachments {' -> '.join(alternative)}. Choose an explicit Path, Realization or Links selection.")
                 selected.add(attachment)
                 node = parent
         return selected
@@ -92,6 +92,21 @@ class PhysicalGraph:
             previous_host, previous_interface = b.host, right
         return {self.interfaces[ref] for ref in chain}, visited_hosts
 
+    def realization(self, declaration: RealizationDeclaration) -> tuple[set[Attachment], set[str]]:
+        """An exact attachment tree supports host and shared-bus branches alike."""
+        label = f"Realization {declaration.name}"
+        for ref in declaration.attachments:
+            require(ref in self.interfaces, f"{label}: unknown interface {ref}")
+        selected = {self.interfaces[ref] for ref in declaration.attachments}
+        graph = nx.Graph()
+        graph.add_edges_from((("host", a.host), ("link", a.link)) for a in selected)
+        for kind, name in sorted(graph):
+            if kind == "link":
+                require(graph.degree((kind, name)) >= 2, f"{label}: dangling Link {name} needs two attachments")
+        require(nx.is_connected(graph), f"{label}: disconnected attachments")
+        require(nx.is_tree(graph), f"{label}: propagation cycle")
+        return selected, {a.host for a in selected}
+
     def legacy(self, wire: WireDeclaration, members: tuple[str, ...]) -> set[Attachment]:
         selected_links = set(wire.links or ())
         selected = {a for a in self.interfaces.values() if a.link in selected_links}
@@ -115,6 +130,7 @@ def resolve_deployment(data: AuthoredDeployment | dict) -> ResolvedDeployment:
     authored = data if isinstance(data, AuthoredDeployment) else parse_deployment(data)
     graph = PhysicalGraph(authored.hosts)
     chains = {name: graph.chain(path) for name, path in authored.paths.items()}
+    realizations = {name: graph.realization(value) for name, value in authored.realizations.items()}
     wires = {}
     for wire in authored.wires.values():
         expanded = set(wire.hosts or ())
@@ -127,6 +143,11 @@ def resolve_deployment(data: AuthoredDeployment | dict) -> ResolvedDeployment:
             require(expanded <= visited,
                     f"Wire {wire.name}: Path {wire.path} is missing members {sorted(expanded - visited)}")
             mode = "path"
+        elif wire.realization is not None:
+            selected, visited = realizations[wire.realization]
+            require(expanded <= visited,
+                    f"Wire {wire.name}: Realization {wire.realization} is missing members {sorted(expanded - visited)}")
+            mode = "realization"
         elif wire.links is not None:
             selected, mode = graph.legacy(wire, members), "links"
         else:

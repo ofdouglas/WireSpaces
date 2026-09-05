@@ -13,6 +13,7 @@ import sys
 import unittest
 
 import networkx as nx
+import test_support  # Make the compiler modules importable from this test directory.
 import yaml
 
 import test_wiring_codegen as legacy_tests
@@ -24,7 +25,7 @@ from wiring_projection import project_deployment
 from wiring_schema import parse_deployment
 from wiring_topology import resolve_deployment
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class ModelTest(unittest.TestCase):
@@ -85,14 +86,14 @@ class ModelTest(unittest.TestCase):
         fixtures = {
             "demo": ROOT / "demo.yaml",
             "bench": ROOT.parent / "hardware/bench/topology.yaml",
-            "amr": ROOT.parent / "sketches_b/topologies/amr.yaml",
-            "excavator": ROOT.parent / "sketches_b/topologies/excavator.yaml",
+            "amr": ROOT / "examples/amr.yaml",
+            "excavator": ROOT / "examples/excavator.yaml",
         }
         cases = {name: yaml.safe_load(path.read_text()) for name, path in fixtures.items()}
         legacy = legacy_tests.WiringTest()
         legacy.setUp()
         cases["Legacy"] = legacy.two_links()
-        expected = json.loads((ROOT / "testdata/output_sha256.json").read_text())
+        expected = json.loads((ROOT / "tests/testdata/output_sha256.json").read_text())
         observed = {}
         for name, data in cases.items():
             target = compile_deployment(data)
@@ -103,10 +104,16 @@ class ModelTest(unittest.TestCase):
                 header = re.sub(
                     r"^constexpr (?:std::uint32_t|bool) k\w+(?:ArbitrationBitrate|DataBitrate|UseFdFrames|BitRateSwitch)\{.*\};\n",
                     "", header, flags=re.MULTILINE)
+                header = re.sub(r"^constexpr std::uint8_t k\w+IngressIndex\{.*\};\n", "", header, flags=re.MULTILINE)
+                header = header.replace(
+                    "// Routes are local-origin masks; Router::receive validates and excludes the selected ingress.",
+                    "// Routes describe locally originated traffic; ingress-aware gateway routing is not provided.")
                 details = explain_deployment(target, host)
+                details["route_semantics"] = "local-origin; ingress participation is not enforced"
                 for detail in details["hosts"].values():
                     for interface in detail["interfaces"].values():
                         interface.pop("can", None)
+                        interface.pop("ingress_index", None)
                         interface["link_declaration"].pop("ArbitrationBitrate", None)
                         interface["link_declaration"].pop("DataBitrate", None)
                 inspection = json.dumps(details, sort_keys=True, indent=2) + "\n"

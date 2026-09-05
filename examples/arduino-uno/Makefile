@@ -105,7 +105,7 @@ $(BUILD_DIR)/main.o $(BUILD_DIR)/bits_ram_transfer.o $(BUILD_DIR)/mcp2515_can_te
 $(BOOT_PROFILE_BUILD_DIR)/ram_test.o $(BOOT_PROFILE_BUILD_DIR)/size_profile.o: demo_wiring.h
 
 test-codegen:
-	$(CODEGEN_PYTHON) -m unittest discover -s $(WIRESPACES_ROOT)/codegen -p 'test_*.py' -v
+	$(CODEGEN_PYTHON) -m unittest discover -s $(WIRESPACES_ROOT)/codegen/tests -p 'test_*.py' -v
 
 $(BOOT_PROFILE_BUILD_DIR):
 	mkdir -p $@

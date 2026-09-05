@@ -6,11 +6,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import test_support  # Make the compiler modules importable from this test directory.
 import yaml
 
 from wiring_codegen import SchemaLoader, generate_header
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class WiringTest(unittest.TestCase):

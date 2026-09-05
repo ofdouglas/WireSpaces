@@ -36,15 +36,21 @@ public:
         return size_ + sizeof(Header);
     }
 
+    // Host-local metadata, never serialized: zero means local origin; 1..8
+    // identify the receiving interface by its egress bit + 1.
+    [[nodiscard]] uint8_t ingressIndex() const noexcept { return ingress_index_; }
+    void setIngressIndex(uint8_t index) noexcept { ingress_index_ = index; }
+
     [[nodiscard]] bool resize(uint16_t size) noexcept;
     /**
      * @brief Copy packet contents into this buffer without changing its capacity.
      *
-     * Copies the header, active payload size and active payload bytes. Self-copy
+     * Copies the header, ingress tag, active payload size and active payload bytes. Self-copy
      * succeeds. Insufficient capacity leaves this buffer unchanged. Source and
      * destination must be distinct nonoverlapping buffers unless they are identical.
      */
     [[nodiscard]] bool copyFrom(const PacketBuffer& source) noexcept;
+    // Successful initialization (including responses) clears ingress; resize preserves it.
     [[nodiscard]] bool initialize(uint16_t size, ControlFields control_fields) noexcept;
     [[nodiscard]] bool initializeResponseTo(const Header& request_header, uint16_t size, ControlFields control_fields) noexcept;  
 
@@ -65,11 +71,13 @@ protected:
 private:
     uint16_t capacity_{0U};
     uint16_t size_{0U};
-    uint16_t payload_alignment_padding_{0U};
+    uint8_t ingress_index_{0U};
+    uint8_t payload_alignment_padding_{0U};
     Header header_{};
 };
 
 static_assert(alignof(PacketBuffer) >= 4U, "PacketBuffer must be four-byte aligned");
+static_assert(sizeof(PacketBuffer) == 12U, "Ingress metadata must not grow the packet prefix");
 static_assert((sizeof(PacketBuffer) % 4U) == 0U, "Packet payload offset must be four-byte aligned");
 
 }  // namespace wirespaces

@@ -9,21 +9,38 @@
 
 #include <cstdint>
 
+
+namespace wirespaces::crc {
+
+/**
+ * @brief Controls CRC processing (incremental, all-at-once, etc).
+ */
+struct ComputeFlags {
+    static constexpr uint8_t kInitialize = 1 << 0U;
+    static constexpr uint8_t kFinalize = 1 << 1U;
+    uint8_t value{0U};
+};
+
+constexpr ComputeFlags kDefaultComputeFlags{ComputeFlags::kInitialize | ComputeFlags::kFinalize};
+
+} // namespace wirespaces::crc
+
 namespace wirespaces::crc::details {
 
 /**
  * @brief Calculate a non-reflected CRC over contiguous input bytes.
  *
- * @tparam CrcAlgorithm CRC parameter specification.
+ * @tparam CrcAlgorithm The CRC parameter specification.
  * @param[in] input Bytes protected by the CRC.
- * @return Computed CRC value.
+ * @param[in] initial CRC register when @p flags omits kInitialize.
+ * @param[in] flags Compute flags.
+ * @return Computed CRC value, or the intermediate register when @p flags omits kFinalize.
  *
  * @todo Handle reflect_in and reflect_out.
- * @todo Support incremental processing (update, ... finalize).
  */
 template <typename CrcAlgorithm>
 constexpr typename CrcAlgorithm::value_type crcBitwise(
-    foundation::Span<const uint8_t> input) noexcept {
+    foundation::Span<const uint8_t> input, typename CrcAlgorithm::value_type initial, ComputeFlags flags) noexcept {
     static_assert(!(CrcAlgorithm::reflect_in || CrcAlgorithm::reflect_out),
                   "Reflection not implemented yet");
 
@@ -31,7 +48,7 @@ constexpr typename CrcAlgorithm::value_type crcBitwise(
     constexpr T kMsbBit = static_cast<T>(static_cast<T>(1U) << ((sizeof(T) * 8U) - 1U));
     constexpr size_t kDataShift{8U * (sizeof(T) - 1U)};
 
-    T result{CrcAlgorithm::initial};
+    T result = (flags.value & ComputeFlags::kInitialize) ? CrcAlgorithm::initial : initial;
     for (const uint8_t byte : input) {
         result ^= static_cast<T>(byte) << kDataShift;
         for (uint8_t bit_index{0U}; bit_index < 8U; ++bit_index) {
@@ -41,7 +58,7 @@ constexpr typename CrcAlgorithm::value_type crcBitwise(
         }
     }
 
-    return static_cast<T>(result ^ CrcAlgorithm::xorOut);
+    return (flags.value & ComputeFlags::kFinalize) ? static_cast<T>(result ^ CrcAlgorithm::xorOut) : result;
 }
 
 /** @brief Compile-time specification and implementation of one CRC algorithm. */
@@ -62,11 +79,27 @@ struct SpecImpl {
     }
 
     /** @brief Compute this CRC over one contiguous byte span. */
-    static constexpr value_type compute(foundation::Span<const uint8_t> input) noexcept {
-        return crcBitwise<Derived>(input);
+    static constexpr value_type compute(
+        foundation::Span<const uint8_t> input,
+        ComputeFlags flags = kDefaultComputeFlags,
+        value_type initial = Derived::initial) noexcept {
+        return crcBitwise<Derived>(input, initial, flags);
     }
 
-    // TODO: support incremental processing (update, ... finalize).
+    /** @brief Return the initial CRC register before any input has been processed. */
+    static constexpr value_type init() noexcept {
+        return crcBitwise<Derived>({}, Derived::initial, ComputeFlags{ComputeFlags::kInitialize});
+    }
+
+    /** @brief Update the CRC register with more input bytes. */
+    static constexpr value_type update(foundation::Span<const uint8_t> input, value_type state) noexcept {
+        return crcBitwise<Derived>(input, state, ComputeFlags{});
+    }
+
+    /** @brief Apply xorOut to a CRC register after all input has been processed. */
+    static constexpr value_type finalize(value_type state) noexcept {
+        return crcBitwise<Derived>({}, state, ComputeFlags{ComputeFlags::kFinalize});
+    }
 };
 
 }  // namespace wirespaces::crc::details

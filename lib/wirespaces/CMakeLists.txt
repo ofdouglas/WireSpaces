@@ -114,6 +114,17 @@ if(BUILD_TESTING AND WIRESPACES_BUILD_LIBRARY_TESTS)
     gtest_discover_tests(wirespaces_services_tests)
 
     add_executable(
+        wirespaces_crc_tests
+        crc/test/crc_test.cpp
+    )
+    target_link_libraries(
+        wirespaces_crc_tests
+        PRIVATE WireSpaces::crc GTest::gtest_main
+    )
+    wirespaces_configure_host_target(wirespaces_crc_tests)
+    gtest_discover_tests(wirespaces_crc_tests)
+
+    add_executable(
         wirespaces_uart_hdlc_tests
         links/uart_hdlc/test/hdlc_test.cpp
     )

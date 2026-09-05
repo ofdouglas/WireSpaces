@@ -53,7 +53,9 @@ private:
     heartbeat::HeartbeatService<1000U> heartbeat_service_{
         &router_, wiring_constants::kTestWire, wiring_constants::kArduinoHost,
         wirespaces::HostId{wirespaces::kBroadcastHostValue}};
+
     ping::PingService ping_service_{&router_};
+    
     led_control::LedControlService led_control_service_{
         &router_, wirespaces::platform::avr::setBuiltinLedBrightness, nullptr};
 
@@ -73,7 +75,7 @@ void DemoApplication::initialize() noexcept {
 }
 
 void DemoApplication::runOnce() noexcept {
-    uart_receiver_.process(dispatcher_);
+    uart_receiver_.process(router_, dispatcher_, demo_wiring::kUartIngressIndex);
     ping_service_.run();
     led_control_service_.run();
     heartbeat_service_.run();

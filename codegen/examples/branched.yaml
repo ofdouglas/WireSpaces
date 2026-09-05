@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../wiring.schema.json
+# A physical redundant Link and an unselected bus listener are deliberately present.
+Hosts:
+  - {Name: Root, HostId: 1, Interfaces: [Uplink, Bypass]}
+  - {Name: Gateway, HostId: 2, Interfaces: [Uplink, Bus, Tail, Bypass]}
+  - {Name: LeafA, HostId: 3, Interfaces: [Bus]}
+  - {Name: LeafB, HostId: 4, Interfaces: [Bus]}
+  - {Name: LeafC, HostId: 5, Interfaces: [Tail]}
+  - {Name: Observer, HostId: 6, Interfaces: [Bus]}
+Links:
+  - {Name: Uplink, LinkType: UART_HDLC, BaudRate: 115200}
+  - {Name: Bus, LinkType: CAN, ArbitrationBitrate: 500000}
+  - {Name: Tail, LinkType: UART_HDLC, BaudRate: 115200}
+  - {Name: Bypass, LinkType: UART_HDLC, BaudRate: 115200}
+Groups:
+  Terminals: [Root, LeafA, LeafB, LeafC]
+Realizations:
+  TestTree:
+    Attachments:
+      - Root.Uplink
+      - Gateway.Uplink
+      - Gateway.Bus
+      - LeafA.Bus
+      - LeafB.Bus
+      - Gateway.Tail
+      - LeafC.Tail
+Wires:
+  - {Name: Test, WireId: 1, Groups: [Terminals], Realization: TestTree}

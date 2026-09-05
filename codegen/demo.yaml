@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=./wiring.schema.json
 # Names are uppercase-leading C++ identifiers, used verbatim in generated names.
 Hosts:
   - Name: Arduino

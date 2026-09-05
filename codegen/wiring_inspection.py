@@ -23,6 +23,7 @@ def explain_deployment(projection: TargetProjection, local_host: str) -> dict:
                 link_declaration["DataBitrate"] = link.data_bitrate
             interfaces[declaration.name] = {
                 "link": declaration.link, "egress_bit": interface.egress_bit,
+                "ingress_index": interface.ingress_index,
                 "assignment": interface.assignment,
                 "source": f"Hosts.{name}.Interfaces.{declaration.name}",
                 "link_declaration": link_declaration,
@@ -48,6 +49,10 @@ def explain_deployment(projection: TargetProjection, local_host: str) -> dict:
         if declaration.path is not None:
             wire_source["Path"] = declaration.path
             source["path"] = {declaration.path: list(authored.paths[declaration.path].interfaces)}
+        if declaration.realization is not None:
+            wire_source["Realization"] = declaration.realization
+            source["realization"] = {declaration.realization: {
+                "Attachments": sorted(authored.realizations[declaration.realization].attachments)}}
         masks = {h: route.egress_mask for h, host in projection.hosts.items()
                  for route in host.routes if route.wire.name == name}
         wires[name] = {
@@ -56,5 +61,5 @@ def explain_deployment(projection: TargetProjection, local_host: str) -> dict:
             "attachments": [a.reference for a in wire.attachments], "route_masks": masks,
             "source": source,
         }
-    return {"local_host": local_host, "route_semantics": "local-origin; ingress participation is not enforced",
+    return {"local_host": local_host, "route_semantics": "local-origin mask; receive validates and excludes ingress",
             "hosts": hosts, "wires": wires}

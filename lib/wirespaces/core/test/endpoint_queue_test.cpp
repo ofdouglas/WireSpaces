@@ -29,14 +29,17 @@ TEST(EndpointReceiverQueueTest, CopiesAndDequeuesPacket) {
     TestReceiverQueue receiver{};
     TestPacket ingress{PacketBuilder{}.withPayload("first").packet()};
     const Header expected_header{ingress.header()};
+    ingress.setIngressIndex(7U);
     ASSERT_EQ(receiver.receive(ingress), ReceiveResult::kAccepted);
     ingress.payload()[0] = static_cast<uint8_t>('X');
+    ingress.setIngressIndex(2U);
 
     DequeuedPacket output{};
     ASSERT_TRUE(receiver.dequeue(output));
     EXPECT_EQ(output.header().wire, expected_header.wire);
     EXPECT_EQ(output.header().source, expected_header.source);
     EXPECT_EQ(output.size(), 5U);
+    EXPECT_EQ(output.ingressIndex(), 7U);
     EXPECT_EQ(output.capacity(), kQueuePayloadCapacity);
     EXPECT_EQ(std::memcmp(output.payload().data(), "first", 5U), 0);
 }

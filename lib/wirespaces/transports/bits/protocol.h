@@ -52,11 +52,11 @@ struct Setup {
 };
 
 /** @brief Geometry derived from Compact SETUP fields. */
-[[nodiscard]] constexpr uint32_t setupSegmentCount(const Setup& setup) noexcept {
+constexpr uint32_t setupSegmentCount(const Setup& setup) noexcept {
     return static_cast<uint32_t>(setup.final_segment_index) + 1U;
 }
 
-[[nodiscard]] constexpr uint32_t setupTotalSize(const Setup& setup) noexcept {
+constexpr uint32_t setupTotalSize(const Setup& setup) noexcept {
     return static_cast<uint32_t>(setup.final_segment_index) * setup.segment_size +
            setup.final_segment_size;
 }

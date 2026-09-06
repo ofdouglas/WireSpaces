@@ -47,7 +47,7 @@ public:
     [[nodiscard]] int run();
 
 private:
-    [[nodiscard]] int exit(EcuProcessExitCode exit_code) const;
+    int exit(EcuProcessExitCode exit_code) const;
 
     NetworkRuntime& network_;
     EcuApplication& application_;

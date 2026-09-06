@@ -18,6 +18,50 @@ namespace {
 using support::TestPacket;
 WS_PACKET_BUFFER_DEFINE(SmallPacket, 8U);
 
+// Complete initialization replaces stale addresses/controls and ingress, not payload storage.
+TEST(PacketTest, InitializesCompleteConnectionAtSizeBoundaries) {
+    constexpr ConnectionAddress connection{WireNumber{7U}, HostId{2U}, HostId{3U}, EndpointAddress{123U}};
+    SmallPacket packet{};
+    for (const uint16_t size : {0U, 8U}) {
+        ASSERT_TRUE(packet.initialize(8U, ControlFields{QoS::kCritical, true, TransportType::kSimple}));
+        std::memset(packet.payload().data(), 0xAA, 8U);
+        packet.header().wire = WireNumber{99U};
+        packet.header().source = HostId{98U};
+        packet.header().destination = HostId{97U};
+        packet.header().endpoint = EndpointAddress{96U};
+        packet.setIngressIndex(8U);
+        ASSERT_TRUE(packet.initialize(size, connection, ControlFields::bits(QoS::kHigh)));
+        EXPECT_EQ(packet.size(), size);
+        EXPECT_EQ(packet.capacity(), 8U);
+        EXPECT_EQ(packet.ingressIndex(), 0U);
+        EXPECT_EQ(packet.header().wire, connection.wire);
+        EXPECT_EQ(packet.header().source, connection.local_host);
+        EXPECT_EQ(packet.header().destination, connection.remote_host);
+        EXPECT_EQ(packet.header().endpoint, connection.endpoint);
+        EXPECT_EQ(packet.header().qos(), QoS::kHigh);
+        EXPECT_EQ(packet.header().transportType(), TransportType::kBits);
+        EXPECT_FALSE(packet.header().hasExtensions());
+        ASSERT_TRUE(packet.resize(8U));
+        for (const auto byte : packet.payload()) EXPECT_EQ(byte, 0xAAU);
+    }
+}
+
+// Rejected complete initialization preserves header, active bytes, size, capacity and ingress.
+TEST(PacketTest, FailedConnectionInitializationLeavesPacketUnchanged) {
+    SmallPacket packet{};
+    constexpr ConnectionAddress original{WireNumber{7U}, HostId{2U}, HostId{3U}, EndpointAddress{123U}};
+    ASSERT_TRUE(packet.initialize(8U, original, ControlFields::simple()));
+    std::memset(packet.payload().data(), 0xAA, 8U);
+    packet.setIngressIndex(4U);
+    SmallPacket before{};
+    ASSERT_TRUE(before.copyFrom(packet));
+    EXPECT_FALSE(packet.initialize(9U, ConnectionAddress{}, ControlFields::bits()));
+    EXPECT_EQ(packet.size(), before.size());
+    EXPECT_EQ(packet.capacity(), 8U);
+    EXPECT_EQ(packet.ingressIndex(), 4U);
+    EXPECT_EQ(std::memcmp(packet.headerAndPayload().data(), before.headerAndPayload().data(), packet.totalSize()), 0);
+}
+
 // Copying between different capacities preserves destination storage and only copies active bytes.
 TEST(PacketTest, CopiesContentsWithoutCapacityOrUnusedBytes) {
     TestPacket source{};

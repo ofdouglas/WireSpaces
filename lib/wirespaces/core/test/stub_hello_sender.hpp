@@ -44,7 +44,7 @@ public:
         if (message_length > 0U) {
             std::memcpy(packet.payload().data(), message, message_length);
         }
-        static_cast<void>(router_.forward(packet));
+        router_.forward(packet);
     }
 
     void sendHello() { sendMessage("hello"); }

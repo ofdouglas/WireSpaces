@@ -98,10 +98,10 @@ public:
                        ReceiverCallbacks& callbacks,
                        ReceiverPduSender& sender) noexcept;
 
-    [[nodiscard]] ProcessResult process(ByteSpan message) noexcept;
-    [[nodiscard]] SendResult sendDatagram(ByteSpan payload) noexcept;
-    [[nodiscard]] SendResult abort() noexcept;
-    [[nodiscard]] TransferState state() const noexcept { return state_; }
+    ProcessResult process(ByteSpan message) noexcept;
+    SendResult sendDatagram(ByteSpan payload) noexcept;
+    SendResult abort() noexcept;
+    TransferState state() const noexcept { return state_; }
 
 private:
     [[nodiscard]] bool handleSegment(ByteSpan message) noexcept;
@@ -110,7 +110,7 @@ private:
     [[nodiscard]] bool handleAbort(ByteSpan payload) noexcept;
     [[nodiscard]] bool sendAck() noexcept;
     [[nodiscard]] bool sendReject(uint8_t session_id, RejectReason reason) noexcept;
-    [[nodiscard]] bool sendAbort() noexcept;
+    bool sendAbort() noexcept;
     void updateGrant() noexcept;
 
     ReceiverEngineConfig config_{};

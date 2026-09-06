@@ -28,6 +28,10 @@ WS_PACKET_BUFFER_DEFINE(StackReportPacketBuffer, sizeof(StackReportMessage));
 template <uint32_t period_ms>
 class StackReportService {
 public:
+    /** @brief Bind source identity and routing to an explicitly owned domain. */
+    StackReportService(wirespaces::DomainContext& domain, wirespaces::PublicationConfig publication) noexcept
+        : StackReportService{&domain.router(), publication.wire, domain.hostInfo().id, publication.destination} {}
+
     StackReportService(wirespaces::Router* router, wirespaces::WireNumber wire,
                        wirespaces::HostId source_host, wirespaces::HostId destination_host) noexcept
         : router_{router},
@@ -65,7 +69,7 @@ private:
 
         const StackReportMessage message{peak_used_bytes, capacity_bytes};
         std::memcpy(packet.payload().data(), &message, sizeof(message));
-        static_cast<void>(router_->forward(packet));
+        router_->forward(packet);
     }
 
     wirespaces::Router* router_{nullptr};

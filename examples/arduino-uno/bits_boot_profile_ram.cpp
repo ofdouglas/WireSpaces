@@ -42,28 +42,16 @@ WS_PACKET_BUFFER_DEFINE(TransmitPacket, kMaximumBitsPayloadSize);
 class UartPduSender final
     : public wirespaces::transport::bits::ReceiverPduSender {
 public:
-    wirespaces::MutableByteSpan prepare(
-        std::uint16_t payload_size) noexcept override {
-        if (!packet_.initialize(
-                payload_size,
-                wirespaces::ControlFields{
-                    wirespaces::QoS::kNormal, false,
-                    wirespaces::TransportType::kBits})) {
+    wirespaces::MutableByteSpan prepare(std::uint16_t payload_size) noexcept override {
+        if (!packet_.initialize(payload_size, wiring_constants::kUploadConnection, wirespaces::ControlFields::bits())) {
             return wirespaces::MutableByteSpan{};
         }
-        wirespaces::Header& header{packet_.header()};
-        header.wire = wiring_constants::kTestWire;
-        header.source = wiring_constants::kArduinoHost;
-        header.destination = wiring_constants::kPcHost;
-        header.endpoint = wiring_constants::kBitsUploadEndpoint;
         return packet_.payload();
     }
 
     bool sendPrepared() noexcept override {
-        const auto* canonical_bytes{
-            reinterpret_cast<const std::uint8_t*>(&packet_.header())};
-        const std::size_t canonical_size{
-            sizeof(packet_.header()) + packet_.size()};
+        const auto* canonical_bytes{reinterpret_cast<const std::uint8_t*>(&packet_.header())};
+        const std::size_t canonical_size{sizeof(packet_.header()) + packet_.size()};
         std::uint16_t crc{0xFFFFU};
 
         wirespaces::platform::avr::uart0WriteByte(kFlag);
@@ -112,8 +100,7 @@ public:
         engine_ = &engine;
     }
 
-    void beginSession(std::uint8_t session_id,
-                      std::uint32_t total_size) noexcept {
+    void beginSession(std::uint8_t session_id, std::uint32_t total_size) noexcept {
         session_id_ = session_id;
         expected_size_ = total_size <= kMaximumObjectSize
                              ? static_cast<std::uint16_t>(total_size)
@@ -121,16 +108,14 @@ public:
         received_size_ = 0U;
     }
 
-    bool onSegment(std::uint32_t object_offset,
-                   wirespaces::ByteSpan payload) noexcept override {
+    bool onSegment(std::uint32_t object_offset, wirespaces::ByteSpan payload) noexcept override {
         if (object_offset + payload.size() > kMaximumObjectSize) {
             return false;
         }
 #if !WS_BITS_BOOT_PROFILE_SIZE_ONLY
         std::memcpy(object_ + object_offset, payload.data(), payload.size());
 #endif
-        const std::uint16_t end{
-            static_cast<std::uint16_t>(object_offset + payload.size())};
+        const std::uint16_t end{static_cast<std::uint16_t>(object_offset + payload.size())};
         if (end > received_size_) {
             received_size_ = end;
         }
@@ -144,7 +129,7 @@ public:
         }
 #if WS_BITS_BOOT_PROFILE_SIZE_ONLY
         const std::uint8_t response[]{kEchoResponse, payload[1]};
-        (void)engine_->sendDatagram(wirespaces::ByteSpan{response});
+        engine_->sendDatagram(wirespaces::ByteSpan{response});
 #else
         if (payload.size() > kMaximumUserDatagramSize) {
             return;
@@ -152,7 +137,7 @@ public:
         std::uint8_t response[kMaximumUserDatagramSize]{};
         std::memcpy(response, payload.data(), payload.size());
         response[0] = kEchoResponse;
-        (void)engine_->sendDatagram(
+        engine_->sendDatagram(
             wirespaces::ByteSpan{response, payload.size()});
 #endif
     }
@@ -183,7 +168,7 @@ public:
             static_cast<std::uint8_t>(first_bad_offset >> 8U),
         };
         if (engine_ != nullptr) {
-            (void)engine_->sendDatagram(wirespaces::ByteSpan{result});
+            engine_->sendDatagram(wirespaces::ByteSpan{result});
         }
 #endif
     }
@@ -243,7 +228,7 @@ void processFrame(
         }
     }
 
-    (void)engine.process(message);
+    engine.process(message);
 }
 
 }  // namespace

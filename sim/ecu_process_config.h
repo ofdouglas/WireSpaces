@@ -20,7 +20,7 @@ struct EcuProcessConfig {
      * @brief Check invariants required by EcuProcess.
      * @return true when the name is non-empty and loop period is positive.
      */
-    [[nodiscard]] bool isValid() const;
+    bool isValid() const;
 };
 
 inline bool EcuProcessConfig::isValid() const {

@@ -38,9 +38,13 @@ uint8_t resultPriority(DispatchResult result) noexcept {
 }  // namespace
 
 DispatchResult Dispatcher::dispatch(const PacketBuffer& packet) const noexcept {
+    return dispatch(packet, localHostInfo());
+}
+
+DispatchResult Dispatcher::dispatch(const PacketBuffer& packet, const HostInfo& host) const noexcept {
     const Header& header{packet.header()};
     const bool broadcast{header.destination.isBroadcast()};
-    if (broadcast && !localHostInfo().isMemberOf(header.wire)) {
+    if (broadcast && !host.isMemberOf(header.wire)) {
         return DispatchResult::kNoEndpoint;
     }
 
@@ -49,7 +53,7 @@ DispatchResult Dispatcher::dispatch(const PacketBuffer& packet) const noexcept {
         if ((entry.endpoint != header.endpoint) || (entry.receiver == nullptr)) {
             continue;
         }
-        if (!broadcast && (localHostInfo().id != header.destination)) {
+        if (!broadcast && (host.id != header.destination)) {
             continue;
         }
 

@@ -42,6 +42,6 @@ struct CommandLineResult {
 /**
  * @brief Build usage text for the supplied executable name.
  */
-[[nodiscard]] std::string commandLineUsage(const char* executable_name);
+std::string commandLineUsage(const char* executable_name);
 
 }  // namespace wirespaces::sim

@@ -38,7 +38,7 @@ public:
         return true;
     }
 
-    [[nodiscard]] ByteSpan sent() const noexcept {
+    ByteSpan sent() const noexcept {
         return ByteSpan{sent_.data(), sent_.size()};
     }
 

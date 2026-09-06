@@ -22,7 +22,7 @@ protected:
         route_entry_ = RouteTableEntry{kLocalWire, kNoEgress};
     }
 
-    [[nodiscard]] RouteResult forwardDomain(TestPacket& packet) const {
+    RouteResult forwardDomain(TestPacket& packet) const {
         return router_.forward(packet);
     }
 

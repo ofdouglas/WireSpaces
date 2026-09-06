@@ -13,7 +13,7 @@ namespace wirespaces {
 
 struct HostId {
     uint8_t value;
-    [[nodiscard]] constexpr bool isBroadcast() const noexcept {
+    constexpr bool isBroadcast() const noexcept {
         return value == kBroadcastHostValue;
     }
 };
@@ -55,18 +55,18 @@ enum class Namespace : uint8_t {
 struct EndpointAddress {
     uint16_t value;
 
-    [[nodiscard]] static constexpr EndpointAddress from(Namespace namespace_id,
+    static constexpr EndpointAddress from(Namespace namespace_id,
                                                         uint16_t endpoint_id) noexcept {
         return EndpointAddress{
             static_cast<uint16_t>((static_cast<uint16_t>(namespace_id) << kNamespaceShift) |
                                   (endpoint_id & kEndpointIdMask))};
     }
 
-    [[nodiscard]] constexpr Namespace namespaceId() const noexcept {
+    constexpr Namespace namespaceId() const noexcept {
         return static_cast<Namespace>((value & kNamespaceMask) >> kNamespaceShift);
     }
 
-    [[nodiscard]] constexpr uint16_t endpointId() const noexcept {
+    constexpr uint16_t endpointId() const noexcept {
         return value & kEndpointIdMask;
     }
 
@@ -84,8 +84,18 @@ constexpr bool operator!=(EndpointAddress lhs, EndpointAddress rhs) noexcept {
 }
 
 struct ControlFields {
+    /** @brief Simple transport without extensions, with caller-selected QoS. */
+    static constexpr ControlFields simple(QoS qos = QoS::kNormal) noexcept {
+        return ControlFields{qos, false, TransportType::kSimple};
+    }
+
+    /** @brief BITS transport without extensions, with caller-selected QoS. */
+    static constexpr ControlFields bits(QoS qos = QoS::kNormal) noexcept {
+        return ControlFields{qos, false, TransportType::kBits};
+    }
+
     static constexpr ControlFields defaultControlFields() noexcept {
-        return ControlFields{QoS::kNormal, false, TransportType::kSimple};
+        return simple();
     }
 
     QoS qos{QoS::kNormal};
@@ -93,12 +103,25 @@ struct ControlFields {
     TransportType transport_type{TransportType::kSimple};
 };
 
+/**
+ * @brief Transport-independent address of locally originated traffic.
+ *
+ * This is configuration, not a wire-format header or a routing/authorization policy.
+ * Services decide whether a remote broadcast address is appropriate for their protocol.
+ */
+struct ConnectionAddress {
+    WireNumber wire{};
+    HostId local_host{};
+    HostId remote_host{};
+    EndpointAddress endpoint{};
+};
+
 class WS_PACKED Header {
 public:
     uint8_t control{};
-    [[nodiscard]] QoS qos() const noexcept;
-    [[nodiscard]] bool hasExtensions() const noexcept;
-    [[nodiscard]] TransportType transportType() const noexcept;
+    QoS qos() const noexcept;
+    bool hasExtensions() const noexcept;
+    TransportType transportType() const noexcept;
 
     void setQoS(QoS qos) noexcept;
     void setHasExtensions(bool has_extensions) noexcept;

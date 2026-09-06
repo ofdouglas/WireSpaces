@@ -36,9 +36,11 @@ public:
                                                             kReceiveQueueCapacity>;
 
     explicit PingService(wirespaces::Router* router) noexcept : router_{router} {}
+    /** @brief Bind replies to the domain's Router for the lifetime of this service. */
+    explicit PingService(wirespaces::DomainContext& domain) noexcept : PingService{&domain.router()} {}
 
     /** @brief Return the receiver registered with the Domain Dispatcher. */
-    [[nodiscard]] wirespaces::EndpointReceiver& receiver() noexcept {
+    wirespaces::EndpointReceiver& receiver() noexcept {
         return receive_queue_;
     }
 
@@ -79,7 +81,7 @@ private:
             sequence_number,
         };
         std::memcpy(response.payload().data(), &message, sizeof(message));
-        static_cast<void>(router_->forward(response));
+        router_->forward(response);
     }
 
     wirespaces::Router* router_{nullptr};

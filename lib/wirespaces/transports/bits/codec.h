@@ -11,7 +11,7 @@
 namespace wirespaces::transport::bits {
 
 /** @brief Encode a supported Compact BITS control byte. */
-[[nodiscard]] uint8_t encodeControl(MessageType type) noexcept;
+uint8_t encodeControl(MessageType type) noexcept;
 
 /**
  * @brief Decode and validate a BITS control byte.

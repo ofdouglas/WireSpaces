@@ -12,6 +12,27 @@ namespace {
 
 class HeaderQoSTest : public ::testing::TestWithParam<QoS> {};
 
+// Named helpers preserve each QoS and select transport without adding extensions.
+TEST_P(HeaderQoSTest, NamedControlHelpers) {
+    for (const auto fields : {ControlFields::simple(GetParam()), ControlFields::bits(GetParam())}) {
+        EXPECT_EQ(fields.qos, GetParam());
+        EXPECT_FALSE(fields.has_extensions);
+    }
+    EXPECT_EQ(ControlFields::simple(GetParam()).transport_type, TransportType::kSimple);
+    EXPECT_EQ(ControlFields::bits(GetParam()).transport_type, TransportType::kBits);
+}
+
+// Helpers are constant expressions; the legacy default retains its original meaning.
+TEST(HeaderTest, NamedControlDefaults) {
+    constexpr auto simple = ControlFields::simple();
+    constexpr auto bits = ControlFields::bits();
+    static_assert(simple.qos == QoS::kNormal && bits.qos == QoS::kNormal);
+    constexpr auto legacy = ControlFields::defaultControlFields();
+    EXPECT_EQ(legacy.qos, simple.qos);
+    EXPECT_EQ(legacy.transport_type, simple.transport_type);
+    EXPECT_EQ(legacy.has_extensions, simple.has_extensions);
+}
+
 // Every QoS value round-trips through the packed control byte.
 TEST_P(HeaderQoSTest, RoundTripsQoS) {
     Header header{};

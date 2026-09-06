@@ -34,6 +34,10 @@ WS_PACKET_BUFFER_DEFINE(LedControlPacketBuffer, sizeof(LedControlMessage));
 class LedControlService final {
 public:
     using SetBrightness = void (*)(void* context, uint8_t brightness);
+    /** @brief Bind replies to the domain; output ownership remains with the application. */
+    LedControlService(wirespaces::DomainContext& domain, SetBrightness set_brightness,
+                      void* output_context) noexcept
+        : LedControlService{&domain.router(), set_brightness, output_context} {}
     static constexpr std::size_t kReceiveQueueCapacity{2U};
     using ReceiverQueue = wirespaces::EndpointReceiverQueue<sizeof(LedControlMessage),
                                                             kReceiveQueueCapacity>;
@@ -43,7 +47,7 @@ public:
         : router_{router}, set_brightness_{set_brightness}, output_context_{output_context} {}
 
     /** @brief Return the receiver registered with the Domain Dispatcher. */
-    [[nodiscard]] wirespaces::EndpointReceiver& receiver() noexcept {
+    wirespaces::EndpointReceiver& receiver() noexcept {
         return receive_queue_;
     }
 
@@ -94,7 +98,7 @@ private:
             sequence_number,
         };
         std::memcpy(response.payload().data(), &message, sizeof(message));
-        static_cast<void>(router_->forward(response));
+        router_->forward(response);
     }
 
     wirespaces::Router* router_{nullptr};

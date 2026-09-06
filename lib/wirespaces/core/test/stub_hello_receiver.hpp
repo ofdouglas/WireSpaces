@@ -22,10 +22,10 @@ public:
         return snapshot_.receive(packet);
     }
 
-    [[nodiscard]] bool hasMessage() const noexcept { return snapshot_.hasValue(); }
-    [[nodiscard]] uint32_t generation() const noexcept { return snapshot_.generation(); }
+    bool hasMessage() const noexcept { return snapshot_.hasValue(); }
+    uint32_t generation() const noexcept { return snapshot_.generation(); }
 
-    [[nodiscard]] std::string text() const {
+    std::string text() const {
         uint8_t buffer[kDefaultEndpointStorageCapacity]{};
         uint16_t length{0U};
         uint32_t generation_value{0U};

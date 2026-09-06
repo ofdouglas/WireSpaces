@@ -10,6 +10,7 @@
 #include <wirespaces/services/led_control/led_control.h>
 #include <wirespaces/services/ping/ping.h>
 #include <wirespaces/services/heartbeat/heartbeat.h>
+#include <wirespaces/services/stack_report/stack_report.h>
 
 namespace wirespaces::hal {
 namespace {
@@ -40,9 +41,9 @@ public:
         }
     }
 
-    [[nodiscard]] uint32_t count() const noexcept { return count_; }
-    [[nodiscard]] const Header& header() const noexcept { return header_; }
-    [[nodiscard]] ByteSpan payload() const noexcept { return ByteSpan{payload_, size_}; }
+    uint32_t count() const noexcept { return count_; }
+    const Header& header() const noexcept { return header_; }
+    ByteSpan payload() const noexcept { return ByteSpan{payload_, size_}; }
 
 private:
     Header header_{};
@@ -61,13 +62,32 @@ void initializeRequest(PacketBuffer& packet, EndpointAddress endpoint) {
     packet.header().endpoint = endpoint;
 }
 
+// Stack reports derive source identity from the context, preserving service-specific QoS/endpoint.
+TEST(PollingServiceTest, StackReportUsesDomainPublication) {
+    hal::test_now_ms = 1000U;
+    ResponseRecorder responses{};
+    const RouteTableEntry routes[]{{kWire, kEgress}};
+    DomainContext domain{HostInfo{kLocalHost, 1U, {kWire}},
+                         foundation::Span<const RouteTableEntry>{routes}, responses};
+    stack_report::StackReportService<1000U> service{domain, PublicationConfig{kWire, kRemoteHost}};
+    service.run(10U, 100U);
+    EXPECT_EQ(responses.count(), 1U);
+    EXPECT_EQ(responses.header().source, kLocalHost);
+    EXPECT_EQ(responses.header().destination, kRemoteHost);
+    EXPECT_EQ(responses.header().wire, kWire);
+    EXPECT_EQ(responses.header().qos(), QoS::kBackground);
+    EXPECT_EQ(responses.header().endpoint,
+              EndpointAddress::from(Namespace::kCommon, WS_SERVICE_STACK_REPORT_ENDPOINT_ID));
+}
+
 // Heartbeats originate on the configured route, with complete identity and uptime metadata.
 TEST(PollingServiceTest, HeartbeatUsesConfiguredHeaderAndPeriod) {
     hal::test_now_ms = 0U;
     ResponseRecorder responses{};
     const RouteTableEntry route{kWire, kEgress};
-    Router router{foundation::Span<const RouteTableEntry>{&route, 1U}, responses};
-    heartbeat::HeartbeatService<1000U> service{&router, kWire, kLocalHost, HostId{kBroadcastHostValue}};
+    DomainContext domain{HostInfo{kLocalHost, 1U, {kWire}},
+                         foundation::Span<const RouteTableEntry>{&route, 1U}, responses};
+    heartbeat::HeartbeatService<1000U> service{domain, PublicationConfig{kWire, HostId{kBroadcastHostValue}}};
     hal::test_now_ms = 999U;
     service.run();
     EXPECT_EQ(responses.count(), 0U);

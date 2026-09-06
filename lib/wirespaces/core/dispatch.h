@@ -11,6 +11,7 @@
 #include <cstdint>
 
 namespace wirespaces {
+struct HostInfo;
 
 enum class ReceiveResult : uint8_t {
     kAccepted = 0U,
@@ -43,7 +44,10 @@ public:
     explicit constexpr Dispatcher(foundation::Span<const DispatchTableEntry> entries) noexcept
         : entries_{entries} {}
 
-    [[nodiscard]] DispatchResult dispatch(const PacketBuffer& packet) const noexcept;
+    /** @brief Legacy dispatch using process-global host identity. */
+    DispatchResult dispatch(const PacketBuffer& packet) const noexcept;
+    /** @brief Dispatch with explicitly supplied domain identity instead of the legacy global. */
+    DispatchResult dispatch(const PacketBuffer& packet, const HostInfo& host) const noexcept;
 
 private:
     foundation::Span<const DispatchTableEntry> entries_{};

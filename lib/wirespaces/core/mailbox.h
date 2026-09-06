@@ -25,10 +25,10 @@ public:
     [[nodiscard]] bool read(MutableByteSpan output, uint16_t& length,
                             uint32_t& generation) const noexcept;
 
-    [[nodiscard]] bool hasValue() const noexcept {
+    bool hasValue() const noexcept {
         return occupied_;
     }
-    [[nodiscard]] uint32_t generation() const noexcept {
+    uint32_t generation() const noexcept {
         return generation_;
     }
 

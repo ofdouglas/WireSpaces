@@ -53,16 +53,19 @@ public:
      * Does not deliver locally. Received traffic at a leaf returns kNoEgress without a callback.
      * Local-origin zero masks still reach the forwarder for local-domain compatibility.
      */
-    [[nodiscard]] RouteResult forward(const PacketBuffer& packet) const noexcept;
+    RouteResult forward(const PacketBuffer& packet) const noexcept;
 
-    /** @brief Receive a validated Link packet, stamping this host's ingress index (1..8).
+    /** @brief Legacy ingress using process-global identity, stamping ingress index (1..8).
      * Reject unknown routes/unselected ingress before any forwarding or delivery.
      * Local delivery additionally requires Wire membership and Dispatcher destination checks.
      * Packet storage is borrowed; forwarders and receivers must copy/enqueue before returning.
      * May run in driver or router-task context; caller supplies any required synchronization.
      */
-    [[nodiscard]] IngressResult receive(PacketBuffer& packet, uint8_t ingress_index,
+    IngressResult receive(PacketBuffer& packet, uint8_t ingress_index,
                                         const Dispatcher& dispatcher) const noexcept;
+    /** @brief Explicit-domain ingress; membership and destination checks use host. */
+    IngressResult receive(PacketBuffer& packet, uint8_t ingress_index,
+                                        const Dispatcher& dispatcher, const HostInfo& host) const noexcept;
 
 private:
     foundation::Span<const RouteTableEntry> entries_{};

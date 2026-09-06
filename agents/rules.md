@@ -57,6 +57,12 @@ WireSpaces/
 
 * Use `-std=c++17` by default.
 
+* Use `[[nodiscard]]` selectively where ignoring failure can lead to invalid subsequent
+  processing: bounded buffer operations, decoding/encoding, output reads, and transfer
+  admission. Do not apply it routinely to getters, polling, routing/dispatch reports,
+  or best-effort sends. Keep explicit discard casts only where the remaining contract
+  genuinely requires an intentional exception (or to suppress unused parameters).
+
 * Write code suitable for MCUs by default:
   - No dynamic allocation (except during 1-time init at boot)
   - No exceptions

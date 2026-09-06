@@ -1,5 +1,48 @@
 # WireSpaces demo using ATMEGA328P (Arduino UNO)
 
+## Packet configuration
+
+`wiring_constants.h` owns the upload and echo `ConnectionAddress` constants,
+shared by the full BITS application and the constrained boot-profile sender.
+The topology generator still only supplies topology identities and routes;
+service peers and endpoints remain application choices.
+
+```cpp
+packet.initialize(payload_size, wiring_constants::kUploadConnection,
+                  wirespaces::ControlFields::bits());
+```
+
+Check the returned boolean before accessing the payload. Successful complete
+initialization sets all addresses and control fields and clears the ingress tag;
+capacity failure leaves the packet unchanged. `ControlFields::simple(qos)` and
+`ControlFields::bits(qos)` default to normal QoS without extensions. Explicit
+`ControlFields` aggregates remain available for extensions. Response addressing
+remains separate via `initializeResponseTo()`.
+
+BITS's existing `ConnectionConfig` name aliases the common address type. No
+packet storage fields, generated connection defaults, or WireSplice behavior
+are added. Constants are not guaranteed to be free of AVR SRAM cost: with the
+current toolchain these boot-profile builds use 36 bytes of static data versus
+30 before this adapter (both flash size gates still pass).
+
+## Demo
+
+The demo and full BITS application own a `DomainContext` containing immutable
+HostInfo and a Router. Services bind explicitly to that context; no default
+context is registered. `kDiagnosticsPublication` supplies heartbeat's Wire and
+destination, while the context supplies its source Host and the service supplies
+its endpoint. The UART receiver calls `domain.receive(...)` so ingress membership
+and dispatch destination checks use the same identity. There is no longer a
+`setLocalHostInfo()` initialization step in these applications.
+
+Links, services and dispatch tables remain application-owned in dependency order.
+The context cannot be copied or moved; its route table and egress forwarder must
+outlive it, and it must outlive its services. The older Router/service entry
+points remain compatible with existing callers. In particular, the three-argument
+`Router::receive()` and one-argument `Dispatcher::dispatch()` still use legacy
+global identity; new context callers use `domain.receive()` or explicit HostInfo
+overloads instead. This refactor adds no multi-domain scheduler or synchronization.
+
 The example runs a minimal WireSpaces heartbeat publisher:
 
 - ATmega328P Timer 0 supplies the millisecond clock.
@@ -19,22 +62,26 @@ Build from WSL:
 make
 ```
 
-Flash through the Arduino bootloader:
+Flash through PICkit 5 using MPLAB IPE's AVR ISP support:
 
 ```sh
 make flash
 ```
 
-The default port is `/dev/arduino-uno`. After installing the udev rule below, you can use the stable symlink `/dev/arduino-uno` instead:
+The flash targets select PICkit 5 independently of the serial port. Override
+`IPECMD`, `PICKIT`, or `AVR_ISP_SPEED` when necessary. The Makefile retries
+intermittent ISP failures up to `FLASH_ATTEMPTS` times (default three).
+
+Serial verification defaults to `/dev/arduino-uno`:
 
 ```sh
-make flash PORT=/dev/arduino-uno
+make test-ping PORT=/dev/arduino-uno
 ```
 
 Override the port when necessary:
 
 ```sh
-make flash PORT=/dev/ttyACM1
+make test-ping PORT=/dev/ttyACM1
 ```
 
 ### WSL udev access
@@ -223,7 +270,7 @@ retains a minimal user-datagram service; it must remain at or below 3,350 bytes
 before board-specific flash code is added. Both targets write ELF and map files
 under `build/boot_profile/`.
 
-Flash the hardware-test image through the existing Arduino bootloader and run
+Flash the hardware-test image through PICkit 5 and run
 the PC test:
 
 ```sh

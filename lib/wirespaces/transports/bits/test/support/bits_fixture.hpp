@@ -82,11 +82,11 @@ public:
         }
     }
 
-    [[nodiscard]] uint32_t messageCount(MessageType type) const noexcept {
+    uint32_t messageCount(MessageType type) const noexcept {
         return message_counts_[static_cast<size_t>(type)];
     }
-    [[nodiscard]] const PacketBuffer& lastPacket() const noexcept { return last_packet_; }
-    [[nodiscard]] DispatchResult lastResult() const noexcept { return last_result_; }
+    const PacketBuffer& lastPacket() const noexcept { return last_packet_; }
+    DispatchResult lastResult() const noexcept { return last_result_; }
 
 private:
     static bool capture(const PacketBuffer& source, PacketBuffer& destination) noexcept {
@@ -134,13 +134,13 @@ public:
     void onTransferComplete() noexcept override { ++completion_count_; }
     void onTransferAborted() noexcept override { ++abort_count_; }
 
-    [[nodiscard]] const std::array<uint8_t, 128U>& object() const noexcept { return object_; }
-    [[nodiscard]] uint32_t receivedSize() const noexcept { return received_size_; }
-    [[nodiscard]] uint32_t segmentCount() const noexcept { return segment_count_; }
-    [[nodiscard]] uint32_t completionCount() const noexcept { return completion_count_; }
-    [[nodiscard]] uint32_t abortCount() const noexcept { return abort_count_; }
-    [[nodiscard]] const std::vector<uint32_t>& offsets() const noexcept { return offsets_; }
-    [[nodiscard]] const std::vector<uint8_t>& datagram() const noexcept { return datagram_; }
+    const std::array<uint8_t, 128U>& object() const noexcept { return object_; }
+    uint32_t receivedSize() const noexcept { return received_size_; }
+    uint32_t segmentCount() const noexcept { return segment_count_; }
+    uint32_t completionCount() const noexcept { return completion_count_; }
+    uint32_t abortCount() const noexcept { return abort_count_; }
+    const std::vector<uint32_t>& offsets() const noexcept { return offsets_; }
+    const std::vector<uint8_t>& datagram() const noexcept { return datagram_; }
 
 private:
     std::array<uint8_t, 128U> object_{};
@@ -168,11 +168,11 @@ public:
 
     void onTransferAborted() noexcept override { ++abort_count_; }
 
-    [[nodiscard]] const std::vector<uint8_t>& datagram() const noexcept { return datagram_; }
-    [[nodiscard]] uint32_t completionCount() const noexcept { return completion_count_; }
-    [[nodiscard]] uint32_t rejectionCount() const noexcept { return rejection_count_; }
-    [[nodiscard]] RejectReason rejectionReason() const noexcept { return rejection_reason_; }
-    [[nodiscard]] uint32_t abortCount() const noexcept { return abort_count_; }
+    const std::vector<uint8_t>& datagram() const noexcept { return datagram_; }
+    uint32_t completionCount() const noexcept { return completion_count_; }
+    uint32_t rejectionCount() const noexcept { return rejection_count_; }
+    RejectReason rejectionReason() const noexcept { return rejection_reason_; }
+    uint32_t abortCount() const noexcept { return abort_count_; }
 
 private:
     std::vector<uint8_t> datagram_{};
@@ -208,7 +208,7 @@ protected:
         return false;
     }
 
-    [[nodiscard]] DispatchResult injectAck(const Ack& ack) {
+    DispatchResult injectAck(const Ack& ack) {
         TestPacket packet{};
         EXPECT_TRUE(packet.initialize(kAckSize,
                                       ControlFields{QoS::kNormal, false,
@@ -222,7 +222,7 @@ protected:
         return transmitter_dispatcher_.dispatch(packet);
     }
 
-    [[nodiscard]] DispatchResult injectSetup(
+    DispatchResult injectSetup(
         const wirespaces::transport::bits::Setup& setup) {
         TestPacket packet{};
         EXPECT_TRUE(packet.initialize(kSetupSize,
@@ -237,7 +237,7 @@ protected:
         return receiver_dispatcher_.dispatch(packet);
     }
 
-    [[nodiscard]] DispatchResult injectReject(const Reject& reject) {
+    DispatchResult injectReject(const Reject& reject) {
         TestPacket packet{};
         EXPECT_TRUE(packet.initialize(kRejectSize,
                                       ControlFields{QoS::kNormal, false,

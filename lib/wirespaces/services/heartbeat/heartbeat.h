@@ -28,6 +28,10 @@ WS_PACKET_BUFFER_DEFINE(HeartbeatPacketBuffer, sizeof(HeartbeatMessage));
 template <uint32_t period_ms>
 class HeartbeatService {
 public:
+    /** @brief Bind source identity and routing to an explicitly owned domain. */
+    HeartbeatService(wirespaces::DomainContext& domain, wirespaces::PublicationConfig publication) noexcept
+        : HeartbeatService{&domain.router(), publication.wire, domain.hostInfo().id, publication.destination} {}
+
     HeartbeatService(wirespaces::Router* router, wirespaces::WireNumber wire,
                      wirespaces::HostId source_host, wirespaces::HostId destination_host) noexcept
         : router_{router},

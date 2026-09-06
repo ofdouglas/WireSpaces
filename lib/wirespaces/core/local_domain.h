@@ -17,7 +17,7 @@ public:
 
     void forward(const PacketBuffer& packet, EgressSet egress_set) noexcept override;
 
-    [[nodiscard]] DispatchResult lastResult() const noexcept {
+    DispatchResult lastResult() const noexcept {
         return last_result_;
     }
 

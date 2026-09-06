@@ -41,7 +41,7 @@ private:
 template <typename PacketBufferType>
 class UartHdlcReceiver final {
 public:
-    void process(const Router& router, const Dispatcher& dispatcher, std::uint8_t ingress_index) noexcept;
+    void process(const DomainContext& domain, const Dispatcher& dispatcher, std::uint8_t ingress_index) noexcept;
 
 private:
     static constexpr std::size_t kMaximumCanonicalSize{sizeof(Header) + PacketBufferType::kPayloadCapacity};
@@ -63,15 +63,14 @@ void UartHdlcForwarder<kMaximumPayloadSize>::forward(const PacketBuffer& packet,
     if (frame_size == 0U) {
         return;
     }
-    platform::avr::uart0WriteSpan(
-        foundation::Span<const std::uint8_t>{frame_storage, frame_size});
+    platform::avr::uart0WriteSpan(foundation::Span<const std::uint8_t>{frame_storage, frame_size});
 }
 
 // --- UartHdlcReceiver implementations ---
 
 template <typename PacketBufferType>
 void UartHdlcReceiver<PacketBufferType>::process(
-    const Router& router, const Dispatcher& dispatcher, std::uint8_t ingress_index) noexcept {
+    const DomainContext& domain, const Dispatcher& dispatcher, std::uint8_t ingress_index) noexcept {
     while (platform::avr::uart0ByteAvailable()) {
         const std::uint8_t byte{platform::avr::uart0ReadByte()};
         if (!decoder_.push(byte)) {
@@ -87,7 +86,7 @@ void UartHdlcReceiver<PacketBufferType>::process(
                 if (payload_size > 0U) {
                     std::memcpy(packet.payload().data(), frame.data() + sizeof(Header), payload_size);
                 }
-                static_cast<void>(router.receive(packet, ingress_index, dispatcher));
+                domain.receive(packet, ingress_index, dispatcher);
             }
         }
         decoder_.consume();

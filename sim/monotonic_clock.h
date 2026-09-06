@@ -24,7 +24,7 @@ public:
     /**
      * @brief Read the current monotonic time.
      */
-    [[nodiscard]] virtual TimePoint now() const = 0;
+    virtual TimePoint now() const = 0;
 
     /**
      * @brief Suspend execution until at least the supplied monotonic deadline.
@@ -37,7 +37,7 @@ public:
  */
 class SystemMonotonicClock final : public MonotonicClock {
 public:
-    [[nodiscard]] TimePoint now() const override;
+    TimePoint now() const override;
     void sleepUntil(TimePoint deadline) override;
 };
 

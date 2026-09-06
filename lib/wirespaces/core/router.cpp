@@ -33,16 +33,21 @@ RouteResult Router::forward(const PacketBuffer& packet) const noexcept {
 
 IngressResult Router::receive(PacketBuffer& packet, uint8_t ingress_index,
                               const Dispatcher& dispatcher) const noexcept {
+    return receive(packet, ingress_index, dispatcher, localHostInfo());
+}
+
+IngressResult Router::receive(PacketBuffer& packet, uint8_t ingress_index,
+                              const Dispatcher& dispatcher, const HostInfo& host) const noexcept {
     packet.setIngressIndex(ingress_index);
     if (ingress_index == 0U) {
         return {RouteResult::kInvalidIngress, DispatchResult::kNoEndpoint};
     }
     const RouteResult routing{forward(packet)};
     if (((routing != RouteResult::kForwarded) && (routing != RouteResult::kNoEgress)) ||
-        !localHostInfo().isMemberOf(packet.header().wire)) {
+        !host.isMemberOf(packet.header().wire)) {
         return {routing, DispatchResult::kNoEndpoint};
     }
-    return {routing, dispatcher.dispatch(packet)};
+    return {routing, dispatcher.dispatch(packet, host)};
 }
 
 }  // namespace wirespaces

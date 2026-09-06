@@ -29,8 +29,8 @@ public:
     }
 
     void setResult(ReceiveResult result) noexcept { result_ = result; }
-    [[nodiscard]] uint32_t invocationCount() const noexcept { return invocation_count_; }
-    [[nodiscard]] const PacketBuffer* lastPacket() const noexcept { return last_packet_; }
+    uint32_t invocationCount() const noexcept { return invocation_count_; }
+    const PacketBuffer* lastPacket() const noexcept { return last_packet_; }
 
 private:
     uint32_t invocation_count_{0U};
@@ -53,7 +53,7 @@ protected:
         ++entry_count_;
     }
 
-    [[nodiscard]] DispatchResult dispatch(TestPacket& packet) const {
+    DispatchResult dispatch(TestPacket& packet) const {
         const Dispatcher dispatcher{
             foundation::Span<const DispatchTableEntry>{dispatch_entries_, entry_count_}};
         return dispatcher.dispatch(packet);

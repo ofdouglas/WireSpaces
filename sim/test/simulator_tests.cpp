@@ -30,7 +30,7 @@ namespace {
 
 class FakeShutdown final : public wirespaces::sim::ShutdownSource {
 public:
-    [[nodiscard]] bool isShutdownRequested() const override {
+    bool isShutdownRequested() const override {
         return requested_;
     }
 
@@ -44,7 +44,7 @@ private:
 
 class FakeClock final : public wirespaces::sim::MonotonicClock {
 public:
-    [[nodiscard]] TimePoint now() const override {
+    TimePoint now() const override {
         return current_time_;
     }
 
@@ -57,7 +57,7 @@ public:
         current_time_ += duration;
     }
 
-    [[nodiscard]] const std::vector<TimePoint>& sleepDeadlines() const {
+    const std::vector<TimePoint>& sleepDeadlines() const {
         return sleep_deadlines_;
     }
 
@@ -128,14 +128,14 @@ private:
     int periodic_calls_{0};
 };
 
-[[nodiscard]] wirespaces::sim::EcuProcessConfig testConfig() {
+wirespaces::sim::EcuProcessConfig testConfig() {
     wirespaces::sim::EcuProcessConfig config{};
     config.ecu_name = "test-ecu";
     config.loop_period = std::chrono::microseconds{1000};
     return config;
 }
 
-[[nodiscard]] std::chrono::microseconds deadlineAsMicroseconds(
+std::chrono::microseconds deadlineAsMicroseconds(
     const wirespaces::sim::MonotonicClock::TimePoint deadline) {
     return std::chrono::duration_cast<std::chrono::microseconds>(
         deadline.time_since_epoch());

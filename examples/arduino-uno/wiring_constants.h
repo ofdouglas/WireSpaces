@@ -21,6 +21,9 @@ using demo_wiring::kPcHost;
 using demo_wiring::kUartBaudRate;
 using demo_wiring::kArduinoHostInfo;
 
+constexpr wirespaces::PublicationConfig kDiagnosticsPublication{
+    kTestWire, wirespaces::HostId{wirespaces::kBroadcastHostValue}};
+
 // Endpoint assignments remain application-owned; deployment wiring is generated above.
 constexpr wirespaces::EndpointAddress kPingEndpoint{
     wirespaces::EndpointAddress::from(wirespaces::Namespace::kCommon, WS_SERVICE_PING_ENDPOINT_ID)};
@@ -32,5 +35,11 @@ constexpr wirespaces::EndpointAddress kBitsUploadEndpoint{
     wirespaces::EndpointAddress::from(wirespaces::Namespace::kUser0, 1U)};
 constexpr wirespaces::EndpointAddress kBitsEchoEndpoint{
     wirespaces::EndpointAddress::from(wirespaces::Namespace::kUser0, 2U)};
+
+// Application-owned connections; topology codegen does not select service peers/endpoints.
+constexpr wirespaces::ConnectionAddress kUploadConnection{
+    kTestWire, kArduinoHost, kPcHost, kBitsUploadEndpoint};
+constexpr wirespaces::ConnectionAddress kEchoConnection{
+    kTestWire, kArduinoHost, kPcHost, kBitsEchoEndpoint};
 
 }  // namespace wiring_constants

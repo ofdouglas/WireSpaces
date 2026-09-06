@@ -18,10 +18,11 @@ struct HostInfo {
     uint8_t wire_count{0U};
     WireNumber wires[kMaximumHostWires]{};
 
-    [[nodiscard]] bool isMemberOf(WireNumber wire) const noexcept;
+    bool isMemberOf(WireNumber wire) const noexcept;
 };
 
-[[nodiscard]] const HostInfo& localHostInfo() noexcept;
+// Legacy process-wide identity; DomainContext does not read or register this state.
+const HostInfo& localHostInfo() noexcept;
 void setLocalHostInfo(const HostInfo& host_info) noexcept;
 
 }  // namespace wirespaces

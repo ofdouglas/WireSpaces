@@ -15,7 +15,7 @@
 namespace wirespaces::sim {
 namespace {
 
-[[nodiscard]] CommandLineResult errorResult(std::string diagnostic) {
+CommandLineResult errorResult(std::string diagnostic) {
     CommandLineResult result{};
     result.status = CommandLineStatus::kError;
     result.diagnostic = std::move(diagnostic);

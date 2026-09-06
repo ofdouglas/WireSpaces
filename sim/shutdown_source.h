@@ -18,7 +18,7 @@ public:
     /**
      * @brief Check whether the process should leave its superloop.
      */
-    [[nodiscard]] virtual bool isShutdownRequested() const = 0;
+    virtual bool isShutdownRequested() const = 0;
 };
 
 /**
@@ -40,7 +40,7 @@ public:
      */
     void reset();
 
-    [[nodiscard]] bool isShutdownRequested() const override;
+    bool isShutdownRequested() const override;
 
 private:
     static void handleSignal(int signal_number);

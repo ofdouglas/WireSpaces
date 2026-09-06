@@ -25,13 +25,8 @@ constexpr std::uint16_t kMaximumObjectSize{256U};
 constexpr std::uint16_t kSegmentPayloadSize{24U};
 constexpr std::uint16_t kMaximumBitsPayloadSize{bits::kSegmentHeaderSize + kSegmentPayloadSize};
 
-constexpr bits::ConnectionConfig kUploadConnection{
-    wiring_constants::kTestWire, wiring_constants::kArduinoHost, wiring_constants::kPcHost,
-    wiring_constants::kBitsUploadEndpoint};
-
-constexpr bits::ConnectionConfig kEchoConnection{
-    wiring_constants::kTestWire, wiring_constants::kArduinoHost, wiring_constants::kPcHost,
-    wiring_constants::kBitsEchoEndpoint};
+using wiring_constants::kUploadConnection;
+using wiring_constants::kEchoConnection;
 
 constexpr bits::TimingConfig kTransferTiming{100U, 250U, 5U};
 
@@ -74,11 +69,11 @@ public:
         object_complete_ = false;
     }
 
-    [[nodiscard]] bool hasCompletedObject() const noexcept {
+    bool hasCompletedObject() const noexcept {
         return object_complete_;
     }
 
-    [[nodiscard]] wirespaces::ByteSpan completedObject() const noexcept {
+    wirespaces::ByteSpan completedObject() const noexcept {
         return object_complete_ ? wirespaces::ByteSpan{storage_.data(), received_size_}
                                 : wirespaces::ByteSpan{};
     }
@@ -128,7 +123,7 @@ public:
     BitsRamTransferApplication& operator=(const BitsRamTransferApplication&) = delete;
     BitsRamTransferApplication& operator=(BitsRamTransferApplication&&) = delete;
 
-    /** @brief Initialize target peripherals and process-wide host identity. */
+    /** @brief Initialize target peripherals; domain identity is bound at construction. */
     void initialize() noexcept;
 
     /** @brief Poll ingress and advance both Compact BITS roles once. */
@@ -151,15 +146,16 @@ private:
     UartReceiver uart_receiver_{};
 
     demo_wiring::Forwarder egress_forwarder_{uart_forwarder_};
-    wirespaces::Router router_{demo_wiring::routes(), egress_forwarder_};
+    wirespaces::DomainContext domain_{
+        wiring_constants::kArduinoHostInfo, demo_wiring::routes(), egress_forwarder_};
     
     RamReceiverCallbacks receiver_callbacks_{wirespaces::MutableByteSpan{receive_object_}};
     RamTransmitterCallbacks transmitter_callbacks_{};
 
-    bits::BitsReceiver receiver_{kUploadConnection, router_, receiver_callbacks_,
+    bits::BitsReceiver receiver_{kUploadConnection, domain_.router(), receiver_callbacks_,
                                 PacketSlotSpan{segment_slots_}, receiver_datagram_packet_,
                                 receiver_transmit_packet_};
-    bits::BitsTransmitter transmitter_{kEchoConnection, kTransferTiming, router_, transmitter_callbacks_,
+    bits::BitsTransmitter transmitter_{kEchoConnection, kTransferTiming, domain_.router(), transmitter_callbacks_,
                                       transmitter_datagram_packet_, transmitter_transmit_packet_};
 
     wirespaces::DispatchTableEntry dispatch_entries_[2U]{
@@ -174,18 +170,17 @@ private:
 void BitsRamTransferApplication::initialize() noexcept {
     wirespaces::platform::avr::uart0Init(wiring_constants::kUartBaudRate);
     wirespaces::platform::avr::millisecondClockInit();
-    wirespaces::setLocalHostInfo(wiring_constants::kArduinoHostInfo);
 }
 
 void BitsRamTransferApplication::runOnce() noexcept {
-    uart_receiver_.process(router_, dispatcher_, demo_wiring::kUartIngressIndex);
-    (void)receiver_.process();
+    uart_receiver_.process(domain_, dispatcher_, demo_wiring::kUartIngressIndex);
+    receiver_.process();
 
     if (receiver_callbacks_.hasCompletedObject() && !transmitterBusy(transmitter_.state())) {
         startEcho(receiver_callbacks_.completedObject());
     }
 
-    (void)transmitter_.process(wirespaces::hal::MillisecondClock::now());
+    transmitter_.process(wirespaces::hal::MillisecondClock::now());
 }
 
 void BitsRamTransferApplication::startEcho(wirespaces::ByteSpan received_object) noexcept {

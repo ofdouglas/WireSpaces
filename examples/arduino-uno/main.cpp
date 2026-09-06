@@ -34,7 +34,7 @@ public:
     DemoApplication& operator=(const DemoApplication&) = delete;
     DemoApplication& operator=(DemoApplication&&) = delete;
 
-    /** @brief Initialize target hardware and process-wide host identity. */
+    /** @brief Initialize target hardware; domain identity is bound at construction. */
     void initialize() noexcept;
 
     /** @brief Poll ingress and run each Service once. */
@@ -47,17 +47,17 @@ private:
 
     // Routes
     demo_wiring::Forwarder egress_forwarder_{uart_forwarder_};
-    wirespaces::Router router_{demo_wiring::routes(), egress_forwarder_};
+    wirespaces::DomainContext domain_{
+        wiring_constants::kArduinoHostInfo, demo_wiring::routes(), egress_forwarder_};
 
     // Services
     heartbeat::HeartbeatService<1000U> heartbeat_service_{
-        &router_, wiring_constants::kTestWire, wiring_constants::kArduinoHost,
-        wirespaces::HostId{wirespaces::kBroadcastHostValue}};
+        domain_, wiring_constants::kDiagnosticsPublication};
 
-    ping::PingService ping_service_{&router_};
+    ping::PingService ping_service_{domain_};
     
     led_control::LedControlService led_control_service_{
-        &router_, wirespaces::platform::avr::setBuiltinLedBrightness, nullptr};
+        domain_, wirespaces::platform::avr::setBuiltinLedBrightness, nullptr};
 
     // Dispatch Table
     // TODO: this should be codegen eventually
@@ -71,11 +71,10 @@ private:
 
 void DemoApplication::initialize() noexcept {
     wirespaces::platform::avr::initialize(wiring_constants::kUartBaudRate);
-    wirespaces::setLocalHostInfo(wiring_constants::kArduinoHostInfo);
 }
 
 void DemoApplication::runOnce() noexcept {
-    uart_receiver_.process(router_, dispatcher_, demo_wiring::kUartIngressIndex);
+    uart_receiver_.process(domain_, dispatcher_, demo_wiring::kUartIngressIndex);
     ping_service_.run();
     led_control_service_.run();
     heartbeat_service_.run();

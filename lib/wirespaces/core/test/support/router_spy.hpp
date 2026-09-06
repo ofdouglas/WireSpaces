@@ -26,9 +26,9 @@ public:
         last_egress_set_ = kNoEgress;
     }
 
-    [[nodiscard]] bool called() const noexcept { return called_; }
-    [[nodiscard]] const PacketBuffer* lastPacket() const noexcept { return last_packet_; }
-    [[nodiscard]] EgressSet lastEgressSet() const noexcept { return last_egress_set_; }
+    bool called() const noexcept { return called_; }
+    const PacketBuffer* lastPacket() const noexcept { return last_packet_; }
+    EgressSet lastEgressSet() const noexcept { return last_egress_set_; }
 
 private:
     bool called_{false};
@@ -44,7 +44,7 @@ protected:
         route_entry_ = RouteTableEntry{kLocalWire, kNoEgress};
     }
 
-    [[nodiscard]] RouteResult forward(TestPacket& packet) const {
+    RouteResult forward(TestPacket& packet) const {
         return router_.forward(packet);
     }
 

@@ -16,12 +16,7 @@
 namespace wirespaces::transport::bits {
 
 /** @brief Immutable point-to-point identity of one BITS connection. */
-struct ConnectionConfig {
-    WireNumber wire{};
-    HostId local_host{};
-    HostId remote_host{};
-    EndpointAddress endpoint{};
-};
+using ConnectionConfig = ConnectionAddress;
 
 /** @brief Caller-selected retransmission behavior, in monotonic milliseconds. */
 struct TimingConfig {
@@ -68,10 +63,10 @@ public:
                  PacketBuffer& datagram_ingress, PacketBuffer& transmit_packet) noexcept;
 
     ReceiveResult receive(const PacketBuffer& packet) noexcept override;
-    [[nodiscard]] ProcessResult process() noexcept;
-    [[nodiscard]] SendResult sendDatagram(ByteSpan payload) noexcept;
-    [[nodiscard]] SendResult abort() noexcept;
-    [[nodiscard]] TransferState state() const noexcept { return engine_.state(); }
+    ProcessResult process() noexcept;
+    SendResult sendDatagram(ByteSpan payload) noexcept;
+    SendResult abort() noexcept;
+    TransferState state() const noexcept { return engine_.state(); }
 
 private:
     [[nodiscard]] MutableByteSpan prepare(uint16_t payload_size) noexcept override;
@@ -100,13 +95,13 @@ public:
                     PacketBuffer& transmit_packet) noexcept;
 
     ReceiveResult receive(const PacketBuffer& packet) noexcept override;
-    [[nodiscard]] ProcessResult process(uint32_t now_ms) noexcept;
-    [[nodiscard]] SendResult sendDatagram(ByteSpan payload) noexcept;
-    [[nodiscard]] SendResult abort() noexcept;
+    ProcessResult process(uint32_t now_ms) noexcept;
+    SendResult sendDatagram(ByteSpan payload) noexcept;
+    SendResult abort() noexcept;
     [[nodiscard]] StartResult startTransfer(ByteSpan object, uint16_t segment_size,
                                             uint8_t session_id,
                                             uint8_t initial_sequence_number) noexcept;
-    [[nodiscard]] TransferState state() const noexcept { return state_; }
+    TransferState state() const noexcept { return state_; }
 
 private:
     [[nodiscard]] bool handleDatagram() noexcept;
@@ -117,10 +112,10 @@ private:
     [[nodiscard]] bool sendSegment(uint8_t window_offset, uint32_t now_ms,
                                    bool retransmission) noexcept;
     [[nodiscard]] bool sendProbe(uint32_t now_ms) noexcept;
-    [[nodiscard]] bool sendAbort() noexcept;
+    bool sendAbort() noexcept;
     [[nodiscard]] bool preparePacket(uint16_t payload_size, QoS qos) noexcept;
     [[nodiscard]] bool forwardPacket() noexcept;
-    [[nodiscard]] bool retryLimitReached(uint8_t retry_count) const noexcept;
+    bool retryLimitReached(uint8_t retry_count) const noexcept;
     void shiftWindow(uint8_t count) noexcept;
     void resetTransferTracking() noexcept;
     void transitionToAborted() noexcept;

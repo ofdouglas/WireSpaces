@@ -184,16 +184,9 @@ SendResult BitsReceiver::abort() noexcept {
 }
 
 MutableByteSpan BitsReceiver::prepare(uint16_t payload_size) noexcept {
-    if (!transmit_packet_.initialize(
-            payload_size,
-            ControlFields{QoS::kNormal, false, TransportType::kBits})) {
+    if (!transmit_packet_.initialize(payload_size, connection_, ControlFields::bits())) {
         return MutableByteSpan{};
     }
-    Header& header{transmit_packet_.header()};
-    header.wire = connection_.wire;
-    header.source = connection_.local_host;
-    header.destination = connection_.remote_host;
-    header.endpoint = connection_.endpoint;
     return transmit_packet_.payload();
 }
 
@@ -258,7 +251,7 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
         }
         if (elapsed(now_ms, setup_last_send_ms_, timing_.retransmission_timeout_ms)) {
             if (retryLimitReached(setup_retry_count_)) {
-                (void)sendAbort();
+                sendAbort();
                 transitionToAborted();
                 return ProcessResult::kError;
             }
@@ -298,7 +291,7 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
             continue;
         }
         if (retryLimitReached(segment_retry_count_[offset])) {
-            (void)sendAbort();
+            sendAbort();
             transitionToAborted();
             return ProcessResult::kError;
         }
@@ -315,7 +308,7 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
             probe_last_send_ms_ = now_ms;
         } else if (elapsed(now_ms, probe_last_send_ms_, timing_.probe_timeout_ms)) {
             if (retryLimitReached(probe_retry_count_)) {
-                (void)sendAbort();
+                sendAbort();
                 transitionToAborted();
                 return ProcessResult::kError;
             }
@@ -562,16 +555,7 @@ bool BitsTransmitter::sendAbort() noexcept {
 }
 
 bool BitsTransmitter::preparePacket(uint16_t payload_size, QoS qos) noexcept {
-    if (!transmit_packet_.initialize(payload_size,
-                                     ControlFields{qos, false, TransportType::kBits})) {
-        return false;
-    }
-    Header& header{transmit_packet_.header()};
-    header.wire = connection_.wire;
-    header.source = connection_.local_host;
-    header.destination = connection_.remote_host;
-    header.endpoint = connection_.endpoint;
-    return true;
+    return transmit_packet_.initialize(payload_size, connection_, ControlFields::bits(qos));
 }
 
 bool BitsTransmitter::forwardPacket() noexcept {

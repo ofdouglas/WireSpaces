@@ -86,7 +86,7 @@ class RealizationTest(unittest.TestCase):
             command = ["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pedantic",
                        "-I", str(ROOT.parent / "lib"), "-I", str(target),
                        str(ROOT / "tests/support/branched_runtime.cpp"),
-                       *[str(core / f"{name}.cpp") for name in ("packet", "header", "host", "dispatch", "router")],
+                       *[str(core / f"{name}.cpp") for name in ("packet", "host", "dispatch", "router")],
                        "-o", str(target / "runtime")]
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)

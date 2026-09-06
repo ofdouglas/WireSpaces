@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <wirespaces/core/header.h>
+#include <wirespaces/core/packet.h>
 
 #include <cstdint>
 

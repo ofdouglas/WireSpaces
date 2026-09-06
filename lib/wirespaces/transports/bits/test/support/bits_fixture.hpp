@@ -286,11 +286,12 @@ protected:
 
     BitsReceiver receiver_{
         receiver_connection_, receiver_router_, receiver_callbacks_,
-        foundation::Span<PacketBuffer*>{receiver_segment_slots_},
-        receiver_datagram_ingress_, receiver_transmit_packet_};
+        ReceiverStorage{foundation::Span<PacketBuffer*>{receiver_segment_slots_},
+                        receiver_datagram_ingress_, receiver_transmit_packet_}};
     BitsTransmitter transmitter_{transmitter_connection_, timing_, transmitter_router_,
-                                transmitter_callbacks_, transmitter_datagram_ingress_,
-                                transmitter_transmit_packet_};
+                                transmitter_callbacks_,
+                                TransmitterStorage{transmitter_datagram_ingress_,
+                                                   transmitter_transmit_packet_}};
 
     DispatchTableEntry receiver_entry_{kTestEndpoint, &receiver_};
     DispatchTableEntry transmitter_entry_{kTestEndpoint, &transmitter_};

@@ -99,7 +99,7 @@ class DeploymentStudyTest(unittest.TestCase):
             core = ROOT.parent / "lib/wirespaces/core"
             result = subprocess.run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pedantic",
                 "-I", str(ROOT.parent / "lib"), "-I", str(ROOT / "tests/support"), "-I", str(target),
-                str(target / "study.cpp"), *[str(core / f"{name}.cpp") for name in ("packet", "header", "host", "dispatch", "router")],
+                str(target / "study.cpp"), *[str(core / f"{name}.cpp") for name in ("packet", "host", "dispatch", "router")],
                 "-o", str(target / "study")], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             subprocess.run([str(target / "study")], check=True, timeout=30)

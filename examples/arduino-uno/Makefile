@@ -61,7 +61,7 @@ BOOT_PROFILE_RAM_FLASH_LIMIT := 4096
 BOOT_PROFILE_SIZE_FLASH_LIMIT := 3350
 
 # --- Object inventory ---------------------------------------------------------
-CORE_OBJS := dispatch header host packet router
+CORE_OBJS := dispatch domain host packet router
 PLATFORM_OBJS := builtin_led millisecond_clock
 BITS_LIB_OBJS := bits_transport bits_receiver_engine bits_codec
 
@@ -77,7 +77,7 @@ BITS_OBJECTS := $(call local_obj,bits_ram_transfer) \
 	$(call objs,$(BUILD_DIR),$(CORE_OBJS))
 CAN_OBJECTS := $(call local_obj,mcp2515_can_test)
 
-BOOT_PROFILE_COMMON_OBJS := receiver_engine codec header packet
+BOOT_PROFILE_COMMON_OBJS := receiver_engine codec packet
 BOOT_PROFILE_RAM_OBJECTS := $(BOOT_PROFILE_BUILD_DIR)/ram_test.o \
 	$(call objs,$(BOOT_PROFILE_BUILD_DIR),$(BOOT_PROFILE_COMMON_OBJS))
 BOOT_PROFILE_SIZE_OBJECTS := $(BOOT_PROFILE_BUILD_DIR)/size_profile.o \

@@ -26,7 +26,7 @@ protected:
     HelloReceiver receiver_{};
     DispatchTableEntry dispatch_entry_{kHelloReceiverEndpoint, &receiver_};
     Dispatcher dispatcher_{foundation::Span<const DispatchTableEntry>{&dispatch_entry_, 1U}};
-    LocalDomainForwarder local_forwarder_{dispatcher_};
+    LocalDispatchForwarder local_forwarder_{dispatcher_};
     RouteTableEntry route_entry_{kLocalWire, kNoEgress};
     Router router_{foundation::Span<const RouteTableEntry>{&route_entry_, 1U}, local_forwarder_};
     HelloSender sender_{router_, kHelloReceiverEndpoint, kLocalHostId};

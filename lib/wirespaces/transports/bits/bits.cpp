@@ -89,17 +89,12 @@ ReceiverEngineConfig receiverEngineConfig(
 
 }  // namespace
 
-BitsReceiver::BitsReceiver(const ConnectionConfig& connection, Router& router,
-                           ReceiverCallbacks& callbacks,
-                           foundation::Span<PacketBuffer*> segment_ingress,
-                           PacketBuffer& datagram_ingress,
-                           PacketBuffer& transmit_packet) noexcept
+BitsReceiver::BitsReceiver(ConnectionConfig connection, Router& router,
+                           ReceiverCallbacks& callbacks, ReceiverStorage storage) noexcept
     : connection_{connection},
       router_{router},
-      segment_ingress_{segment_ingress},
-      datagram_ingress_{datagram_ingress},
-      transmit_packet_{transmit_packet},
-      engine_{receiverEngineConfig(segment_ingress), callbacks, *this} {}
+      storage_{storage},
+      engine_{receiverEngineConfig(storage.segment_ingress), callbacks, *this} {}
 
 ReceiveResult BitsReceiver::receive(const PacketBuffer& packet) noexcept {
     if (!matchesConnection(packet, connection_) || packet.payload().empty()) {
@@ -115,20 +110,20 @@ ReceiveResult BitsReceiver::receive(const PacketBuffer& packet) noexcept {
         if (datagram_occupied_) {
             return ReceiveResult::kFull;
         }
-        if (!copyPacket(packet, datagram_ingress_)) {
+        if (!copyPacket(packet, storage_.datagram_ingress)) {
             return ReceiveResult::kRejected;
         }
         datagram_occupied_ = true;
         return ReceiveResult::kAccepted;
     }
 
-    const size_t slot_count{segment_ingress_.size() < kCompactWindowWidth
-                                ? segment_ingress_.size()
+    const size_t slot_count{storage_.segment_ingress.size() < kCompactWindowWidth
+                                ? storage_.segment_ingress.size()
                                 : kCompactWindowWidth};
     bool free_slot_seen{false};
     for (size_t index{0U}; index < slot_count; ++index) {
         const uint16_t bit{static_cast<uint16_t>(1U << index)};
-        PacketBuffer* const slot{segment_ingress_[index]};
+        PacketBuffer* const slot{storage_.segment_ingress[index]};
         if (slot == nullptr || (segment_occupied_mask_ & bit) != 0U) {
             continue;
         }
@@ -153,7 +148,7 @@ ProcessResult BitsReceiver::process() noexcept {
             segment_occupied_mask_ =
                 static_cast<uint16_t>(segment_occupied_mask_ &
                                       static_cast<uint16_t>(~bit));
-            const PacketBuffer* const packet{segment_ingress_[index]};
+            const PacketBuffer* const packet{storage_.segment_ingress[index]};
             result = engine_.process(
                 packet == nullptr ? ByteSpan{} : packet->payload());
             break;
@@ -162,8 +157,8 @@ ProcessResult BitsReceiver::process() noexcept {
 
     if (datagram_occupied_) {
         const ProcessResult datagram_result{
-            engine_.process(ByteSpan{datagram_ingress_.payload().data(),
-                                     datagram_ingress_.size()})};
+            engine_.process(ByteSpan{storage_.datagram_ingress.payload().data(),
+                                     storage_.datagram_ingress.size()})};
         datagram_occupied_ = false;
         if (datagram_result == ProcessResult::kError ||
             result == ProcessResult::kError) {
@@ -184,27 +179,24 @@ SendResult BitsReceiver::abort() noexcept {
 }
 
 MutableByteSpan BitsReceiver::prepare(uint16_t payload_size) noexcept {
-    if (!transmit_packet_.initialize(payload_size, connection_, ControlFields::bits())) {
+    if (!storage_.transmit_packet.initialize(payload_size, connection_, ControlFields::bits())) {
         return MutableByteSpan{};
     }
-    return transmit_packet_.payload();
+    return storage_.transmit_packet.payload();
 }
 
 bool BitsReceiver::sendPrepared() noexcept {
-    return router_.forward(transmit_packet_) == RouteResult::kForwarded;
+    return router_.forward(storage_.transmit_packet) == RouteResult::kForwarded;
 }
 
-BitsTransmitter::BitsTransmitter(const ConnectionConfig& connection,
-                                 const TimingConfig& timing, Router& router,
+BitsTransmitter::BitsTransmitter(ConnectionConfig connection, TimingConfig timing, Router& router,
                                  TransmitterCallbacks& callbacks,
-                                 PacketBuffer& datagram_ingress,
-                                 PacketBuffer& transmit_packet) noexcept
+                                 TransmitterStorage storage) noexcept
     : connection_{connection},
       timing_{timing},
       router_{router},
       callbacks_{callbacks},
-      datagram_ingress_{datagram_ingress},
-      transmit_packet_{transmit_packet} {}
+      storage_{storage} {}
 
 ReceiveResult BitsTransmitter::receive(const PacketBuffer& packet) noexcept {
     if (!matchesConnection(packet, connection_) || packet.payload().empty()) {
@@ -222,7 +214,7 @@ ReceiveResult BitsTransmitter::receive(const PacketBuffer& packet) noexcept {
     if (datagram_occupied_) {
         return ReceiveResult::kFull;
     }
-    if (!copyPacket(packet, datagram_ingress_)) {
+    if (!copyPacket(packet, storage_.datagram_ingress)) {
         return ReceiveResult::kRejected;
     }
     datagram_occupied_ = true;
@@ -236,27 +228,27 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
         const bool handled{handleDatagram()};
         datagram_occupied_ = false;
         if (!handled) {
-            state_ = TransferState::kError;
+            session_.state = TransferState::kError;
             return ProcessResult::kError;
         }
     }
 
-    if (state_ == TransferState::kStarting) {
-        if (!setup_sent_) {
+    if (session_.state == TransferState::kStarting) {
+        if (!session_.setup_sent) {
             if (!sendSetup(now_ms, false)) {
-                state_ = TransferState::kError;
+                session_.state = TransferState::kError;
                 return ProcessResult::kError;
             }
             return ProcessResult::kProgress;
         }
-        if (elapsed(now_ms, setup_last_send_ms_, timing_.retransmission_timeout_ms)) {
-            if (retryLimitReached(setup_retry_count_)) {
+        if (elapsed(now_ms, session_.setup_last_send_ms, timing_.retransmission_timeout_ms)) {
+            if (retryLimitReached(session_.setup_retry_count)) {
                 sendAbort();
                 transitionToAborted();
                 return ProcessResult::kError;
             }
             if (!sendSetup(now_ms, true)) {
-                state_ = TransferState::kError;
+                session_.state = TransferState::kError;
                 return ProcessResult::kError;
             }
             return ProcessResult::kProgress;
@@ -264,17 +256,18 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
         return progressed ? ProcessResult::kProgress : ProcessResult::kIdle;
     }
 
-    if (state_ != TransferState::kActive) {
+    if (session_.state != TransferState::kActive) {
         return progressed ? ProcessResult::kProgress : ProcessResult::kIdle;
     }
 
-    const uint8_t window_span{static_cast<uint8_t>(granted_end_ - acknowledged_count_)};
+    const uint8_t window_span{
+        static_cast<uint8_t>(session_.granted_end - session_.acknowledged_count)};
     const uint16_t window_mask{lowBitMask(window_span)};
     for (uint8_t offset{0U}; offset < window_span; ++offset) {
         const uint16_t bit{static_cast<uint16_t>(1U << offset)};
-        if ((sent_bitmap_ & bit) == 0U) {
+        if ((session_.sent_bitmap & bit) == 0U) {
             if (!sendSegment(offset, now_ms, false)) {
-                state_ = TransferState::kError;
+                session_.state = TransferState::kError;
                 return ProcessResult::kError;
             }
             return ProcessResult::kProgress;
@@ -282,66 +275,66 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
     }
 
     const uint16_t outstanding{static_cast<uint16_t>(
-        sent_bitmap_ & static_cast<uint16_t>(~acknowledged_bitmap_) & window_mask)};
+        session_.sent_bitmap & static_cast<uint16_t>(~session_.acknowledged_bitmap) & window_mask)};
     for (uint8_t offset{0U}; offset < window_span; ++offset) {
         const uint16_t bit{static_cast<uint16_t>(1U << offset)};
         if ((outstanding & bit) == 0U ||
-            !elapsed(now_ms, segment_last_send_ms_[offset],
+            !elapsed(now_ms, session_.segment_last_send_ms[offset],
                      timing_.retransmission_timeout_ms)) {
             continue;
         }
-        if (retryLimitReached(segment_retry_count_[offset])) {
+        if (retryLimitReached(session_.segment_retry_count[offset])) {
             sendAbort();
             transitionToAborted();
             return ProcessResult::kError;
         }
         if (!sendSegment(offset, now_ms, true)) {
-            state_ = TransferState::kError;
+            session_.state = TransferState::kError;
             return ProcessResult::kError;
         }
         return ProcessResult::kProgress;
     }
 
-    if (acknowledged_count_ < segment_count_ && outstanding == 0U) {
-        if (!probe_timer_active_) {
-            probe_timer_active_ = true;
-            probe_last_send_ms_ = now_ms;
-        } else if (elapsed(now_ms, probe_last_send_ms_, timing_.probe_timeout_ms)) {
-            if (retryLimitReached(probe_retry_count_)) {
+    if (session_.acknowledged_count < session_.segment_count && outstanding == 0U) {
+        if (!session_.probe_timer_active) {
+            session_.probe_timer_active = true;
+            session_.probe_last_send_ms = now_ms;
+        } else if (elapsed(now_ms, session_.probe_last_send_ms, timing_.probe_timeout_ms)) {
+            if (retryLimitReached(session_.probe_retry_count)) {
                 sendAbort();
                 transitionToAborted();
                 return ProcessResult::kError;
             }
             if (!sendProbe(now_ms)) {
-                state_ = TransferState::kError;
+                session_.state = TransferState::kError;
                 return ProcessResult::kError;
             }
             return ProcessResult::kProgress;
         }
     } else {
-        probe_timer_active_ = false;
-        probe_retry_count_ = 0U;
+        session_.probe_timer_active = false;
+        session_.probe_retry_count = 0U;
     }
     return progressed ? ProcessResult::kProgress : ProcessResult::kIdle;
 }
 
 SendResult BitsTransmitter::sendDatagram(ByteSpan payload) noexcept {
-    if (transmit_packet_.capacity() < kUserDatagramHeaderSize ||
-        payload.size() > static_cast<size_t>(transmit_packet_.capacity() -
+    if (storage_.transmit_packet.capacity() < kUserDatagramHeaderSize ||
+        payload.size() > static_cast<size_t>(storage_.transmit_packet.capacity() -
                                              kUserDatagramHeaderSize)) {
         return SendResult::kTooLarge;
     }
     const uint16_t message_size{static_cast<uint16_t>(payload.size() +
                                                        kUserDatagramHeaderSize)};
     if (!preparePacket(message_size, QoS::kNormal) ||
-        !encodeUserDatagram(payload, transmit_packet_.payload())) {
+        !encodeUserDatagram(payload, storage_.transmit_packet.payload())) {
         return SendResult::kTooLarge;
     }
     return forwardPacket() ? SendResult::kSent : SendResult::kNoRoute;
 }
 
 SendResult BitsTransmitter::abort() noexcept {
-    if (state_ != TransferState::kStarting && state_ != TransferState::kActive) {
+    if (session_.state != TransferState::kStarting && session_.state != TransferState::kActive) {
         return SendResult::kInvalidState;
     }
     const bool sent{sendAbort()};
@@ -352,7 +345,7 @@ SendResult BitsTransmitter::abort() noexcept {
 StartResult BitsTransmitter::startTransfer(ByteSpan object, uint16_t segment_size,
                                            uint8_t session_id,
                                            uint8_t initial_sequence_number) noexcept {
-    if (state_ == TransferState::kStarting || state_ == TransferState::kActive) {
+    if (session_.state == TransferState::kStarting || session_.state == TransferState::kActive) {
         return StartResult::kBusy;
     }
     if (object.empty() || segment_size == 0U || object.size() > UINT32_MAX) {
@@ -363,26 +356,27 @@ StartResult BitsTransmitter::startTransfer(ByteSpan object, uint16_t segment_siz
     if (count == 0U || count > kMaximumCompactSegmentCount) {
         return StartResult::kInvalidArgument;
     }
-    if (transmit_packet_.capacity() < kSetupSize ||
-        transmit_packet_.capacity() <
+    if (storage_.transmit_packet.capacity() < kSetupSize ||
+        storage_.transmit_packet.capacity() <
             (static_cast<uint32_t>(segment_size) + kSegmentHeaderSize)) {
         return StartResult::kPacketTooSmall;
     }
 
-    object_ = object;
+    session_.object = object;
     const uint16_t final_segment_index{static_cast<uint16_t>(count - 1U)};
     const uint16_t final_segment_size{static_cast<uint16_t>(
         object_size - static_cast<uint32_t>(final_segment_index) * segment_size)};
-    setup_ = Setup{session_id, initial_sequence_number, final_segment_index,
-                   segment_size, final_segment_size};
-    segment_count_ = count;
+    session_.setup = Setup{session_id, initial_sequence_number, final_segment_index,
+                           segment_size, final_segment_size};
+    session_.segment_count = count;
     resetTransferTracking();
-    state_ = TransferState::kStarting;
+    session_.state = TransferState::kStarting;
     return StartResult::kStarted;
 }
 
 bool BitsTransmitter::handleDatagram() noexcept {
-    const ByteSpan message{datagram_ingress_.payload().data(), datagram_ingress_.size()};
+    const ByteSpan message{storage_.datagram_ingress.payload().data(),
+                           storage_.datagram_ingress.size()};
     if (message.empty()) {
         return false;
     }
@@ -419,41 +413,42 @@ bool BitsTransmitter::handleAck(ByteSpan payload) noexcept {
     if (!detail::decodeAckKnownType(payload, ack)) {
         return false;
     }
-    if ((state_ != TransferState::kStarting && state_ != TransferState::kActive) ||
-        ack.session_id != setup_.session_id) {
+    if ((session_.state != TransferState::kStarting &&
+         session_.state != TransferState::kActive) ||
+        ack.session_id != session_.setup.session_id) {
         return true;
     }
 
-    const uint8_t current_base{baseSequence(setup_, acknowledged_count_)};
+    const uint8_t current_base{baseSequence(session_.setup, session_.acknowledged_count)};
     const uint8_t advance{static_cast<uint8_t>(ack.window_base - current_base)};
     const uint8_t grant_span{static_cast<uint8_t>(ack.max_receive_sequence -
                                                   ack.window_base)};
     if (advance > kCompactWindowWidth ||
-        (acknowledged_count_ + advance) > segment_count_ ||
+        (session_.acknowledged_count + advance) > session_.segment_count ||
         grant_span > kCompactWindowWidth ||
-        (acknowledged_count_ + advance + grant_span) > segment_count_ ||
+        (session_.acknowledged_count + advance + grant_span) > session_.segment_count ||
         (ack.window_bitmap & static_cast<uint16_t>(~lowBitMask(grant_span))) != 0U) {
         return true;
     }
 
     shiftWindow(advance);
-    acknowledged_count_ += advance;
-    acknowledged_bitmap_ = static_cast<uint16_t>(
-        acknowledged_bitmap_ |
-        (ack.window_bitmap & lowBitMask(grant_span) & sent_bitmap_));
-    const uint32_t advertised_end{acknowledged_count_ + grant_span};
-    if (advertised_end > granted_end_) {
-        granted_end_ = advertised_end;
+    session_.acknowledged_count += advance;
+    session_.acknowledged_bitmap = static_cast<uint16_t>(
+        session_.acknowledged_bitmap |
+        (ack.window_bitmap & lowBitMask(grant_span) & session_.sent_bitmap));
+    const uint32_t advertised_end{session_.acknowledged_count + grant_span};
+    if (advertised_end > session_.granted_end) {
+        session_.granted_end = advertised_end;
     }
-    setup_sent_ = true;
-    probe_timer_active_ = false;
-    probe_retry_count_ = 0U;
+    session_.setup_sent = true;
+    session_.probe_timer_active = false;
+    session_.probe_retry_count = 0U;
 
-    if (acknowledged_count_ == segment_count_) {
-        state_ = TransferState::kCompleted;
+    if (session_.acknowledged_count == session_.segment_count) {
+        session_.state = TransferState::kCompleted;
         callbacks_.onTransferComplete();
     } else {
-        state_ = TransferState::kActive;
+        session_.state = TransferState::kActive;
     }
     return true;
 }
@@ -463,11 +458,12 @@ bool BitsTransmitter::handleReject(ByteSpan payload) noexcept {
     if (!detail::decodeRejectKnownType(payload, reject)) {
         return false;
     }
-    if ((state_ != TransferState::kStarting && state_ != TransferState::kActive) ||
-        reject.session_id != setup_.session_id) {
+    if ((session_.state != TransferState::kStarting &&
+         session_.state != TransferState::kActive) ||
+        reject.session_id != session_.setup.session_id) {
         return true;
     }
-    state_ = TransferState::kRejected;
+    session_.state = TransferState::kRejected;
     callbacks_.onTransferRejected(reject.reason);
     return true;
 }
@@ -477,8 +473,9 @@ bool BitsTransmitter::handleAbort(ByteSpan payload) noexcept {
     if (!detail::decodeAbortKnownType(payload, abort_message)) {
         return false;
     }
-    if ((state_ != TransferState::kStarting && state_ != TransferState::kActive) ||
-        abort_message.session_id != setup_.session_id) {
+    if ((session_.state != TransferState::kStarting &&
+         session_.state != TransferState::kActive) ||
+        abort_message.session_id != session_.setup.session_id) {
         return true;
     }
     transitionToAborted();
@@ -487,79 +484,79 @@ bool BitsTransmitter::handleAbort(ByteSpan payload) noexcept {
 
 bool BitsTransmitter::sendSetup(uint32_t now_ms, bool retransmission) noexcept {
     if (!preparePacket(kSetupSize, QoS::kNormal) ||
-        !encodeSetup(setup_, transmit_packet_.payload()) || !forwardPacket()) {
+        !encodeSetup(session_.setup, storage_.transmit_packet.payload()) || !forwardPacket()) {
         return false;
     }
-    setup_sent_ = true;
-    setup_last_send_ms_ = now_ms;
+    session_.setup_sent = true;
+    session_.setup_last_send_ms = now_ms;
     if (retransmission) {
-        ++setup_retry_count_;
+        ++session_.setup_retry_count;
     }
     return true;
 }
 
 bool BitsTransmitter::sendSegment(uint8_t window_offset, uint32_t now_ms,
                                   bool retransmission) noexcept {
-    const uint32_t segment_index{acknowledged_count_ + window_offset};
-    if (segment_index >= segment_count_) {
+    const uint32_t segment_index{session_.acknowledged_count + window_offset};
+    if (segment_index >= session_.segment_count) {
         return false;
     }
-    const uint32_t object_offset{segment_index * setup_.segment_size};
+    const uint32_t object_offset{segment_index * session_.setup.segment_size};
     const uint16_t payload_size{
-        segment_index == setup_.final_segment_index
-            ? setup_.final_segment_size
-            : setup_.segment_size};
+        segment_index == session_.setup.final_segment_index
+            ? session_.setup.final_segment_size
+            : session_.setup.segment_size};
     const uint16_t message_size{static_cast<uint16_t>(kSegmentHeaderSize + payload_size)};
     if (!preparePacket(message_size, QoS::kBackground)) {
         return false;
     }
 
-    const SegmentHeader header{setup_.session_id,
+    const SegmentHeader header{session_.setup.session_id,
                                static_cast<uint16_t>(segment_index)};
-    if (!encodeSegmentHeader(header, transmit_packet_.payload())) {
+    if (!encodeSegmentHeader(header, storage_.transmit_packet.payload())) {
         return false;
     }
-    std::memcpy(transmit_packet_.payload().data() + kSegmentHeaderSize,
-                object_.data() + object_offset, payload_size);
+    std::memcpy(storage_.transmit_packet.payload().data() + kSegmentHeaderSize,
+                session_.object.data() + object_offset, payload_size);
     if (!forwardPacket()) {
         return false;
     }
 
     const uint16_t bit{static_cast<uint16_t>(1U << window_offset)};
-    sent_bitmap_ = static_cast<uint16_t>(sent_bitmap_ | bit);
-    segment_last_send_ms_[window_offset] = now_ms;
+    session_.sent_bitmap = static_cast<uint16_t>(session_.sent_bitmap | bit);
+    session_.segment_last_send_ms[window_offset] = now_ms;
     if (retransmission) {
-        ++segment_retry_count_[window_offset];
+        ++session_.segment_retry_count[window_offset];
     } else {
-        segment_retry_count_[window_offset] = 0U;
+        session_.segment_retry_count[window_offset] = 0U;
     }
-    probe_timer_active_ = false;
+    session_.probe_timer_active = false;
     return true;
 }
 
 bool BitsTransmitter::sendProbe(uint32_t now_ms) noexcept {
-    const Probe probe{setup_.session_id};
+    const Probe probe{session_.setup.session_id};
     if (!preparePacket(kProbeSize, QoS::kNormal) ||
-        !encodeProbe(probe, transmit_packet_.payload()) || !forwardPacket()) {
+        !encodeProbe(probe, storage_.transmit_packet.payload()) || !forwardPacket()) {
         return false;
     }
-    probe_last_send_ms_ = now_ms;
-    ++probe_retry_count_;
+    session_.probe_last_send_ms = now_ms;
+    ++session_.probe_retry_count;
     return true;
 }
 
 bool BitsTransmitter::sendAbort() noexcept {
-    const Abort abort_message{setup_.session_id};
+    const Abort abort_message{session_.setup.session_id};
     return preparePacket(kAbortSize, QoS::kNormal) &&
-           encodeAbort(abort_message, transmit_packet_.payload()) && forwardPacket();
+           encodeAbort(abort_message, storage_.transmit_packet.payload()) && forwardPacket();
 }
 
 bool BitsTransmitter::preparePacket(uint16_t payload_size, QoS qos) noexcept {
-    return transmit_packet_.initialize(payload_size, connection_, ControlFields::bits(qos));
+    return storage_.transmit_packet.initialize(payload_size, connection_, ControlFields::bits(qos));
 }
 
 bool BitsTransmitter::forwardPacket() noexcept {
-    return router_.forward(transmit_packet_) == RouteResult::kForwarded;
+    return router_.forward(storage_.transmit_packet) == RouteResult::kForwarded;
 }
 
 bool BitsTransmitter::retryLimitReached(uint8_t retry_count) const noexcept {
@@ -571,50 +568,50 @@ void BitsTransmitter::shiftWindow(uint8_t count) noexcept {
         return;
     }
     if (count >= kCompactWindowWidth) {
-        sent_bitmap_ = 0U;
-        acknowledged_bitmap_ = 0U;
+        session_.sent_bitmap = 0U;
+        session_.acknowledged_bitmap = 0U;
         for (uint8_t index{0U}; index < kCompactWindowWidth; ++index) {
-            segment_last_send_ms_[index] = 0U;
-            segment_retry_count_[index] = 0U;
+            session_.segment_last_send_ms[index] = 0U;
+            session_.segment_retry_count[index] = 0U;
         }
         return;
     }
 
-    sent_bitmap_ = static_cast<uint16_t>(sent_bitmap_ >> count);
-    acknowledged_bitmap_ = static_cast<uint16_t>(acknowledged_bitmap_ >> count);
+    session_.sent_bitmap = static_cast<uint16_t>(session_.sent_bitmap >> count);
+    session_.acknowledged_bitmap = static_cast<uint16_t>(session_.acknowledged_bitmap >> count);
     for (uint8_t index{0U}; index < (kCompactWindowWidth - count); ++index) {
-        segment_last_send_ms_[index] = segment_last_send_ms_[index + count];
-        segment_retry_count_[index] = segment_retry_count_[index + count];
+        session_.segment_last_send_ms[index] = session_.segment_last_send_ms[index + count];
+        session_.segment_retry_count[index] = session_.segment_retry_count[index + count];
     }
     for (uint8_t index{static_cast<uint8_t>(kCompactWindowWidth - count)};
          index < kCompactWindowWidth; ++index) {
-        segment_last_send_ms_[index] = 0U;
-        segment_retry_count_[index] = 0U;
+        session_.segment_last_send_ms[index] = 0U;
+        session_.segment_retry_count[index] = 0U;
     }
 }
 
 void BitsTransmitter::resetTransferTracking() noexcept {
-    acknowledged_count_ = 0U;
-    granted_end_ = 0U;
-    sent_bitmap_ = 0U;
-    acknowledged_bitmap_ = 0U;
-    setup_last_send_ms_ = 0U;
-    probe_last_send_ms_ = 0U;
-    setup_retry_count_ = 0U;
-    probe_retry_count_ = 0U;
-    setup_sent_ = false;
-    probe_timer_active_ = false;
+    session_.acknowledged_count = 0U;
+    session_.granted_end = 0U;
+    session_.sent_bitmap = 0U;
+    session_.acknowledged_bitmap = 0U;
+    session_.setup_last_send_ms = 0U;
+    session_.probe_last_send_ms = 0U;
+    session_.setup_retry_count = 0U;
+    session_.probe_retry_count = 0U;
+    session_.setup_sent = false;
+    session_.probe_timer_active = false;
     for (uint8_t index{0U}; index < kCompactWindowWidth; ++index) {
-        segment_last_send_ms_[index] = 0U;
-        segment_retry_count_[index] = 0U;
+        session_.segment_last_send_ms[index] = 0U;
+        session_.segment_retry_count[index] = 0U;
     }
 }
 
 void BitsTransmitter::transitionToAborted() noexcept {
-    if (state_ == TransferState::kAborted) {
+    if (session_.state == TransferState::kAborted) {
         return;
     }
-    state_ = TransferState::kAborted;
+    session_.state = TransferState::kAborted;
     callbacks_.onTransferAborted();
 }
 

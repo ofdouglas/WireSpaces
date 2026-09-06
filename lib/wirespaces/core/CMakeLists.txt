@@ -2,9 +2,8 @@ add_library(
     wirespaces_core
     STATIC
         dispatch.cpp
-        header.cpp
+        domain.cpp
         host.cpp
-        local_domain.cpp
         mailbox.cpp
         packet.cpp
         router.cpp

@@ -23,7 +23,7 @@ TEST(DomainContextTest, BindsIdentityAndIngressWithoutGlobalRegistration) {
     const DispatchTableEntry entries[]{{kReceiverEndpoint, &receiver}};
     Dispatcher dispatcher{foundation::Span<const DispatchTableEntry>{entries}};
     // The selected ingress is the only egress, so the forwarder must not be called.
-    LocalDomainForwarder unused_forwarder{dispatcher};
+    LocalDispatchForwarder unused_forwarder{dispatcher};
     DomainContext domain{HostInfo{HostId{12U}, 1U, {WireNumber{7U}}},
                          foundation::Span<const RouteTableEntry>{routes}, unused_forwarder};
     const HostInfo previous{localHostInfo()};

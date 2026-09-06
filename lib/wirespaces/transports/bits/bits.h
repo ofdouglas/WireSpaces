@@ -25,6 +25,19 @@ struct TimingConfig {
     uint8_t max_retries{5U};
 };
 
+/** @brief Non-owning receiver packet storage supplied by the application. */
+struct ReceiverStorage {
+    foundation::Span<PacketBuffer*> segment_ingress{};
+    PacketBuffer& datagram_ingress;
+    PacketBuffer& transmit_packet;
+};
+
+/** @brief Non-owning transmitter packet storage supplied by the application. */
+struct TransmitterStorage {
+    PacketBuffer& datagram_ingress;
+    PacketBuffer& transmit_packet;
+};
+
 /** @brief Result of starting a transmitter-side transfer. */
 enum class StartResult : uint8_t {
     kStarted = 0U,
@@ -58,9 +71,8 @@ protected:
  */
 class BitsReceiver final : public EndpointReceiver, private ReceiverPduSender {
 public:
-    BitsReceiver(const ConnectionConfig& connection, Router& router, ReceiverCallbacks& callbacks,
-                 foundation::Span<PacketBuffer*> segment_ingress,
-                 PacketBuffer& datagram_ingress, PacketBuffer& transmit_packet) noexcept;
+    BitsReceiver(ConnectionConfig connection, Router& router, ReceiverCallbacks& callbacks,
+                 ReceiverStorage storage) noexcept;
 
     ReceiveResult receive(const PacketBuffer& packet) noexcept override;
     ProcessResult process() noexcept;
@@ -74,9 +86,7 @@ private:
 
     ConnectionConfig connection_{};
     Router& router_;
-    foundation::Span<PacketBuffer*> segment_ingress_{};
-    PacketBuffer& datagram_ingress_;
-    PacketBuffer& transmit_packet_;
+    ReceiverStorage storage_;
     uint16_t segment_occupied_mask_{0U};
     bool datagram_occupied_{false};
     BitsReceiverEngine engine_;
@@ -90,9 +100,8 @@ private:
  */
 class BitsTransmitter final : public EndpointReceiver {
 public:
-    BitsTransmitter(const ConnectionConfig& connection, const TimingConfig& timing, Router& router,
-                    TransmitterCallbacks& callbacks, PacketBuffer& datagram_ingress,
-                    PacketBuffer& transmit_packet) noexcept;
+    BitsTransmitter(ConnectionConfig connection, TimingConfig timing, Router& router,
+                    TransmitterCallbacks& callbacks, TransmitterStorage storage) noexcept;
 
     ReceiveResult receive(const PacketBuffer& packet) noexcept override;
     ProcessResult process(uint32_t now_ms) noexcept;
@@ -101,9 +110,29 @@ public:
     [[nodiscard]] StartResult startTransfer(ByteSpan object, uint16_t segment_size,
                                             uint8_t session_id,
                                             uint8_t initial_sequence_number) noexcept;
-    TransferState state() const noexcept { return state_; }
+    TransferState state() const noexcept { return session_.state; }
 
 private:
+    /** @brief Mutable state belonging to the current or most recent object transfer. */
+    struct TransferSession {
+        TransferState state{TransferState::kIdle};
+        ByteSpan object{};
+        Setup setup{};
+        uint32_t segment_count{0U};
+        uint32_t acknowledged_count{0U};
+        uint32_t granted_end{0U};
+        uint16_t sent_bitmap{0U};
+        uint16_t acknowledged_bitmap{0U};
+        uint32_t segment_last_send_ms[kCompactWindowWidth]{};
+        uint8_t segment_retry_count[kCompactWindowWidth]{};
+        uint32_t setup_last_send_ms{0U};
+        uint32_t probe_last_send_ms{0U};
+        uint8_t setup_retry_count{0U};
+        uint8_t probe_retry_count{0U};
+        bool setup_sent{false};
+        bool probe_timer_active{false};
+    };
+
     [[nodiscard]] bool handleDatagram() noexcept;
     [[nodiscard]] bool handleAck(ByteSpan payload) noexcept;
     [[nodiscard]] bool handleReject(ByteSpan payload) noexcept;
@@ -124,25 +153,9 @@ private:
     TimingConfig timing_{};
     Router& router_;
     TransmitterCallbacks& callbacks_;
-    PacketBuffer& datagram_ingress_;
-    PacketBuffer& transmit_packet_;
+    TransmitterStorage storage_;
     bool datagram_occupied_{false};
-    TransferState state_{TransferState::kIdle};
-    ByteSpan object_{};
-    Setup setup_{};
-    uint32_t segment_count_{0U};
-    uint32_t acknowledged_count_{0U};
-    uint32_t granted_end_{0U};
-    uint16_t sent_bitmap_{0U};
-    uint16_t acknowledged_bitmap_{0U};
-    uint32_t segment_last_send_ms_[kCompactWindowWidth]{};
-    uint8_t segment_retry_count_[kCompactWindowWidth]{};
-    uint32_t setup_last_send_ms_{0U};
-    uint32_t probe_last_send_ms_{0U};
-    uint8_t setup_retry_count_{0U};
-    uint8_t probe_retry_count_{0U};
-    bool setup_sent_{false};
-    bool probe_timer_active_{false};
+    TransferSession session_{};
 };
 
 }  // namespace wirespaces::transport::bits

@@ -361,7 +361,7 @@ There is no duplicate cache or TTL; all hosts must use a consistent acyclic depl
 
 `Router::forward` accepts zero-tagged local origin and validates/excludes nonzero
 tags, but does not itself dispatch locally. For compatibility, a local-origin zero
-route mask is still offered to a custom forwarder (e.g. LocalDomainForwarder);
+route mask is still offered to a custom forwarder (e.g. LocalDispatchForwarder);
 the generated Forwarder emits nothing for it. Direct Dispatcher calls retain their
 existing semantics; external Link drivers should use `Router::receive` to enforce
 ingress and membership. Routing and endpoint delivery report independent results;

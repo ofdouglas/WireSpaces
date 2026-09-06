@@ -152,11 +152,13 @@ private:
     RamReceiverCallbacks receiver_callbacks_{wirespaces::MutableByteSpan{receive_object_}};
     RamTransmitterCallbacks transmitter_callbacks_{};
 
-    bits::BitsReceiver receiver_{kUploadConnection, domain_.router(), receiver_callbacks_,
-                                PacketSlotSpan{segment_slots_}, receiver_datagram_packet_,
-                                receiver_transmit_packet_};
-    bits::BitsTransmitter transmitter_{kEchoConnection, kTransferTiming, domain_.router(), transmitter_callbacks_,
-                                      transmitter_datagram_packet_, transmitter_transmit_packet_};
+    bits::BitsReceiver receiver_{
+        kUploadConnection, domain_.router(), receiver_callbacks_,
+        bits::ReceiverStorage{PacketSlotSpan{segment_slots_}, receiver_datagram_packet_,
+                              receiver_transmit_packet_}};
+    bits::BitsTransmitter transmitter_{
+        kEchoConnection, kTransferTiming, domain_.router(), transmitter_callbacks_,
+        bits::TransmitterStorage{transmitter_datagram_packet_, transmitter_transmit_packet_}};
 
     wirespaces::DispatchTableEntry dispatch_entries_[2U]{
         {wiring_constants::kBitsUploadEndpoint, &receiver_},

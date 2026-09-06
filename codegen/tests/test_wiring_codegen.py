@@ -141,7 +141,6 @@ int main() {
             subprocess.run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
                             "-I", str(ROOT / "lib"), str(path / "test.cpp"),
                             str(ROOT / "lib/wirespaces/core/packet.cpp"),
-                            str(ROOT / "lib/wirespaces/core/header.cpp"),
                             "-o", str(path / "test")], check=True, capture_output=True)
             subprocess.run([str(path / "test")], check=True)
             # The physical Can attachment remains bound, but is absent from inferred routes.
@@ -154,7 +153,6 @@ int main() {
             subprocess.run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
                             "-I", str(ROOT / "lib"), str(path / "test.cpp"),
                             str(ROOT / "lib/wirespaces/core/packet.cpp"),
-                            str(ROOT / "lib/wirespaces/core/header.cpp"),
                             "-o", str(path / "test")], check=True, capture_output=True)
             subprocess.run([str(path / "test")], check=True)
 

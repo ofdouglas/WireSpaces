@@ -30,13 +30,14 @@ jobs:
           python3 -m venv .venv
           .venv/bin/python -m pip install -r tests/requirements.txt
 
-      - name: Cache CMake dependencies
+      - name: Cache CMake dependency sources
         uses: actions/cache@v4
         with:
-          path: build/_deps
-          key: ${{ runner.os }}-cmake-deps-${{ hashFiles('**/CMakeLists.txt') }}
+          # Generated subbuilds contain generator-specific CMake caches.
+          path: build/_deps/googletest-src
+          key: ${{ runner.os }}-cmake-sources-v1-${{ hashFiles('**/CMakeLists.txt') }}
           restore-keys: |
-            ${{ runner.os }}-cmake-deps-
+            ${{ runner.os }}-cmake-sources-v1-
 
       - name: Run complete device-independent suite
         run: ./scripts/test.sh

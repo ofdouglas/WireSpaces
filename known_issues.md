@@ -8,8 +8,8 @@ development, merging soon is reasonable. The core/runtime separation and staged
 topology compiler are reasonable foundations. Address items 1–3 with small fixes
 before merging where practical; carry the remaining items into focused follow-ups.
 
-Items 1, 3 and 4 are resolved on `cleanup-prototype-tech-debt`. Items 2, 5, 6
-and 7 remain open. Original review findings are retained below for context.
+Items 1, 3, 4 and 7 are resolved on `cleanup-prototype-tech-debt`. Items 2, 5
+and 6 remain open. Original review findings are retained below for context.
 
 ## 1. BITS can report completion for data it never sent
 
@@ -165,6 +165,20 @@ did not exercise this scenario.
 
 ## 7. Default verification excludes substantial prototype subsystems
 
+**Status:** Resolved on `cleanup-prototype-tech-debt`.
+
+`scripts/test.sh` now runs all CMake tests, generator tests (including the Node
+viewer test), Python tool and host-only hardware-harness tests, and all five AVR
+builds with their size gates. Missing dependencies fail before building; cached
+CMake options cannot silently disable test targets. CI installs the shared pinned
+Python requirements and the Ubuntu 24.04 native/AVR toolchains, then invokes this
+same script. `CONTRIBUTING.md` documents setup and the separate hardware workflow.
+
+Local validation passed: 127 C++ tests, 54 generator tests with no skips, 18 Python
+tool tests, one hardware-harness unit test, and all five AVR builds. A missing-Node
+probe failed as intended. Hardware results are recorded below. The original
+finding follows.
+
 **Priority:** Before or soon after merge.
 
 CI and `scripts/test.sh` run CMake/CTest, excluding generator tests, Python tools
@@ -222,3 +236,24 @@ After the fixes and additional boundary coverage:
 - Both AVR size gates passed: 3,602 bytes for the constrained RAM profile (limit
   4,096) and 3,324 bytes for the size profile (limit 3,350).
 - Hardware tests were not run.
+
+## Cleanup validation (2026-09-06)
+
+The unified `scripts/test.sh` suite passed with the counts recorded under item 7.
+All four flashable images uploaded and verified through the Uno UART bootloader.
+The attached bench passed:
+
+- Demo heartbeat, ping, ingress rejection and recovery.
+- Full BITS 128-byte RAM round trip.
+- Constrained BITS datagram echo, 256-byte image, and 251-byte partial-final image.
+- MCP2515/CANtact: three Classical CAN frames in each direction at 500 kbit/s.
+  Since `can0` was unavailable, a temporary adapter ran the existing CAN harness
+  with python-can's direct SLCAN backend; its exchange assertions were unchanged.
+
+PICkit programming and readback remained unreliable. Arduino AVR core 1.8.6's
+Uno Optiboot image was installed with the official fuse settings using a retry
+batch at 31.25 kHz ISP and minimum programming speed. PICkit never reported
+verified success, but UART subsequently worked, and a full UART flash readback
+matched all 502 bytes present in the official bootloader HEX. UART is now the
+temporary default; `FLASH_METHOD=pickit` retains the slow ISP alternative.
+The demo was restored and heartbeat/ping passed again after the CAN test.

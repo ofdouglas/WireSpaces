@@ -12,7 +12,7 @@ This sketch is a starting point for prototyping, not a decision record. Everythi
 
 # 1. Scope and Ground Rules
 
-The library is the thing between a Link driver and a Service. It owns the canonical PDU representation, forwarding, Endpoint storage, and the Link-facing contracts. It does not own the application, the schedule, or the transport medium.
+The library is the thing between a Link driver and a Service. The sketches below describe the simple-datagram prototype slice. `CORE §9` and `CORE §20` now allow one Transport Entity boundary with multiple declared ingress elements; receive hooks classify and retain only, with protocol semantics deferred. Detailed Transport Entity/BITS API integration is pending (`REG §6.12/§6.16`), and the single Queue/Snapshot examples below do not constrain compound Transport storage. It owns the canonical PDU representation, forwarding, Endpoint storage, and the Link-facing contracts. It does not own the application, the schedule, or the transport medium.
 
 | In scope | Out of scope |
 |---|---|
@@ -146,7 +146,7 @@ One real gap: the implementation has no incremental `update`/`finalize`, only a 
 
 - `data_structures/memory_pool.h` does not currently compile — a missing brace after the namespace, a `.data()` call on a pointer, and an assignment to a reference member. It is also not needed in phase 1, since nothing pools. Worth knowing before someone reaches for it.
 - `can/can_frame.h` is not the right base for the CAN profile. `Can::CanFrame` carries a `crc_` member and HDLC payload framing because it was built for the bootloader's CAN-over-HDLC transport, and its identifier is a template parameter constrained to an enum. WireSpaces needs a plain 11-bit identifier, a DLC, and eight bytes. Either a minimal frame type here or a refactor there — not a direct reuse.
-- `util/integer.h` is worth knowing about but **not** worth acting on first. `util::Uint24_s` demonstrates checked serialization of a narrow value in a wider container, and its TODO asks for a general form. The current preferred Participant and Wire values already use their full provisional container widths, while packed `Endpoint` has its own validity rule. An earlier draft made resolving that TODO a precondition for §4.1; §4.1 now explains why that was wrong on both the technical claim and the sequencing. The stopping condition lives there.
+- `util/integer.h` is worth knowing about but **not** worth acting on first. `util::Uint24_s` demonstrates checked serialization of a narrow value in a wider container, and its TODO asks for a general form. The current preferred Host and Wire values already use their full provisional container widths, while packed `Endpoint` has its own validity rule. An earlier draft made resolving that TODO a precondition for §4.1; §4.1 now explains why that was wrong on both the technical claim and the sequencing. The stopping condition lives there.
 
 **Not reusable, and mentioned only so nobody looks twice:** `bootloader/`, `hdlc/protocol.h`, and `hdlc/network_management.h` are application protocols. `Firmware/wirespaces/host_demo/` is an earlier C prototype of an unrelated generation.
 
@@ -186,10 +186,10 @@ Snapshot read coherence is a different problem and gets a fixed answer rather th
 
 ## 4.1 Identity
 
-Raw integers for distinct identity spaces make accidental substitutions easy. The canonical API therefore names Participant, Wire, and Endpoint values separately. The current preferred widths below are **provisional pending the topology corpus in §14**; code must not treat their appearance here as an interoperability freeze.
+Raw integers for distinct identity spaces make accidental substitutions easy. The canonical API therefore names Host, Wire, and Endpoint values separately. The current preferred widths below are **provisional pending the topology corpus in §14**; code must not treat their appearance here as an interoperability freeze.
 
 ```cpp
-struct ParticipantId {
+struct HostId {
     static constexpr uint8_t kBroadcast{0xFFU};
     uint8_t value{0U};
 
@@ -219,7 +219,7 @@ enum class TransportType : uint8_t { kUnreliableDatagram = 0U /* ... */ };
 enum class Qos           : uint8_t { kCritical = 0U, kHigh, kNormal, kBackground };
 ```
 
-`ParticipantId{0xFF}` is the one canonical broadcast destination and is never a valid source. Every independently routed/dispatchable Endpoint Domain has one ordinary `ParticipantId`, and uses that same identity on every Wire it joins. Physical-device identity is separate.
+`HostId{0xFF}` is the one canonical broadcast destination and is never a valid source. Every independently routed/dispatchable Endpoint Domain has one ordinary `HostId`, and uses that same identity on every Wire it joins. Physical-device identity is separate.
 
 `kLocalBus` is a reserved canonical `WireNumber` with local-only scope. It is valid for local dispatch and may be bound to at most one Link Interface in a Router/Endpoint Domain, but it is never transparently forwarded or spliced as itself.
 
@@ -246,8 +246,8 @@ struct PduDescriptor {
     bool          has_header_extensions{false};
     TransportType transport{TransportType::kUnreliableDatagram};
     WireNumber    wire{};
-    ParticipantId src{};
-    ParticipantId dest{};
+    HostId src{};
+    HostId dest{};
     Endpoint      endpoint{};
 
     bool isValid() const;
@@ -257,7 +257,7 @@ enum class EncodeResult : uint8_t {
     kOk = 0U,
     kOutputTooSmall,
     kInvalidQos,
-    kInvalidSourceParticipant,
+    kInvalidSourceHost,
     kInvalidEndpoint,
     kUnknownTransport,
 };
@@ -266,7 +266,7 @@ enum class DecodeResult : uint8_t {
     kOk = 0U,
     kInputTooShort,
     kReservedBitsSet,
-    kInvalidSourceParticipant,
+    kInvalidSourceHost,
     kInvalidEndpoint,
     kUnknownTransport,
 };
@@ -284,8 +284,8 @@ The current preferred provisional serialized layout is byte-oriented:
 ```text
 Byte 0      QoS[2] | Reserved[2] | H[1] | Transport[3]
 Byte 1      WireNumber
-Byte 2      SrcParticipantId
-Byte 3      DestParticipantId
+Byte 2      SrcHostId
+Byte 3      DestHostId
 Bytes 4-5   Endpoint = Namespace[2] + Id[14], little-endian
 ```
 
@@ -329,7 +329,7 @@ Which resolution, and what a wrap means for a staleness comparison, are open (`R
 
 `util::Span<const uint8_t>` is a borrowed view valid for the duration of one call, and the copy-based baseline (`OWN-3`) means every accept and submit path copies what it keeps before returning. That is the whole ownership story for phase 1, and it is worth being explicit that this is a *phase* rather than a design: the owned-handle shape that `CORE §16.1` describes is deliberately absent, so there is nothing yet whose ownership can be lost.
 
-The one rule that must hold even in a copy-only world, because it is what a later zero-copy path will be checked against:
+The adopted boundary permits explicit owned references or bounded immutable leases, but this prototype sketch still specifies copies only; it provides no owned-handle API yet. The one rule that must hold even in a copy-only world, because it is what a later reference path will be checked against:
 
 ```text
 a rejected submission leaves ownership with the caller, for every reject reason
@@ -427,7 +427,7 @@ template <> struct DeliveredMetadata<MetadataLevel::kPayloadOnly> {};  // empty;
 
 template <> struct DeliveredMetadata<MetadataLevel::kWithSource> {
     WireNumber    wire{};
-    ParticipantId src{};
+    HostId src{};
     LinkIndex     ingress{};
 };
 // kFull adds destination, Endpoint, Qos, TransportType, extension presence,
@@ -508,7 +508,7 @@ public:
 };
 
 /// Bounded opaque context created from one validated ingress PDU.
-/// It retains only the canonical Wire, remote Participant, and registered
+/// It retains only the canonical Wire, remote Host, and registered
 /// Endpoint/Transport constraints needed to form a reply.
 class ReplyContext {
 public:
@@ -548,7 +548,7 @@ int32_t generationDelta(Generation newer, Generation older);
 
 The ordinary transmit and Snapshot publication forms are constructed with a `PduSink&` and static binding, per `CORE §10.3`: a Service names its outputs, the deployment names the Wires. A `ReplyEndpoint` instead consumes the bounded context created by validated ingress.
 
-The useful binding contexts remain static, transmit-only, receive-only, request-scoped, and learned-from-ingress. Request-scoped acceptance constructs a bounded `ReplyContext` so a reply uses the local `ParticipantId` as source, the received canonical source as destination, and the received Wire, subject to the registered Endpoint and Transport constraints. Learned selections are likewise bounded and validated against profile/deployment rules. Neither mechanism gives Link-local codes canonical meaning, and merely reading source metadata does not create a transmit binding.
+The useful binding contexts remain static, transmit-only, receive-only, request-scoped, and learned-from-ingress. Request-scoped acceptance constructs a bounded `ReplyContext` so a reply uses the local `HostId` as source, the received canonical source as destination, and the received Wire, subject to the registered Endpoint and Transport constraints. Learned selections are likewise bounded and validated against profile/deployment rules. Neither mechanism gives Link-local codes canonical meaning, and merely reading source metadata does not create a transmit binding.
 
 ---
 
@@ -583,12 +583,12 @@ The class shape is worth one note because it reads oddly: `QueueEndpoint` public
 
 ```cpp
 struct EndpointBinding {
-    ParticipantId participant{};
+    HostId host{};
     Endpoint      endpoint{};
     EndpointSink* sink{nullptr};
 };
 
-/// Selects local Participant and Endpoint bindings from canonical destination.
+/// Selects local Host and Endpoint bindings from canonical destination.
 class EndpointDispatcher {
 public:
     /// @param[in] table  Caller-owned, stable for the dispatcher's lifetime.
@@ -601,9 +601,9 @@ public:
 };
 ```
 
-For a directed PDU, the dispatcher offers only the binding matching `(dest, endpoint)`. For canonical broadcast it fans out to every locally hosted Participant binding for that Endpoint. Broadcast fanout is bounded by the static table and still performs no Service work; each sink independently accepts, fills, or rejects. Configuration rejects duplicate `(participant, endpoint)` bindings, and `0xFF` is never a configured local Participant.
+For a directed PDU, the dispatcher offers only the binding matching `(dest, endpoint)`. For canonical broadcast it fans out to every locally hosted Host binding for that Endpoint. Broadcast fanout is bounded by the static table and still performs no Service work; each sink independently accepts, fills, or rejects. Configuration rejects duplicate `(host, endpoint)` bindings, and `0xFF` is never a configured local Host.
 
-The table is caller-owned and built at init, which keeps the dispatcher free of storage policy and lets generated configuration supply a `constexpr` table. A one-Participant target naturally has that same Participant value in every row. A tiny target that collapses this to a `switch` (`CORE §25`) replaces the class rather than configuring it — the collapse is a different implementation of the same contract, not a mode.
+The table is caller-owned and built at init, which keeps the dispatcher free of storage policy and lets generated configuration supply a `constexpr` table. A one-Host target naturally has that same Host value in every row. A tiny target that collapses this to a `switch` (`CORE §25`) replaces the class rather than configuring it — the collapse is a different implementation of the same contract, not a mode.
 
 Ordered lookup with binary search is the likely directed default; broadcast requires a bounded range scan or equivalent generated fanout. A small linear scan wins below roughly a dozen Endpoints. Neither is a contract.
 
@@ -636,9 +636,9 @@ public:
 };
 ```
 
-The Router makes propagation decisions from canonical Wire identity and ingress topology, never from destination Participant. A dense `Wire -> LinkBitmask` with the ingress bit removed is the minimal form; `(Wire, ingress) -> EgressLinkBitmask` is available where the local topology needs an explicit matrix. `kLocalBus` yields no transparent egress and cannot be a splice source.
+The Router makes propagation decisions from canonical Wire identity and ingress topology, never from destination Host. A dense `Wire -> LinkBitmask` with the ingress bit removed is the minimal form; `(Wire, ingress) -> EgressLinkBitmask` is available where the local topology needs an explicit matrix. `kLocalBus` yields no transparent egress and cannot be a splice source.
 
-The Router is deliberately unaware of CAN VCNs, compact/general participant codes, and participant projection. Those are Link-representation details: ingress has already reconstructed canonical values, and egress receives only canonical values.
+The Router is deliberately unaware of CAN VCNs, compact/general host codes, and host projection. Those are Link-representation details: ingress has already reconstructed canonical values, and egress receives only canonical values.
 
 Phase 1 has no runtime reconfiguration, therefore no table versioning and no pointer swap. The seqlock a Snapshot Endpoint uses (§9.2) is a different mechanism for a different problem and does not appear here; an immutable table needs no reader protocol at all. This is not a simplification to be apologized for: `IMPL §1` says advanced table synchronization arrives after measurement, and an immutable table is the correct starting point precisely because it makes the reader path deterministic. The interface is shaped so a mutable implementation can appear behind it without touching callers.
 
@@ -657,7 +657,7 @@ private:
 };
 ```
 
-This is where Wire-mask propagation, splice application, and local delivery live, and it is the only place that knows about both Endpoints and Links. For each ingress PDU it preserves canonical source, destination, Endpoint, control metadata, extensions, and payload; applies any explicit Wire splice; offers local delivery to the Dispatcher; and submits to each selected egress Link. The Dispatcher, not the Router, performs directed Participant selection and broadcast fanout. Keeping the engine small is the point; if it starts accumulating policy, that policy probably belongs in configuration.
+This is where Wire-mask propagation, splice application, and local delivery live, and it is the only place that knows about both Endpoints and Links. For each ingress PDU it preserves canonical source, destination, Endpoint, control metadata, extensions, and payload; applies any explicit Wire splice; offers local delivery to the Dispatcher; and submits to each selected egress Link. The Dispatcher, not the Router, performs directed Host selection and broadcast fanout. Keeping the engine small is the point; if it starts accumulating policy, that policy probably belongs in configuration.
 
 ---
 
@@ -717,7 +717,7 @@ A datagram driver gets added when a datagram Link is actually implemented, not i
 
 Interrupt- and DMA-driven drivers implement the same interfaces with the queueing behind them, which is a per-target concern and the reason these seams are virtual.
 
-The CAN driver does not label identifier bits as canonical fields. Names such as `Can11Direction`, `VirtualCircuitNumber`, `CompactParticipantCode`, and `GeneralParticipantCode` exist only in `wirespaces::can` profile implementation/configuration. In particular, a profile-local direction bit selects how local codes reconstruct canonical source and destination; it has no canonical request/reply or authority meaning.
+The CAN driver does not label identifier bits as canonical fields. Names such as `Can11Direction`, `VirtualCircuitNumber`, `CompactHostCode`, and `GeneralHostCode` exist only in `wirespaces::can` profile implementation/configuration. In particular, a profile-local direction bit selects how local codes reconstruct canonical source and destination; it has no canonical request/reply or authority meaning.
 
 `start()` and `stop()` are **driver control, not WireSpaces lifecycle**. They enable and disable a peripheral; they say nothing about restart units, runtime generations, or bounded quiesce, all of which `CORE §23` specifies and §13 defers. The distinction is worth keeping in the naming so that a later lifecycle API is not mistaken for already existing:
 
@@ -747,9 +747,9 @@ public:
 
 The cadence sampling goes through `PduSource&` (§4.6), not through a `SnapshotTransmitEndpoint&`. The previous draft named the Endpoint type here, which would have made `link` depend on `endpoint` and made every LLL test drag in the Endpoint layer. The concrete driver is held by the concrete LLL — a CAN LLL holds a `CanDriver&` — so the driver type appears in the profile implementation and nowhere above it.
 
-The LLL is also where arrival timestamping and profile decode happen, which is what allows an offloaded or RTL implementation to satisfy the same contract (`CORE §1.7`). Before calling `IngressSink`, every LLL reconstructs an unambiguous canonical Wire, source Participant, and destination Participant. A CAN11 binding, for example, supplies its one Wire while a VCN or participant-code profile reconstructs the two canonical Participants.
+The LLL is also where arrival timestamping and profile decode happen, which is what allows an offloaded or RTL implementation to satisfy the same contract (`CORE §1.7`). Before calling `IngressSink`, every LLL reconstructs an unambiguous canonical Wire, source Host, and destination Host. A CAN11 binding, for example, supplies its one Wire while a VCN or host-code profile reconstructs the two canonical Hosts.
 
-The reverse boundary is equally strict: `submit()` receives canonical values and either represents them according to that Link instance's profile and binding or returns `SendResult::kUnrepresentable`. It never truncates a Participant, substitutes an unmapped code, or silently sends a PDU on a different Wire. This is where Wire elision and projection end; Router and Endpoint code never see them.
+The reverse boundary is equally strict: `submit()` receives canonical values and either represents them according to that Link instance's profile and binding or returns `SendResult::kUnrepresentable`. It never truncates a Host, substitutes an unmapped code, or silently sends a PDU on a different Wire. This is where Wire elision and projection end; Router and Endpoint code never see them.
 
 ## 8.3 Capabilities, at two levels
 
@@ -787,7 +787,7 @@ The dividing line is whether the field survives a change of controller. A CAN Li
 
 Unsupported features are stated rather than omitted in both, since an absent field reads as an unmade decision while an explicit "none" is information (`ERR-5` applied to configuration).
 
-`LinkCapabilities`' first real job is static validation: refusing to bind traffic whose maximum PDU, QoS, broadcast use, or canonical address set cannot be represented on the selected Link, before anything is emitted (`LINK §2.13`). Profile-specific limits such as VCN entry count, direct participant-code ranges, projection capacity, Guest CAN-ID allocation, and hardware filter count remain profile/driver capability records below the canonical interface rather than fields the Router interprets.
+`LinkCapabilities`' first real job is static validation: refusing to bind traffic whose maximum PDU, QoS, broadcast use, or canonical address set cannot be represented on the selected Link, before anything is emitted (`LINK §2.13`). Profile-specific limits such as VCN entries per alias, active/spare alias capacity, Guest CAN-ID allocation, and hardware filter count remain profile/driver capability records below the canonical interface rather than fields the Router interprets.
 
 ---
 
@@ -868,12 +868,12 @@ Three consequences worth stating, because each is a place a correct-looking impl
 Configuration is data, produced by hand for the prototype and by the Organizer later (`DEPLOY §2`). The library consumes it; it does not parse files.
 
 ```cpp
-struct ParticipantConfig {
-    ParticipantId participant{};
+struct HostConfig {
+    HostId host{};
 };
 
 struct LibraryConfig {
-    util::Span<const ParticipantConfig> participants;
+    util::Span<const HostConfig> hosts;
     util::Span<const RouteEntry>      routes;
     util::Span<const EndpointBinding> endpoints;
     util::Span<const LinkConfig>      links;
@@ -886,27 +886,22 @@ struct LibraryConfig {
 ValidationResult validate(const LibraryConfig& config);
 ```
 
-Each `LinkConfig` binds a Link Interface to canonical Wire membership and a concrete profile configuration. The first CAN11 profile concepts are:
+Each `LinkConfig` binds a Link Interface to canonical Wire membership and a concrete profile configuration. The current CAN11 configuration concepts are:
 
 ```text
-common CAN11 binding:
-    exactly one WireNumber, possibly kLocalBus
-    addressing model = Guest VCN | Native VCN | Native Participant-Compressed
+Guest binding:
+    one Wire, allocated aligned CAN-ID block, fixed QoS, exact profile
+    deployment-wide Guest VCN relationship definition
 
-VCN model:
-    bounded VCN -> {ParticipantA, ParticipantB}
-
-Participant-Compressed model:
-    direct canonical codes, or optional bounded local-code <-> ParticipantId projection
-
-Guest VCN additions:
-    allocated aligned CAN-ID base/range
-    fixed canonical QoS interpretation
+Native binding:
+    WireAlias -> {Wire, DefaultMap role bindings or ExplicitMap, profile parameters}
+    one deterministic TX alias selection per admitted canonical tuple
+    spare-alias capacity for live migration
 ```
 
-These are configuration concepts, not a premature map ABI. The current sketch intentionally does not choose VCN/projection table storage, a map fingerprint protocol, or an atomic activation mechanism. Direct participant-compressed mode needs no projection table. Dynamic setup may build immutable/read-mostly profile state before activation without changing the canonical Router contract.
+These are configuration concepts, not a selected table ABI. Default MainA/MainB/NodeN positions map to canonical HostIds. Native receive aliases may coexist for one Wire; TX selects one representation. Active bindings are immutable. Readiness, retirement/reuse, fingerprints, and Guest cutover remain profile work (`LINK §2.14`). The Router never interprets an alias or VCN.
 
-`validate` returning a result rather than asserting matters for the host and tooling cases, where reporting every problem beats stopping at the first. Initial checks include unique ordinary Participant IDs; valid source/destination and packed Endpoints; no duplicate `(participant, endpoint)` bindings; unambiguous routes; loop-free ordinary Wire topology; at most one local `kLocalBus` Link binding; no `kLocalBus` forwarding/splice action; and egress representability under every selected profile. CAN11 validation additionally checks one Wire per profile instance, VCN entry semantics, Guest allocation shape, and direct/projected participant representability.
+`validate` returns a result rather than asserting so tooling can report errors. Local checks include unique ordinary HostIds, valid Endpoints, unambiguous routes and TX selections, scope and LocalBus rules, alias/map consistency, VCN uniqueness, Guest allocation/QoS, and representability. Deployment-wide topology, Guest semantics, migration readiness, and stale-frame exclusion need evidence beyond one local slice (`DEPLOY §2.4`).
 
 Set-valued and coupled acceptance (`CORE §19.1`) is a phase-2 concern, but the representation should not actively prevent it: a binding that stores single values everywhere is harder to widen than one storing ranges from the start.
 
@@ -1025,7 +1020,7 @@ Per `CONFORM §1.1`, choices made to let code exist are listed rather than left 
 
 | Choice here | Open item |
 |---|---|
-| 8-bit `ParticipantId` and provisional 8-bit `WireNumber` | pre-freeze topology-corpus evidence and allocation margin |
+| 8-bit `HostId` and provisional 8-bit `WireNumber` | pre-freeze topology-corpus evidence and allocation margin |
 | current preferred 6-byte descriptor/control/Endpoint layout | interoperability remains unfrozen; validate against topology and profile evidence |
 | bytes in Endpoints, decode on read | `REG §6.12` — `T` and the decoded representation |
 | `Timestamp` narrower than the platform clock | `REG §6.7` — resolution, epoch, wrap comparison |
@@ -1041,7 +1036,7 @@ Per `CONFORM §1.1`, choices made to let code exist are listed rather than left 
 
 None of these is settled by appearing in working code, and a test pinning one is pinning current behavior for regression purposes rather than ratifying it.
 
-Before freezing identity widths or the descriptor layout, run a representative topology corpus covering multicore/internal Endpoint Domains, redundant controllers, gateways, several CAN buses, overlapping broad/narrow Wires, device-private and debug Wires, local/sentinel reservations, and plausible product growth. Record peak Participant and Wire consumption, reservation cost, and remaining margin. The purpose is useful headroom, not merely proving one sketch fits.
+Before freezing identity widths or the descriptor layout, run a representative topology corpus covering multicore/internal Endpoint Domains, redundant controllers, gateways, several CAN buses, overlapping broad/narrow Wires, device-private and debug Wires, local/sentinel reservations, and plausible product growth. Record peak Host and Wire consumption, reservation cost, and remaining margin. The purpose is useful headroom, not merely proving one sketch fits.
 
 Snapshot read coherence is no longer provisional: it is a seqlock (§9.2). The use of distinct plain wrapper types, rather than a generalized bounded-integer utility, also has the stated stopping condition in §4.1; their numeric widths remain provisional as listed above.
 
@@ -1061,7 +1056,7 @@ Six things need a decision before or during the first increment, and none is min
 
    **First:** `core` — descriptor codec with `DecodeResult` — plus one `QueueEndpoint`, one `SnapshotEndpoint`, an `EndpointDispatcher`, and **one `TransmitEndpoint` feeding a recording `PduSink`**. No Router, no Link, entirely host-testable. Adding the transmit side costs almost nothing and exercises both faces of the Endpoint model, which is where §5 puts the most weight; a receive-only slice would leave `SendResult`, ownership-on-rejection, and the `PduSink` seam entirely untested.
 
-   **Second: a fake Classical CAN driver and the simplest CAN LLL path**, before any byte-stream work. This is deliberately the adversarial choice. CAN immediately forces the driver seam to represent an arbitration identifier and DLC correctly, which is the exact thing the old single-`Span` seam could not do and the thing §8.1 was rewritten for — so it tests whether the new seams are genuinely carrier-neutral instead of only claimed to be. Even without aggregation or fragmentation, a direct Native Participant-Compressed path exercises profile-local identifier packing, canonical Wire/source/destination reconstruction, egress representability rejection, and the `IngressSink` boundary. A byte-stream Link would exercise none of those and would let a wrong abstraction survive longer.
+   **Second: a fake Classical CAN driver and the simplest CAN LLL path**, before any byte-stream work. This is deliberately the adversarial choice. CAN immediately forces the driver seam to represent an arbitration identifier and DLC correctly, which is the exact thing the old single-`Span` seam could not do and the thing §8.1 was rewritten for — so it tests whether the new seams are genuinely carrier-neutral instead of only claimed to be. Even without aggregation or fragmentation, a default-map Native VCN path exercises identifier packing, alias/VCN reconstruction of canonical Wire/source/destination, deterministic egress selection, representability rejection, and the `IngressSink` boundary. A byte-stream Link would exercise none of those and would let a wrong abstraction survive longer.
 
 5. **How the `Firmware` utilities are depended upon** (§12.1). These are separate repositories, so the recommendation is a vendored extraction with the upstream commit recorded, rather than an include path into an unpinned sibling checkout. Question 1 above may dissolve this one entirely.
 

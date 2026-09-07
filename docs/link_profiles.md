@@ -1,8 +1,8 @@
 # WireSpaces — Link Profiles
 
-**Status:** Draft; CAN11 addressing direction selected, PDUA control/CRC details still provisional
+**Status:** Draft; unified CAN11 VCN direction incorporated; exact profile, PDUA, control, CRC, and transition details remain provisional
 **Scope:** How canonical WS PDUs are carried on specific Physical Links
-**Authority:** This document owns per-carrier encodings and profile-local reconstruction metadata. Canonical Wire, participant, Endpoint, Transport, and routing semantics belong to `CORE`. A conflict means the profile here is unfinished, not that `CORE` is wrong
+**Authority:** This document owns per-carrier encodings and profile-local reconstruction metadata. Canonical Wire, host, Endpoint, Transport, and routing semantics belong to `CORE`. A conflict means the profile here is unfinished, not that `CORE` is wrong
 
 ---
 
@@ -14,7 +14,7 @@ Current profile maturity:
 
 | Profile | Status |
 |---|---|
-| Classical CAN, 11-bit | Three static addressing profiles selected; PDUA details require revalidation |
+| Classical CAN, 11-bit | Unified VCN model with Guest/Native encodings; packing and transition details provisional |
 | Byte-stream / UART | Direction chosen; framing and CRC unresolved |
 | CAN FD, CAN XL | In scope; approach undecided |
 | USB | Start with CDC/serial; native bulk and FTDI FIFO attractive |
@@ -24,194 +24,115 @@ Current profile maturity:
 
 ---
 
-# 2. Classical CAN — 11-bit Profiles
+# 2. Classical CAN — Unified 11-bit VCN Profiles
 
-Classical CAN11 is a constrained compatibility floor, not the definition or ceiling of WireSpaces. It does not carry the preferred 48-bit canonical descriptor literally. The CAN LLL reconstructs a complete canonical descriptor from one statically selected profile, its Link Binding, the complete 11-bit identifier, and the PDU data.
+CAN11 uses one addressing concept: **Virtual Circuit Number (VCN) + Direction**. Guest and Native are statically selected carrier encodings of that concept. This replaces the former Native VCN8 and separate Compact/General Host-compressed baseline. The latter remains an experimental alternative only (`REG §6.8`). Canonical Host identity and Wire propagation are unchanged.
 
-There are three selected CAN11 profiles:
-
-```text
-Guest VCN
-Native VCN
-Native Participant-Compressed
-```
-
-They expose two addressing models: VCN names a configured participant relation; Participant-Compressed names participant codes directly. The former committed/`WireAlias`/`NodeId` model is retired.
+This chapter incorporates the unified VCN proposal as the current design direction. The identifier budgets and default mapping below are preferred provisional profile definitions; no byte-exact interoperability is claimed. PDUA packing, exact control allocation, fingerprints, and migration completion rules still require evidence and freeze.
 
 ## 2.1 Link Binding and canonical reconstruction
 
-> **Each CAN11 Link Binding carries exactly one WS Wire.**
+A Guest Link Binding selects one Wire, one aligned allocated CAN-ID block, one fixed QoS, and a deployment-wide Guest VCN relationship map.
 
-This is a property of the Link Binding, not a claim that an entire physical CAN bus equals one Wire. In particular, a Guest binding owns only its allocated identifier block on a legacy-governed bus; frames outside that block may belong to other protocols or bindings.
-
-`WireNumber` is never represented in a baseline CAN11 frame. It is always reconstructed from the binding:
+A Native Link Binding contains up to eight active alias bindings:
 
 ```text
-ingress:
-    classify frame to exactly one active CAN11 Link Binding
-    canonical.WireNumber = binding.WireNumber
-    canonical.SrcParticipantId,
-    canonical.DestParticipantId = profile identifier reconstruction
-    canonical.QoS = identifier field or binding-fixed QoS
-    canonical.Endpoint and remaining control = PDUA reconstruction
-
-egress:
-    require canonical.WireNumber == binding.WireNumber
-    resolve canonical source, destination, and QoS to exactly one CAN ID
-    encode Endpoint and remaining control through the binding's PDUA codec
+WireAlias -> {canonical WireNumber, VCN map, profile version/parameters}
 ```
 
-Ingress classification must be unique. A frame matching no Guest allocation is non-WS for that binding, not a malformed WS frame. Overlapping active Guest allocations or any other configuration that makes classification ambiguous are invalid.
+Each alias selects exactly one Wire and one map. Several aliases may select different Wires or the same Wire with different representation maps. VCN interpretation is scoped by the alias binding, not by canonical `(WireNumber, VCN)`.
 
-The addressing profile and its exact version are selected statically in generated configuration. They are never negotiated, inferred from traffic, or auto-detected at runtime. Payload byte 0 may distinguish optimized from General PDUA within that selected profile; it does not select the addressing profile.
+Ingress classification is unique: first select the carrier profile/binding, then the Native alias if present, then resolve VCN and Direction. Before Router/dispatch, reconstruct canonical Wire, source Host, destination Host, and QoS. A Guest frame outside its allocated block is non-WS for that binding and never enters its parser or error handling. Overlapping Guest blocks or other ambiguous classifications are invalid. Native operation requires control of the relevant identifier space; it is not inferred from a Guest-looking payload.
+
+A binding's exact profile/version is selected statically. PDUA's optimized/General discriminator never selects an addressing profile.
 
 ## 2.2 Common identifier and arbitration rules
 
-Where a profile carries QoS, canonical QoS occupies the most arbitration-significant identifier bits and is packed unchanged:
+Where transmitted, QoS occupies the most arbitration-significant identifier bits unchanged: Critical `0`, High `1`, Normal `2`, Background `3`. Lower CAN identifier wins. Alias and VCN allocation also affect arbitration within a QoS class and must be visible in tooling.
 
-| QoS | Class | Arbitration among WS identifiers |
-|---:|---|---|
-| `0` | Critical | highest |
-| `1` | High | next |
-| `2` | Normal | next |
-| `3` | Background / bulk | lowest |
-
-CAN arbitration is lower-identifier-wins, matching canonical QoS ordering. Fields below QoS also affect arbitration and therefore require visible, deterministic allocation rules.
-
-`Direction` is Link-local reconstruction metadata. It is not part of the canonical descriptor.
+`Direction = 0` means `AToB`; `Direction = 1` means `BToA` for the map's ordered A/B representation. This is a provisional encoding convention, never canonical request/reply or authority semantics. Final identifier positions and control priority must be frozen together with vectors; reserved control is not automatically lowest-priority merely because it is reserved.
 
 ## 2.3 VCN semantics
 
-A `VirtualCircuitNumber` is a Link-local configured name for an **unordered participant relation**:
+A VCN identifies an unordered Host relationship, stored with a defined A/B order to interpret Direction:
 
 ```text
-VCN -> {ParticipantA, ParticipantB}
+VCN -> {HostA, HostB}
+0 -> SrcHostId=A, DestHostId=B
+1 -> SrcHostId=B, DestHostId=A
 ```
 
-For an ordinary pair:
+A VCN is not an Endpoint. Multiple Endpoints and Transports between the same Hosts reuse it. Ordinary self-pairs are invalid. Within one map, an unordered pair has at most one VCN and a Host has at most one broadcast-source VCN. A broadcast entry is stored `{HostA, kBroadcast}` and permits only `AToB`; the reverse direction never becomes ordinary traffic.
 
-```text
-Direction = AToB -> SrcParticipantId = A, DestParticipantId = B
-Direction = BToA -> SrcParticipantId = B, DestParticipantId = A
-```
+Guest relationship meanings are global within one deployment identity universe: the same Guest VCN resolves to the same ordered Host pair wherever used. Its Wire still comes from the local Guest binding. Different native aliases may have different maps, including aliases on different Links. All devices interpreting one active alias on one bus agree on its full binding.
 
-The Direction bit uses `0` for `AToB` and `1` for `BToA`. Swapping the stored A/B order without also updating the Direction interpretation is therefore a configuration change.
-
-A VCN names participants, not an Endpoint. Multiple Endpoints and Transports between the same participant pair reuse the same VCN. The Endpoint is reconstructed from PDUA data.
-
-VCN configuration shall satisfy all of the following:
-
-- self-pairs `{A,A}` are prohibited;
-- an unordered ordinary pair may appear under at most one ordinary VCN;
-- a broadcast relation is stored as `{A,kBroadcast}` and permits only `A -> kBroadcast`; the reverse Direction is invalid for ordinary traffic;
-- a participant may have at most one broadcast-source VCN;
-- reserved Link-control VCNs are not ordinary mappings;
-- egress lookup for `(source, destination)` within a binding is unique.
-
-An egress lookup that finds zero or more than one legal VCN is rejected before any frame is emitted. These rules make canonical reconstruction and reverse egress resolution one-to-one without making VCNs Service-specific.
+Egress resolves the canonical tuple to one explicitly configured TX representation. Multiple receive aliases for one Wire do not authorize arbitrary TX choice: configuration selects exactly one active TX alias for each admitted canonical tuple on that interface, then exactly one legal VCN/Direction. An absent, ambiguous, unsupported, or unauthorized selection rejects before emission. No first-match, lowest-alias, observed-traffic selection, or automatic retry under another alias is permitted. QoS and Endpoint/Transport representability remain part of validation. Changing the selected TX alias is an explicit migration operation, not mutation of either alias's meaning (§2.14).
 
 ## 2.4 Guest VCN
 
-Guest VCN is the CAN11 coexistence profile. The physical bus owner shall allocate WireSpaces one **aligned contiguous block of 16 standard identifiers**:
+The bus owner allocates an aligned contiguous block; low bits carry VCN and Direction and high bits are the fixed Guest prefix. Guest-4 is the initial implementation profile:
 
 ```text
-CAN ID bits 10..4   fixed GuestBase prefix
-CAN ID bits  3..1   VirtualCircuitNumber[2:0]
+CAN ID bits 10..4    fixed prefix
+CAN ID bits  3..1    VCN[2:0]
 CAN ID bit       0  Direction
-```
 
-Equivalently:
-
-```text
 CAN ID = GuestBase | (VCN << 1) | Direction
 GuestBase & 0x00F = 0
 allocated range = [GuestBase, GuestBase + 15]
 ```
 
-The high bits are fixed by the allocation; the low four bits are owned by this profile. The bus owner determines where the block sits relative to legacy arbitration priorities.
+Guest-5 and Guest-6 are growth directions using VCN4/5 plus Direction, in aligned blocks of 32/64 IDs. They are separate selected profiles, not runtime width negotiation. Widening exposes more default VCNs without changing the meaning of existing VCN values. Moving or expanding the actual CAN-ID block still requires explicit bus-owner allocation and coordinated cutover.
 
-Guest VCN carries no per-frame QoS. The binding supplies one fixed canonical QoS. Egress of a canonical PDU with any different QoS shall be rejected before a frame is emitted; QoS is not silently rewritten.
+| Profile | CAN IDs | VCN codes | Default map capacity |
+|---|---:|---:|---|
+| Guest-4 | 16 | 0..7 | two Main positions and two Node positions |
+| Guest-5 (growth) | 32 | 0..15 | two Main positions and six Node positions |
+| Guest-6 (growth) | 64 | 0..31 | two Main positions and fourteen Node positions |
 
-`VCN = 7` (the all-ones VCN) is reserved for future Link control. This leaves ordinary VCN values `0..6`: **7 ordinary configured relations and 14 ordinary directional CAN identifiers**. Both Direction values under the reserved VCN remain non-ordinary.
-
-A frame outside the allocated 16-ID block is non-WS for this binding and shall not enter WS parsing or error handling. A frame inside the block with reserved or semantically invalid VCN/Direction is classified as WS and rejected according to the profile's malformed/reserved-value rules.
-
-Larger Guest blocks may be defined by future, separately named profile versions. They are not runtime options of this 16-ID profile.
+Guest has no per-frame QoS. The binding supplies one fixed canonical value; TX with a different QoS rejects, never rewrites. Physical arbitration placement comes from the allocated block. The default map reserves VCN 3; **the all-ones VCN is no longer reserved** and may name an ordinary relationship (§2.6). Exact profile-wide control allocation remains open (§2.15).
 
 ## 2.5 Native VCN
 
-Native VCN uses the full relevant CAN11 identifier space:
+Preferred provisional identifier:
 
 ```text
-bits 10..9   QoS                     2
-bits  8..1   VirtualCircuitNumber    8
-bit       0  Direction               1
---------------------------------------
-             total                  11
+bits 10..9  QoS         2
+bits  8..6  WireAlias   3
+bits  5..1  VCN         5
+bit       0 Direction   1
+------------------------
+                       11
 ```
 
-`VCN = 255` (the all-ones VCN) is reserved for future Link control, leaving ordinary VCN values `0..254`: **255 ordinary configured relations**. The reservation applies at every QoS; reserved combinations do not reconstruct ordinary canonical PDUs.
+There are eight alias values and 32 VCN codes per alias, subject to control reservations. Each alias selects `{WireNumber, VcnMap, profile parameters}`. Multiple aliases may bind the same Wire during migration, but they remain distinct representation contexts. The native interface can carry overlapping Wires without putting a literal WireNumber in each frame.
 
-The same VCN relation is used across QoS values. The frame's QoS bits reconstruct canonical QoS, while VCN and Direction reconstruct source and destination according to §2.3. Arbitrary canonical ParticipantIds are representable through the VCN map.
+Initial low-configuration use may define alias 0 as `{kLocalBus, DefaultMap}` and leave other aliases inactive. This does not permanently reserve alias 0 for LocalBus. Rebinding it later still obeys immutability, retirement, and stale-frame exclusion (§2.14); observing traffic cannot promote LocalBus. At most one local Link Interface may carry `kLocalBus` for a Router/Endpoint Domain (`CORE §5.1`). Multiple aliases on that same interface do not create multiple LocalBus Links.
 
-Within a QoS class, VCN numeric allocation affects CAN arbitration. Deployment tooling shall expose that ordering. The exact VCN allocation policy remains open.
+## 2.6 Default mapping and custom mappings
 
-## 2.6 Native Participant-Compressed
+The preferred five-bit default map is:
 
-Native Participant-Compressed uses:
+| VCN | Ordered A/B entry | Ordinary direction |
+|---:|---|---|
+| 0 | `{MainA, kBroadcast}` | AToB only |
+| 1 | `{MainB, kBroadcast}` | AToB only |
+| 2 | `{MainA, MainB}` | both |
+| 3 | reserved / Link control | none |
+| `4 + 2*n` | `{Node[n], MainA}` | both |
+| `5 + 2*n` | `{Node[n], MainB}` | both |
 
-```text
-bits 10..9   QoS                     2
-bits  8..6   CompactCode             3
-bits  5..1   GeneralCode             5
-bit       0  Direction               1
---------------------------------------
-             total                  11
-```
+For Native and Guest-6, `n = 0..13`; Guest-4 exposes `n = 0..1`, and Guest-5 `n = 0..5`. The A/B order above is explicit so independent implementations agree on Direction. It remains part of the provisional profile encoding.
 
-Direction uses:
+`MainA`, `MainB`, and `Node[n]` are **profile positions**, not WS Host classes, Origin/Node roles, leadership, or authority. Deployment binds positions to ordinary canonical HostIds; a role map must not assign two positions to the same Host. Unbound positions are inactive and traffic requiring them rejects. A low-ID default Host assignment is not yet selected. This formula handles the common two-central-Host graph without an arbitrary edge table.
 
-```text
-0 = CompactToGeneral
-1 = GeneralToCompact
-```
+A Native alias may instead use a bounded explicit VCN map for arbitrary modest Host relationships, with uniqueness and broadcast rules from §2.3. Custom maps come from the same authoritative deployment source as default-role bindings. Partial inheritance from the default map and a control reservation common to every custom map remain open. Until a profile defines them, an implementation must label its complete custom-map/control policy provisional and must not assume that VCN 3 has a map-independent wire protocol.
 
-The default is direct canonical ParticipantId mapping:
-
-```text
-CompactCode 0..7   -> canonical ParticipantId 0..7
-GeneralCode 0..30  -> canonical ParticipantId 0..30
-```
-
-A Link Binding may instead enable a Link-local projection from code `0..30` to arbitrary canonical ParticipantIds. Compact codes use the same mapping entries `0..7`. Projection changes only Link representation; it does not create another canonical identity namespace. The active projection shall assign each represented canonical participant one unique code so ingress reconstruction and egress selection remain unambiguous.
-
-Every ordinary unicast pair must have at least one participant represented by a compact code:
-
-- if exactly one endpoint is compact, place it in `CompactCode`, place the other in `GeneralCode`, and set Direction from the canonical source;
-- if both endpoints are compact, encode `CompactCode = min(src_code,dest_code)` and `GeneralCode = max(src_code,dest_code)`;
-- in the both-compact case use `CompactToGeneral` when `src_code <= dest_code`, otherwise use `GeneralToCompact`;
-- a pair in which neither endpoint has a compact code is unrepresentable and is rejected before transmission.
-
-The min/max rule gives a deterministic encoding when both participants fit the compact set. Code ordering is the Link-local code ordering, including when projection is enabled.
-
-`GeneralCode = 31` is reserved:
-
-```text
-GeneralCode = 31, Direction = CompactToGeneral
-    ordinary broadcast
-    SrcParticipantId  = mapping[CompactCode]
-    DestParticipantId = kBroadcast
-
-GeneralCode = 31, Direction = GeneralToCompact
-    reserved for future CAN11 Link control
-    not an ordinary canonical PDU
-```
-
-Every ordinary broadcast source must therefore have a compact code. There is no Guest Participant-Compressed profile.
+Guest maps likewise have one authoritative deployment-wide definition. A custom Guest meaning cannot be authored independently per bus. Whether custom Guest maps are part of the first interoperable Guest profile is open; Guest-4 prototyping starts with the default map.
 
 ## 2.7 Endpoint representation and PDUA status
 
-All three addressing profiles reuse a common CAN11 PDU adaptation (PDUA) where possible. The identifier reconstructs Wire, participants, and QoS; PDUA reconstructs Endpoint, `HasExtensions`, `TransportType`, and the PDU bytes.
+Guest and Native VCN reuse a common CAN11 PDU adaptation (PDUA) where possible. The identifier reconstructs Wire, hosts, and QoS; PDUA reconstructs Endpoint, `HasExtensions`, `TransportType`, and the PDU bytes.
 
 The canonical Endpoint is now a 16-bit `Namespace[2] + Id[14]` value (`BITS §2`). Consequently, the former 10-bit General Endpoint packing and former `PduControl` mask relationship are not valid as committed layouts. Exact `PduControl`, Endpoint packing, optimized N=1, General N=1, and aggregate CRC details are provisional and require joint redesign, capacity recalculation, and golden-vector revalidation.
 
@@ -300,7 +221,7 @@ The exact bytes following `FrameControl`, including `PduControl`, full Endpoint 
 
 ## 2.10 Complete-PDU serialization and reassembly
 
-VCN and Participant-Compressed identifiers do not contain Endpoint. Multiple Endpoints with the same participant relation and QoS therefore share one complete CAN identifier.
+VCN identifiers do not contain Endpoint. Multiple Endpoints with the same host relation and QoS therefore share one complete CAN identifier.
 
 > **For each complete CAN identifier, a transmitter shall serialize whole PDUs and shall not interleave constituent frames from different PDUs.**
 
@@ -309,10 +230,10 @@ All constituent frames of one General PDU carry the same complete identifier, ar
 The reassembly key is:
 
 ```text
-(ingress Link Binding/interface, complete 11-bit CAN identifier)
+(ingress Link Binding/interface, complete 11-bit CAN identifier including alias where present)
 ```
 
-There is **at most one active reassembly context per key**, drawn from a fixed global pool. A context holds bounded accumulated bytes, active `MessageGeneration`, expected `FramesRemaining`, exact accumulated length, integrity state, and timeout deadline. Contexts never assemble across identifiers or ingress interfaces. A START with no free context is rejected and counted; there is no dynamic allocation or eviction (`CORE §15.7`).
+There is **at most one active reassembly context per key**, drawn from a fixed global pool. A context holds bounded accumulated bytes, active `MessageGeneration`, expected `FramesRemaining`, exact accumulated length, integrity state, and timeout deadline. Contexts never assemble across identifiers, aliases, or ingress interfaces. A context retains the immutable binding that interpreted its START; retirement cannot reinterpret its buffered bytes under a replacement map. A START with no free context is rejected and counted; there is no dynamic allocation or eviction (`CORE §15.7`).
 
 Reassembly safety relies on:
 
@@ -378,80 +299,76 @@ Classical CAN ACK and controller retransmission are below this adapter and do no
 
 The CAN11 adapter adds no PDU acknowledgment, retry, or duplicate suppression; those belong to a selected Transport (`CORE §20`, `CORE §21.1`).
 
-Generic CAN participants are not expected to implement WS Link-credit flow control. A gateway may still translate CAN queue pressure into reduced upstream credit on richer Links (`CORE §15.3`). Reliable bulk transfer over CAN should use Transport-level receiver control.
+Generic CAN hosts are not expected to implement WS Link-credit flow control. A gateway may still translate CAN queue pressure into reduced upstream credit on richer Links (`CORE §15.3`). Reliable bulk transfer over CAN should use Transport-level receiver control.
 
 ## 2.13 Transmit procedure
 
-All rejectable conditions shall be checked before the first frame is emitted:
+All rejectable conditions are checked before the first frame:
 
-1. select the statically configured egress Link Binding and require an exact canonical `WireNumber` match;
-2. validate canonical reserved bits, participant identities, Endpoint, extensions, `TransportType`, and QoS;
-3. reconstruct the selected profile's egress mapping and require exactly one legal complete CAN identifier;
-4. for Guest VCN, require canonical QoS to equal the binding's fixed QoS;
-5. reject every unrepresentable value with no truncation, aliasing, remapping, or substitution;
-6. select optimized or General PDUA according to the finalized mandatory encoding rule;
-7. select the smallest legal `N` using finalized net capacity and CRC rules;
-8. reserve bounded queue, controller, and buffer capacity for the complete PDU;
-9. serialize the complete PDU against other traffic using the same CAN identifier and hold a stable byte/metadata view through completion or abort.
+1. Select the statically configured carrier profile and validate canonical scope and fields.
+2. For Guest, require the binding's Wire and fixed QoS, then resolve the deployment Guest VCN map.
+3. For Native, resolve exactly one configured TX alias for the admitted canonical tuple; require that alias to be active and bound to the PDU's Wire.
+4. Resolve exactly one VCN/Direction, respecting Host, broadcast, control, Endpoint, Transport, and extension constraints. No truncation, silent substitution, or fallback alias.
+5. Choose optimized or General PDUA and the smallest legal N under the finalized packing and integrity rules.
+6. Reserve bounded capacity for the complete PDU; pin its alias/map and byte view through completion or abort.
+7. Serialize whole PDUs sharing a complete CAN identifier. A TX-selector update affects new submissions only; already accepted work retains its original representation or is explicitly cancelled.
 
-Once START has been emitted, later failure is an aborted partial transmission, not a pre-transmit rejection. It is counted, and receiver state is left to the finalized reset/timeout rule. Local transmit completion is not delivery.
+After START, failure is an aborted partial transmission, counted separately from pre-TX rejection. Local completion is not Endpoint delivery.
 
-## 2.14 Active-map consistency and update TODO
+## 2.14 Immutable bindings and migration
 
-All participants interpreting the same active CAN11 binding shall use consistent VCN relations, participant projection, reserved values, fixed Guest QoS, Guest range, and exact PDUA profile version. Mixed active maps can reconstruct the same identifier as different canonical sources or destinations and are invalid.
+An active Native alias's Wire, VCN map, profile version, and representation parameters never change in place. One authoritative Wiring source generates every device's slice. Compatibility checking must detect inconsistent active bindings; a mismatch fails closed. Exact fingerprint coverage and distribution remain open.
 
-The following mechanism remains an explicit TODO and is not designed here:
+The update primitive is a spare alias:
 
-- exact configuration fingerprint contents and comparison;
-- map/version distribution;
-- atomic activation or cutover of a replacement map;
-- handling of in-flight TX at activation;
-- exact reassembly-context flush timing and signaling.
+1. Prepare the new binding under an unused alias, often for the same canonical Wire.
+2. Install and validate it on all affected receivers before enabling any sender to use it.
+3. Explicitly change each sender's TX selection. Both receive bindings may coexist; send one representation per PDU on that physical interface, not duplicate copies under both aliases.
+4. Stop new submissions under the old alias and complete or cancel its accepted TX work.
+5. Retire the old alias only after its RX/reassembly work and queued carrier units can no longer be interpreted as current traffic. Release or discard uncertain state with counters.
 
-The eventual activation mechanism must prevent mixed-map operation and must ensure that reassembly begun under one map cannot complete under another. Until that mechanism is specified, consistency is a deployment/configuration invariant, not an on-bus negotiation protocol.
+Different aliases isolate reassembly, but do not by themselves prove distributed readiness or protect against reuse after retirement. Reusing an alias for a different meaning requires a proven stale-frame exclusion boundary covering controllers, queues, retransmission, and reassembly on affected devices. Until a profile defines that boundary, live reuse is unsupported; use an explicit coordinated stop/drain or discard/reconfigure procedure with traffic disabled and demonstrated exclusion. Do not assume a local reset or an arbitrary wait proves that all peers are clear.
+
+No spare alias means no live spare-alias migration. Retain the active binding, reject the update, or use a coordinated offline reconfiguration. Alias 0 follows the same rules, including transition from its default LocalBus binding.
+
+Guest frames have no alias selector. Their globally coordinated VCN meanings cannot be changed independently on one bus. Guest-map changes, block relocation/expansion, and affected in-flight state require a separately specified coordinated cutover; live map mutation is not defined.
+
+Still open: fingerprint fields, readiness/commit protocol, exact retirement/reuse evidence, drain/flush timing, partial migration recovery, and Guest cutover. These are profile-freeze requirements, not permission to reinterpret active traffic.
 
 ## 2.15 Reserved Link-control space
 
-Space is reserved for future CAN11 Link control:
+The default VCN map reserves code 3 and has invalid reverse directions on its broadcast entries. These are candidate control encodings, not defined commissioning messages. **All-ones VCNs are ordinary usable values in the new default map.** The former VCN7/255 reservations and Compact/General code31 convention are superseded.
 
-```text
-Guest VCN:                   VCN = 7
-Native VCN:                  VCN = 255
-Native Participant-Compressed:
-    GeneralCode = 31, Direction = GeneralToCompact
-```
+Ordinary decoding never turns a reserved entry or broadcast source into a canonical PDU. Whether VCN3 is permanently reserved across all custom maps, and which invalid directions are assigned to control, must be settled before interoperability freeze. A diagnostic/commissioning path should remain interpretable independently of arbitrary ordinary maps; no such wire protocol is specified here yet.
 
-This reservation keeps future Link control, including possible commissioning use, structurally possible. It does **not** define commissioning payloads, opcodes, identity rules, ownership procedure, retries, persistence, or a state machine. Ordinary PDU decoders shall not interpret reserved Link-control identifiers as canonical Service traffic.
+The anonymous identical-response/prefix-search note is design input, not an accepted profile. Its old NodeId/WireAlias layout and 64-bit manufacturing-identity choice are not imported. Stable device identity, exact complete response bitstream, control priority, opcodes, retries, and commissioning state transitions remain open (`DEPLOY §1.2`, `REG §6.8`).
 
 ## 2.16 Profile selection and CAN29 escalation
 
-Select one profile statically per CAN11 Link Binding:
-
 ```text
-legacy-governed bus with an explicit allocated 16-ID block
-    -> Guest VCN
+legacy bus with an allocated identifier block
+    -> Guest-4 VCN initially; Guest-5/6 as explicit growth profiles
 
-WS-native identifier space, arbitrary participant relations,
-and a per-relation map is acceptable
-    -> Native VCN
-
-WS-native identifier space and every ordinary relation has
-at least one participant in the compact code set
-    -> Native Participant-Compressed
+WS-native identifier space
+    -> Native VCN; use the default map when it fits
+    -> explicit maps on selected aliases when needed
 ```
 
-Use CAN29 or another richer Link profile when several WS Wires must share one physical CAN interface without separate suitable bindings, when CAN11 map/configuration limits are awkward, when participant-compressed topology constraints do not fit, or when richer routing identity and payload efficiency justify it. Do not accumulate additional runtime-detected CAN11 modes to avoid that escalation.
+Native CAN11 supports several Wires, bounded by eight aliases and 32 VCN codes per alias before reservations. Reserve alias headroom when live migration is required. Consider CAN29 when relationship count, alias count, spare-alias needs, filters, configuration size, or payload efficiency makes compression unsuitable. Ordinary CAN29 should represent canonical Wire/source/destination directly; its exact layout is not selected here.
+
+Compact/General addressing remains an experimental comparison, not another baseline mode. Reconsider only if measured realistic CAN11 topologies show a material advantage after comparing default/custom VCN cost and CAN29 (`IMPL §7`).
 
 ## 2.17 Open items (CAN)
 
-- Final `PduControl`, full Endpoint packing, optimized N=1, General N=1, and mandatory encoding-selection rules.
-- General START metadata size and resulting capacity table.
-- CRC schedule, algorithms and complete parameters, protected range, placement, byte order, DLC/short-frame/padding rules, and golden vectors.
-- Controller filter rules for multiple explicit Link Bindings and Guest allocations.
-- Native VCN allocation policy and tooling presentation of within-QoS arbitration.
-- Exact configuration fingerprint, atomic map activation, and reassembly-flush mechanism (§2.14).
-- Link-control and commissioning payload/state design; only identifier space is reserved here.
-- Final CAN29 representation and migration guidance.
+- Final identifier bits, Direction convention, profile names/versions, default-map vectors, and Guest-5/6 standardization.
+- Map-independent control allocation, custom-map inheritance, and first-profile custom Guest support.
+- Default MainA/MainB/NodeN-to-Host assignment and arbitration-aware custom VCN allocation.
+- Final `PduControl`, full Endpoint packing, optimized/General N=1, mandatory encoding selection, and resulting capacity.
+- CRC schedule, algorithms/parameters, coverage, placement, byte order, DLC/padding, and golden vectors.
+- Controller filters and classification for the selected profile and allocations.
+- Fingerprint scope, readiness protocol, TX-selector publication, retirement/reuse, offline transition, and Guest cutover details (§2.14).
+- Commissioning identity, anonymous-response safety, payloads, retries, persistence, and state machine.
+- Final CAN29 representation and measured crossover; any evidence sufficient to reopen Compact/General.
 
 ---
 
@@ -531,7 +448,7 @@ Ethernet is the primary case for **aggregation** rather than fragmentation: an E
 
 # 7. I2C and SPI
 
-I2C and SPI are architecturally in scope as ordinary Physical Links, and are the main reason `CORE §1.7` exists. Both are **master-initiated**: a non-master Participant's traffic can appear only when the master's LLL polls or otherwise provides transfer cadence, and that polling or autonomous scheduling does not make the master the canonical source or semantic producer.
+I2C and SPI are architecturally in scope as ordinary Physical Links, and are the main reason `CORE §1.7` exists. Both are **master-initiated**: a non-master Host's traffic can appear only when the master's LLL polls or otherwise provides transfer cadence, and that polling or autonomous scheduling does not make the master the canonical source or semantic producer.
 
 A profile for either must specify:
 
@@ -569,7 +486,7 @@ profile identity/version    static selection unit; incompatible-version behavior
 binding and classification  carrier scope owned by one binding; unique ingress match
 canonical reconstruction    every transmitted, elided, compressed, or fixed field
 Wire reconstruction         direct value or the exact Link-Binding rule
-participant representation  ranges, maps, Direction semantics, and uniqueness
+host representation  ranges, maps, Direction semantics, and uniqueness
 Endpoint representation     directly representable range; behavior above it
 byte and bit order          field significance and packing, exactly
 arbitration/priority        relationship between native ordering and canonical QoS

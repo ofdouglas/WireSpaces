@@ -15,7 +15,7 @@ WireSpaces is intended to span C++ firmware, host software, Python tooling, and 
 Useful vectors:
 
 - provisional six-byte canonical PDU descriptor encode/decode examples;
-- canonical WireNumber, source ParticipantId, destination ParticipantId, and Endpoint boundaries;
+- canonical WireNumber, source HostId, destination HostId, and Endpoint boundaries;
 - splice application on ingress and egress, including rejection of `kLocalBus` splices and device-private egress without a splice;
 - Wire-member topology examples with expected propagation masks;
 - canonical local-only `kLocalBus` behavior;
@@ -54,8 +54,8 @@ The provisional canonical descriptor is six bytes:
 ```text
 Byte 0      Control
 Byte 1      WireNumber
-Byte 2      SrcParticipantId
-Byte 3      DestParticipantId
+Byte 2      SrcHostId
+Byte 3      DestHostId
 Bytes 4-5   Endpoint, little-endian
 ```
 
@@ -65,8 +65,8 @@ Its literal vectors remain provisional until the representation freeze, but the 
 |---|---|
 | descriptor length | `5` rejected, `6` exact, `7` rejected unless consumed as a separately defined following field |
 | `WireNumber` (8-bit) | `0x00`, `0x01`, `0xFE`, `0xFF`, every assigned allocation fence, and the assigned canonical `kLocalBus` value |
-| source `ParticipantId` (8-bit) | `0x00`, `0x01`, `0xFE`; `0xFF` rejected as source |
-| destination `ParticipantId` (8-bit) | `0x00`, `0x01`, `0xFE`, `0xFF` as Wire-wide broadcast |
+| source `HostId` (8-bit) | `0x00`, `0x01`, `0xFE`; `0xFF` rejected as source |
+| destination `HostId` (8-bit) | `0x00`, `0x01`, `0xFE`, `0xFF` as Wire-wide broadcast |
 | Endpoint `Namespace` | all four 2-bit values |
 | Endpoint `Id` (14-bit) | `0` rejected, `1`, `0x3FFF`, and one-past-width rejected before emission |
 | `QoS` | all four values, plus the ordering they imply on a contended Link |
@@ -77,7 +77,7 @@ Its literal vectors remain provisional until the representation freeze, but the 
 
 No Link-profile optimization changes those canonical limits. A value that cannot be represented by the selected Link Binding rejects before a frame is emitted rather than truncating, remapping, or changing canonical identity.
 
-Negative cases deserve equal weight: missing, duplicated, swapped, skipped, delayed, replayed, malformed, short, and overlong fragments; unexpected START; reassembly timeout; context-pool exhaustion; unknown Wire; unknown Participant; unknown Endpoint; invalid Link-local Direction; wrong ingress; unsupported TransportType; oversize PDU. The required outcome for all of them is identical and is the property most worth protecting: **counted, dropped, no partial delivery, no error response** (`CORE §18.1`).
+Negative cases deserve equal weight: missing, duplicated, swapped, skipped, delayed, replayed, malformed, short, and overlong fragments; unexpected START; reassembly timeout; context-pool exhaustion; unknown Wire; unknown Host; unknown Endpoint; invalid Link-local Direction; wrong ingress; unsupported TransportType; oversize PDU. The required outcome for all of them is identical and is the property most worth protecting: **counted, dropped, no partial delivery, no error response** (`CORE §18.1`).
 
 Interleaving and isolation cases are worth their own group, because they are where implementations quietly cheat: concurrent reassembly on distinct identifiers, attempted interleaving on one identifier, a full context pool, and no cross-Link or cross-context assembly.
 
@@ -94,7 +94,9 @@ terminal outcome     every accepted PDU reaching exactly one of complete,
                      cancelled, or faulted
 restart              restart with transmit and reassembly work in flight,
                      and application-owned receive buffers surviving it
-storage classes      snapshot replacement distinguished from queue overflow;
+storage classes      each declared ingress element bounded; classification performs
+                     no protocol state transitions or Service callbacks;
+                     snapshot replacement distinguished from queue overflow;
                      value-copy distinguished from ownership transfer
 delivery boundary     no Service code reached from a Link or dispatch context,
                      including when a Service transmits during a receive
@@ -113,7 +115,7 @@ metadata              declared source, class, extension, and arrival fields
                      readable after the ingress buffer has been reused,
                      and an undeclared field unavailable rather than zero
 source authority      a Service unable to transmit to a peer merely because
-                     it read that peer's Wire and ParticipantId from metadata
+                     it read that peer's Wire and HostId from metadata
 exhaustion           queue and pool exhaustion producing bounded work and no
                      corruption, not just a counter increment
 projections          generated software and RTL/static projections producing
@@ -127,12 +129,12 @@ The parser-chunking case earns its place: a framing bug that only appears when a
 
 ## 2.1 Logical-Bus and identity semantics
 
-These are topology tests, not codec tests. Each case states both the Links on which the PDU is logically propagated and the Participants that accept it:
+These are topology tests, not codec tests. Each case states both the Links on which the PDU is logically propagated and the Hosts that accept it:
 
 ```text
 directed propagation  a directed PDU traverses every configured segment of
-                      its loop-free Wire; only DestParticipantId accepts it
-broadcast             DestParticipantId 0xFF is accepted by every Participant
+                      its loop-free Wire; only DestHostId accepts it
+broadcast             DestHostId 0xFF is accepted by every Host
                       on that Wire that implements the Endpoint
 destination routing   changing only destination acceptance does not change
                       ordinary Wire propagation masks
@@ -145,41 +147,42 @@ lineage               heterogeneous forwarding preserves canonical Wire,
 composition           a component that consumes and authors another PDU
                       becomes the source of the new PDU
 identity universe     plain forwarding is accepted only within one coordinated
-                      ParticipantId universe; inconsistent universes reject
+                      HostId universe; inconsistent universes reject
 splice                the configured Wire scope changes while source,
                       destination, Endpoint, metadata, and payload remain;
-                      a PID collision is not silently resolved
+                      a HostId collision is not silently resolved
 ```
 
-Two Links carrying the same Wire may use different participant projections; both must reconstruct the same canonical identities before generic propagation or dispatch.
+Two Links carrying the same Wire may use different host projections; both must reconstruct the same canonical identities before generic propagation or dispatch.
 
 `kLocalBus` has dedicated cases: canonical ingress reconstructs `Wire = kLocalBus` plus canonical source and destination; local dispatch succeeds; transparent forwarding and splicing as `kLocalBus` reject; and a second local Link Binding in the same Router/Endpoint Domain rejects as ambiguous.
 
-## 2.2 CAN11 static-profile cases
+## 2.2 CAN11 unified-VCN cases
 
-Every CAN11 Link Binding test selects exactly one Wire and exactly one of `Guest VCN`, `Native VCN`, or `Native Participant-Compressed`. A second Wire, no profile, multiple profiles, or configuration/artifacts for a different profile reject before traffic is enabled.
+Every case selects an exact Guest or Native VCN profile/version. No profile autodetection or independent per-device map interpretation is allowed. Identifier vectors remain provisional until profile freeze.
 
-VCN-map configuration cases cover a self-pair rejection, duplicate VCNs for the same unordered participant pair, and duplicate broadcast VCNs for one source Participant. For both Guest and Native VCN, vectors cover A-to-B and B-to-A Direction reconstruction, a valid Participant-to-broadcast direction, rejection of the reverse broadcast direction, and classification of the reserved all-ones VCN as Link control rather than ordinary traffic.
+VCN tests cover both Directions, HostIds outside low compact ranges, self-pair/duplicate-pair rejection, duplicate broadcast-source rejection, and invalid reverse broadcast. Default-map tests cover codes 0, 1, 2, reserved 3, first leaf pair 4/5, and final pair 30/31. **Code 31 is ordinary in the default map**; the old all-ones reservations are not inherited. Test the declared A/B order and unbound or duplicate role-position rejection.
 
-Guest VCN adds:
+Guest cases cover exact block alignment/range and bus-owner reservation; outside-block non-WS classification; fixed-QoS reconstruction and mismatch rejection; and identical VCN relationship meanings across deployment Guest bindings. Growth vectors show Guest-4/5/6 exposing additional default entries without reinterpreting earlier values. Their respective full-map capacities are two Main positions plus two, six, or fourteen Node positions; growth-profile tests do not imply those profiles are frozen.
+
+Native cases cover all QoS values, eight alias values, alias-to-Wire/map reconstruction, overlapping Wires on one interface, and two aliases for the same canonical Wire. Confirm one explicit TX selection for each admitted tuple, rejection of ambiguous/missing selection, no first-match/fallback behavior, and no duplicate emission under coexisting aliases.
+
+Migration cases must establish:
 
 ```text
-allocation validity   exactly one aligned contiguous 16-ID block,
-                      in-range end point, explicit bus-owner reservation,
-                      and rejection of every invalid allocation
-range classification  first and last allocated CAN IDs classified as WS;
-                      IDs immediately outside ignored as non-WS
-fixed QoS             ingress reconstructs the configured canonical QoS;
-                      TX requesting any different QoS rejects
+immutability      mutation of an active alias rejected
+readiness         new TX selection disabled until affected receivers are ready
+accepted work     retains its original alias/map through completion or cancellation
+isolation         no reassembly across aliases, interfaces, or retired bindings
+retirement        stale units cannot be interpreted under a reused alias
+capacity          no-spare migration rejected or handled by explicit offline procedure
+interruption      partial deployment fails closed without silently rewriting maps
+Guest             independent live map change rejected; explicit cutover required
+LocalBus          default alias 0 does not forward/splice LocalBus or create a
+                  second local Link; reusing alias 0 obeys retirement rules
 ```
 
-Native VCN covers every QoS value, VCN boundaries, both Directions, broadcast, and VCN maps whose canonical ParticipantIds are above the directly compact-representable range.
-
-Native Participant-Compressed covers direct and projected mappings; the requirement that every ordinary addressed pair include at least one participant in the compact field; rejection of general/general pairs; deterministic encoding when both participants fit the compact field; and general code `31` classified as broadcast in the valid compact-source Direction and as Link control in the opposite Direction. Reserved control combinations never enter ordinary forwarding or dispatch.
-
-For all profiles, same-CAN-ID traffic proves complete-PDU noninterleaving: a second PDU on an identifier cannot interleave with an incomplete first PDU and produce mixed delivery.
-
-Commissioning protocol details, `PduControl`, `N = 1` packing, CRC choices, and exact CAN29 vectors remain explicitly provisional. Regression vectors may pin current prototype behavior, but do not freeze those designs.
+Whole-PDU noninterleaving remains required per complete CAN identifier. Freeze concrete retirement/readiness/cutover tests when those mechanisms are specified; do not invent a timeout to make a safety claim pass. Commissioning, custom-map control reservations, PDUA/N=1, CRC, and CAN29 remain provisional. Compact/General tests, if retained for experiments, confer no baseline profile claim.
 
 ## 2.3 Lifecycle and restart cases
 
@@ -216,7 +219,7 @@ unavailable fields   a not-applicable field distinguishable from zero, on a
                      Link with no flow control and on shared QoS queues
 ```
 
-Two of these deserve emphasis because they are the ones most often skipped. Testing the *planned* stop path matters because an implementation that only ever exercises fault-driven recovery tends to have no working clean shutdown, and discovers it during a firmware update. And the diagnostic-storm case is the one where a correct-in-isolation Participant becomes the bus's problem — a restart loop that reports each attempt is worse than the fault it is reporting.
+Two of these deserve emphasis because they are the ones most often skipped. Testing the *planned* stop path matters because an implementation that only ever exercises fault-driven recovery tends to have no working clean shutdown, and discovers it during a firmware update. And the diagnostic-storm case is the one where a correct-in-isolation Host becomes the bus's problem — a restart loop that reports each attempt is worse than the fault it is reporting.
 
 ---
 
@@ -275,7 +278,7 @@ Counters need their own discipline, since they are the primary evidence for ever
 
 ## 3.3 Freeze the topology corpus before measuring headroom
 
-The 8-bit ParticipantId and WireNumber widths have a pre-freeze corpus gate. The representative topology corpus is named, versioned, and frozen before measuring either width; changing the corpus after seeing poor margin starts a new measurement rather than repairing the result.
+The 8-bit HostId and WireNumber widths have a pre-freeze corpus gate. The representative topology corpus is named, versioned, and frozen before measuring either width; changing the corpus after seeing poor margin starts a new measurement rather than repairing the result.
 
 The corpus includes:
 
@@ -289,13 +292,13 @@ local/sentinel reservations
 plausible product growth
 ```
 
-For every topology, record peak ParticipantId consumption, peak WireNumber consumption, reserved/private allocation cost, and remaining growth margin. Passing means demonstrating useful headroom across the frozen corpus, not merely fitting one current product sketch. Poor margin blocks the representation freeze and requires revisiting allocation.
+For every topology, record peak HostId consumption, peak WireNumber consumption, reserved/private allocation cost, and remaining growth margin. Passing means demonstrating useful headroom across the frozen corpus, not merely fitting one current product sketch. Poor margin blocks the representation freeze and requires revisiting allocation.
 
 ---
 
 # 4. Capability Claims and Reason Categories
 
-Targets range from an 8-bit MCU Participant to a Linux gateway, so a single pass/fail suite would either exclude the small targets or test nothing. The resolution is to make the claim explicit and separate from the result.
+Targets range from an 8-bit MCU Host to a Linux gateway, so a single pass/fail suite would either exclude the small targets or test nothing. The resolution is to make the claim explicit and separate from the result.
 
 Each configuration declares every optional capability as one of:
 

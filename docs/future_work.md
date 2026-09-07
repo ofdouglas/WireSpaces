@@ -56,7 +56,7 @@ Before it can be baseline, the copyless design still has to solve lifetime, fan-
 
 # 3. Additional Transports
 
-The canonical descriptor reserves a 3-bit `TransportType` and the baseline is an Unreliable Datagram (`CORE §20`). No other Transport is designed, and the registry is not allocated.
+The canonical descriptor reserves a 3-bit `TransportType` and the baseline is an Unreliable Datagram (`CORE §20`). The BITS proposal supplies a candidate finite-object protocol; its Endpoint/Transport Entity boundary is incorporated, while detailed protocol integration and registry allocation remain pending (`REG §6.16`).
 
 ## 3.1 Sequenced / end-to-end-protected datagram
 
@@ -75,6 +75,8 @@ Note what this does *not* provide: an end-to-end check detects accidental corrup
 
 ## 3.2 Reliable and bulk transport
 
+The BITS proposal is the current finite-object candidate. `CORE §9/§20` now permits its separate bounded ingress workstreams and deferred protocol processing. This does not settle its wire format, state machine, sink commitment, end-to-end integrity, or detailed API.
+
 Firmware images, files, logs, and similar data should eventually use a Transport that can:
 
 - segment across multiple PDUs;
@@ -82,9 +84,9 @@ Firmware images, files, logs, and similar data should eventually use a Transport
 - bound receiver storage;
 - resume where useful.
 
-Receiver windows and credits belong at this level rather than in a Link LLL, which is why Classical-CAN Participants are not expected to implement generic Link flow control (`LINK §2.11`).
+Receiver windows and credits belong at this level rather than in a Link LLL, which is why Classical-CAN Hosts are not expected to implement generic Link flow control (`LINK §2.12`).
 
-Other plausible Transports: request/response with retry and correlation, and a command Transport that accepts input from several Participants and selects a source based on health or timeout (`CORE §20.1`).
+Other plausible Transports: request/response with retry and correlation, and a command Transport that accepts input from several Hosts and selects a source based on health or timeout (`CORE §20.1`).
 
 Open before any of this can be designed: the TransportType registry allocation, whether ordering guarantees are a separate declared axis from delivery guarantees, and how a reliable Transport interacts with latest-value queue replacement (`CORE §14.3`), which is designed to discard exactly the data a reliable stream wants to keep.
 
@@ -194,7 +196,7 @@ NS3 EID 1024..65535
     richer-link ecosystem Services
 ```
 
-Not every Service needs the compact NS0 Common region (`LINK §2.4`). Service schemas need portable definitions and code generation eventually; the contract is `CORE §21.3`. Freshness representation (`CORE §21.4`) and time sync should be decided together.
+Not every Service needs the compact NS0 Common region (`LINK §2.8`). Service schemas need portable definitions and code generation eventually; the contract is `CORE §21.3`. Freshness representation (`CORE §21.4`) and time sync should be decided together.
 
 ## 8.2 Service archetypes
 
@@ -251,20 +253,19 @@ This is an aspiration, not a plan. It is recorded because it is the use case tha
 
 The 11-bit identifier is a deliberately constrained compatibility floor (`LINK §2`). A future 29-bit Classical CAN profile is the planned escape hatch.
 
-The current canonical direction is a provisional 48-bit descriptor with 8-bit `WireNumber`, `SrcParticipantId`, and `DestParticipantId` fields. A CAN29 profile has enough identifier space to carry those three routing identities plus QoS and limited profile control directly, avoiding CAN11 Wire elision, VCN lookup, or participant compression in ordinary deployments. That would remove:
+The current canonical direction is a provisional 48-bit descriptor with 8-bit `WireNumber`, `SrcHostId`, and `DestHostId` fields. A CAN29 profile has enough identifier space to carry those three routing identities plus QoS and limited profile control directly, avoiding CAN11 alias and VCN reconstruction in ordinary deployments. It could remove:
 
-- CAN11's one-Wire-per-Link-profile restriction;
-- VCN allocation and participant-compression constraints;
-- the inability to realize overlapping Wires on one CAN11 bus;
+- the eight-alias and 32-VCN-per-alias limits of the preferred Native CAN11 budget;
+- VCN-map storage, alias selection, and spare-alias migration pressure;
 - some pressure behind compact Endpoint allocations and CAN11 control space.
 
-CAN29 is the preferred escalation when several Wires must share one physical CAN bus, the communication graph does not fit participant compression cleanly, VCN configuration becomes awkward, or richer payload/metadata efficiency matters. Canonically, Wire identity, source Participant, destination Participant, Endpoint, and Transport semantics remain unchanged. Any `Direction` bit would be only a CAN-profile reconstruction device, not canonical semantics.
+Native CAN11 already supports overlapping Wires on one physical bus. CAN29 becomes attractive when graph size, alias capacity, migration headroom, configuration cost, filter pressure, or payload efficiency justify it (`IMPL §7`). Canonical Wire identity, source Host, destination Host, Endpoint, and Transport semantics remain unchanged. Any `Direction` bit would be only a CAN-profile reconstruction device.
 
 **No 29-bit identifier or byte layout is specified.** The provisional 8-bit canonical allocations guide the profile, but neither field placement nor payload packing should be inferred from CAN11 or frozen here.
 
 ## 11.2 Guest CAN
 
-`LINK §2` owns the CAN11 profiles. The accepted Guest baseline is no longer wholly undesigned: the legacy-bus owner allocates WireSpaces one aligned contiguous block of 16 CAN identifiers, whose four variable low bits carry a 3-bit VCN and a Link-local `Direction`. The Link Binding supplies one fixed canonical QoS for the allocation; Guest frames do not carry per-frame QoS. The all-ones VCN is reserved for Link control rather than an ordinary configured circuit.
+`LINK §2` owns the CAN11 profiles. The accepted Guest baseline is no longer wholly undesigned: the legacy-bus owner allocates WireSpaces one aligned contiguous block of 16 CAN identifiers, whose four variable low bits carry a 3-bit VCN and a Link-local `Direction`. The Link Binding supplies one fixed canonical QoS for the allocation; Guest frames do not carry per-frame QoS. Guest relationship meanings are deployment-wide. The default map reserves VCN3 for control and uses all-ones VCN7 for ordinary traffic. Guest5/Guest6 growth exposes further default entries while preserving the existing meanings.
 
 Two constraints remain worth carrying forward:
 
@@ -275,10 +276,10 @@ The following remain future profile/tooling work:
 
 - larger aligned Guest allocations, such as 32- or 64-ID blocks with wider VCN fields;
 - the exact fixed-QoS selection and arbitration policy;
-- ordinary VCN allocation policy and VCN-table representation;
-- exact participant/VCN map-fingerprint coverage and compatibility behavior;
+- exact default/custom profile boundaries, Host assignment defaults, and VCN-table representation;
+- exact Host/VCN map-fingerprint coverage and compatibility behavior;
 - the commissioning and Link-control protocol carried by reserved values;
-- atomic map activation, including the treatment of reassembly already in progress when a map changes;
+- Guest cutover and the complete Native spare-alias migration protocol, including readiness, retirement, stale-frame exclusion, and failure recovery (`LINK §2.14`);
 - CAN29 identifier and byte layout.
 
 CAN29 remains the preferred answer when the controllers and deployment support it, especially where CAN11 allocation or configuration constraints would otherwise accumulate.
@@ -287,9 +288,9 @@ CAN29 remains the preferred answer when the controllers and deployment support i
 
 # 12. Cross-WireSpace Identity Translation
 
-Canonical `ParticipantId` values are unique within one coordinated deployment identity universe, and plain forwarding does not merge independently assigned universes. Likewise, a Wire is a Logical Bus with canonical identity; connecting Physical Links does not make independently defined Wires identical.
+Canonical `HostId` values are unique within one coordinated deployment identity universe, and plain forwarding does not merge independently assigned universes. Likewise, a Wire is a Logical Bus with canonical identity; connecting Physical Links does not make independently defined Wires identical.
 
-What translation looks like remains undesigned. It would at least map `ParticipantId` and Wire identity across the boundary. That is not transparent forwarding: the boundary is composition, consuming an interaction in one identity universe and authoring a new PDU in the other, with the composing Participant as canonical source. Any Endpoint or Service-semantic translation belongs to that composition as well.
+What translation looks like remains undesigned. It would at least map `HostId` and Wire identity across the boundary. That is not transparent forwarding: the boundary is composition, consuming an interaction in one identity universe and authoring a new PDU in the other, with the composing Host as canonical source. Any Endpoint or Service-semantic translation belongs to that composition as well.
 
 Also open: whether a WireSpace should carry policy or trust semantics in addition to being an identity scope. It is deliberately claimed as nothing more than a scope today.
 
@@ -331,7 +332,7 @@ Individually minor, collected so they are not re-proposed as novel:
 | Extension | Current state | Trigger to revisit |
 |---|---|---|
 | Same-profile cut-through forwarding | Not the generic architecture (`CORE §12`) | Measured gateway latency problem, and only if behaviorally equivalent |
-| Destination-Participant branch pruning | Logical-Bus propagation and acceptance filtering are the baseline (`CORE §12.1`) | Demonstrated bandwidth pressure on a multi-branch Wire |
+| Destination-Host branch pruning | Logical-Bus propagation and acceptance filtering are the baseline (`CORE §12.1`) | Demonstrated bandwidth pressure on a multi-branch Wire |
 | Per-Wire congestion signaling | Coarse credit pools accepted (`CORE §15.6`) | A real system where head-of-line coupling is inadequate |
 | Link Manager Service | Telemetry exists; no consumer (`DEPLOY §3.3`) | A gateway large enough for automatic policy to beat human diagnosis |
 | Intermediate QoS profiles | Only Minimal and Full standardized (`CORE §14.1`) | Implementation experience showing a real need for `Normal+Background` |

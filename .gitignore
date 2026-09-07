@@ -1,0 +1,13 @@
+# Build outputs
+build/
+**/build/
+*.d
+*.o
+*.elf
+*.hex
+*.map
+*.lst
+**/.cache/
+*.pyc
+
+

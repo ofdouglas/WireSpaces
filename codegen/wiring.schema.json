@@ -1,0 +1,416 @@
+{
+  "$defs": {
+    "CanLinkInput": {
+      "additionalProperties": false,
+      "properties": {
+        "ArbitrationBitrate": {
+          "description": "Positive integer bits per second.",
+          "maximum": 4294967295,
+          "minimum": 1,
+          "title": "Arbitrationbitrate",
+          "type": "integer"
+        },
+        "LinkType": {
+          "const": "CAN",
+          "title": "Linktype",
+          "type": "string"
+        },
+        "Name": {
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "Name",
+        "LinkType",
+        "ArbitrationBitrate"
+      ],
+      "title": "CanLinkInput",
+      "type": "object"
+    },
+    "FdLinkInput": {
+      "additionalProperties": false,
+      "properties": {
+        "ArbitrationBitrate": {
+          "description": "Positive integer bits per second.",
+          "maximum": 4294967295,
+          "minimum": 1,
+          "title": "Arbitrationbitrate",
+          "type": "integer"
+        },
+        "DataBitrate": {
+          "description": "Positive integer bits per second.",
+          "maximum": 4294967295,
+          "minimum": 1,
+          "title": "Databitrate",
+          "type": "integer"
+        },
+        "LinkType": {
+          "const": "CAN_FD",
+          "title": "Linktype",
+          "type": "string"
+        },
+        "Name": {
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "Name",
+        "LinkType",
+        "ArbitrationBitrate"
+      ],
+      "title": "FdLinkInput",
+      "type": "object"
+    },
+    "HostInput": {
+      "additionalProperties": false,
+      "properties": {
+        "HostId": {
+          "description": "Explicit deployment-wide host identity.",
+          "maximum": 254,
+          "minimum": 0,
+          "title": "Hostid",
+          "type": "integer"
+        },
+        "Interfaces": {
+          "description": "Physical attachments. A string uses the Link name as the interface name.",
+          "items": {
+            "anyOf": [
+              {
+                "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/InterfaceInput"
+              }
+            ]
+          },
+          "maxItems": 8,
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "Name": {
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "Name",
+        "HostId",
+        "Interfaces"
+      ],
+      "title": "HostInput",
+      "type": "object"
+    },
+    "InterfaceInput": {
+      "additionalProperties": false,
+      "properties": {
+        "EgressBit": {
+          "description": "Pinned host-local bit; omit for automatic name-ordered assignment.",
+          "maximum": 7,
+          "minimum": 0,
+          "title": "Egressbit",
+          "type": "integer"
+        },
+        "Link": {
+          "description": "Name of the shared physical Link.",
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Link",
+          "type": "string"
+        },
+        "Name": {
+          "description": "Local interface name; defaults to Link.",
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "Link"
+      ],
+      "title": "InterfaceInput",
+      "type": "object"
+    },
+    "OtherLinkInput": {
+      "additionalProperties": false,
+      "properties": {
+        "BaudRate": {
+          "description": "Positive integer bits per second.",
+          "maximum": 4294967295,
+          "minimum": 1,
+          "title": "Baudrate",
+          "type": "integer"
+        },
+        "LinkType": {
+          "pattern": "^(?!(?:CAN|CAN_FD|UART_HDLC)$)(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Linktype",
+          "type": "string"
+        },
+        "Name": {
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "Name",
+        "LinkType"
+      ],
+      "title": "OtherLinkInput",
+      "type": "object"
+    },
+    "RealizationInput": {
+      "additionalProperties": false,
+      "properties": {
+        "Attachments": {
+          "description": "Exact Host.Interface attachments forming one connected tree.",
+          "items": {
+            "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*\\.[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+            "type": "string"
+          },
+          "minItems": 2,
+          "title": "Attachments",
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "Attachments"
+      ],
+      "title": "RealizationInput",
+      "type": "object"
+    },
+    "UartLinkInput": {
+      "additionalProperties": false,
+      "properties": {
+        "BaudRate": {
+          "description": "Positive integer bits per second.",
+          "maximum": 4294967295,
+          "minimum": 1,
+          "title": "Baudrate",
+          "type": "integer"
+        },
+        "LinkType": {
+          "const": "UART_HDLC",
+          "title": "Linktype",
+          "type": "string"
+        },
+        "Name": {
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "Name",
+        "LinkType",
+        "BaudRate"
+      ],
+      "title": "UartLinkInput",
+      "type": "object"
+    },
+    "WireInput": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "not": {
+            "required": [
+              "Links",
+              "Path"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "Links",
+              "Realization"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "Path",
+              "Realization"
+            ]
+          }
+        }
+      ],
+      "anyOf": [
+        {
+          "properties": {
+            "Hosts": {
+              "minItems": 1
+            }
+          },
+          "required": [
+            "Hosts"
+          ]
+        },
+        {
+          "properties": {
+            "Groups": {
+              "minItems": 1
+            }
+          },
+          "required": [
+            "Groups"
+          ]
+        }
+      ],
+      "properties": {
+        "Groups": {
+          "description": "Named host groups; combined with Hosts.",
+          "items": {
+            "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+            "type": "string"
+          },
+          "title": "Groups",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "Hosts": {
+          "description": "Local Wire members, not all physical bus listeners.",
+          "items": {
+            "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+            "type": "string"
+          },
+          "title": "Hosts",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "Links": {
+          "description": "Legacy selection: includes every attachment on each Link.",
+          "items": {
+            "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+            "type": "string"
+          },
+          "title": "Links",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "Name": {
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Name",
+          "type": "string"
+        },
+        "Path": {
+          "description": "Named explicit linear chain.",
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Path",
+          "type": "string"
+        },
+        "Realization": {
+          "description": "Named exact attachment tree, including branches.",
+          "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+          "title": "Realization",
+          "type": "string"
+        },
+        "WireId": {
+          "maximum": 254,
+          "minimum": 1,
+          "title": "Wireid",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "Name",
+        "WireId"
+      ],
+      "title": "WireInput",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "WireSpaces deployment: physical topology, local membership and static propagation.",
+  "properties": {
+    "Groups": {
+      "description": "Host lists only; no nested groups.",
+      "patternProperties": {
+        "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])": {
+          "items": {
+            "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "title": "Groups",
+      "type": "object"
+    },
+    "Hosts": {
+      "items": {
+        "$ref": "#/$defs/HostInput"
+      },
+      "minItems": 1,
+      "title": "Hosts",
+      "type": "array"
+    },
+    "Links": {
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CanLinkInput"
+          },
+          {
+            "$ref": "#/$defs/FdLinkInput"
+          },
+          {
+            "$ref": "#/$defs/UartLinkInput"
+          },
+          {
+            "$ref": "#/$defs/OtherLinkInput"
+          }
+        ]
+      },
+      "title": "Links",
+      "type": "array"
+    },
+    "Paths": {
+      "description": "Ordered hop pairs sharing a Link, joined through transit hosts.",
+      "patternProperties": {
+        "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])": {
+          "items": {
+            "pattern": "^(?!.*__)[A-Z][A-Za-z0-9_]*\\.[A-Z][A-Za-z0-9_]*(?![\\s\\S])",
+            "type": "string"
+          },
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "title": "Paths",
+      "type": "object"
+    },
+    "Realizations": {
+      "description": "Named exact attachment trees. Selection never grants membership.",
+      "patternProperties": {
+        "^(?!.*__)[A-Z][A-Za-z0-9_]*(?![\\s\\S])": {
+          "$ref": "#/$defs/RealizationInput"
+        }
+      },
+      "title": "Realizations",
+      "type": "object"
+    },
+    "Wires": {
+      "items": {
+        "$ref": "#/$defs/WireInput"
+      },
+      "title": "Wires",
+      "type": "array"
+    }
+  },
+  "required": [
+    "Hosts",
+    "Links",
+    "Wires"
+  ],
+  "title": "DeploymentInput",
+  "type": "object"
+}

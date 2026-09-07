@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=../wiring.schema.json
+# Topology only: no endpoints or authorization policy.
+# CAN rates are illustrative: confirm arbitration/data timing for the actual system.
+Hosts:
+  - Name: Vcu
+    HostId: 1
+    Interfaces: [OperatorEthernet, ChassisCan, PowertrainCan]
+  - Name: Hmi
+    HostId: 2
+    Interfaces: [OperatorEthernet]
+  - Name: Safety
+    HostId: 3
+    Interfaces: [ChassisCan, SafetyCan]
+  - Name: Brake
+    HostId: 4
+    Interfaces: [ChassisCan]
+  - Name: HydraulicGateway
+    HostId: 5
+    Interfaces: [ChassisCan, HydraulicCan]
+  - Name: Bms
+    HostId: 6
+    Interfaces: [PowertrainCan]
+  - Name: DriveA
+    HostId: 7
+    Interfaces: [PowertrainCan]
+  - Name: DriveB
+    HostId: 8
+    Interfaces: [PowertrainCan]
+  - Name: ValveA
+    HostId: 9
+    Interfaces: [HydraulicCan]
+  - Name: ValveB
+    HostId: 10
+    Interfaces: [HydraulicCan]
+  - Name: Pump
+    HostId: 11
+    Interfaces: [HydraulicCan]
+  - Name: SafetyIo
+    HostId: 12
+    Interfaces: [SafetyCan]
+
+Links:
+  - {Name: OperatorEthernet, LinkType: ETHERNET}
+  - {Name: ChassisCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: PowertrainCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: HydraulicCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: SafetyCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+
+Groups:
+  Drives: [DriveA, DriveB]
+  HydraulicDevices: [ValveA, ValveB, Pump]
+  PlatformHosts: [Vcu, Safety, Brake, HydraulicGateway, Bms, DriveA, DriveB, ValveA, ValveB, Pump, SafetyIo]
+
+Wires:
+  - Name: Operator
+    WireId: 1
+    Hosts: [Vcu, Hmi]
+  - Name: ChassisCoordination
+    WireId: 2
+    Hosts: [Vcu, Safety, Brake, HydraulicGateway]
+  - Name: PowertrainControl
+    WireId: 3
+    Hosts: [Vcu, Safety, Bms]
+    Groups: [Drives]
+  - Name: HydraulicControl
+    WireId: 4
+    Hosts: [Vcu, Safety, HydraulicGateway]
+    Groups: [HydraulicDevices]
+  - Name: SafetyIoControl
+    WireId: 5
+    Hosts: [Safety, SafetyIo]
+  - Name: MachinePlatform
+    WireId: 6
+    Groups: [PlatformHosts]

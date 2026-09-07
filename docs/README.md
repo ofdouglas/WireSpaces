@@ -8,7 +8,7 @@ Each Endpoint Domain has one deployment-scoped `ParticipantId`, used on every Wi
 
 The same Endpoint and Service model is meant to survive whether a Wire is realized inside one device, as a shared-memory channel between cores, across a CAN bus, over Ethernet, or through an FPGA datapath.
 
-**Status: private first draft.** The architecture is provisional, no Link profile is byte-exact, and no wire interoperability is claimed. Implementation is at an early stage in `code/sim/`.
+**Status: private first draft.** The architecture is provisional, no Link profile is byte-exact, and no wire interoperability is claimed. Implementation is at an early stage in `sim/`.
 
 ---
 
@@ -32,11 +32,11 @@ Read in this order if you are new to the project:
 
 Other material:
 
-- [`archive/`](../archive/) — superseded specifications and adopted decision records (provenance only; not normative)
-  - [`decision-bounded-endpoint-delivery.md`](../archive/decision-bounded-endpoint-delivery.md) — revision 0.9 delivery-model decision record (detail beyond `HIST §4.2`)
+- [`archive/`](archive/) — superseded specifications and adopted decision records (provenance only; not normative)
+  - [`decision-bounded-endpoint-delivery.md`](archive/decision-bounded-endpoint-delivery.md) — revision 0.9 delivery-model decision record (detail beyond `HIST §4.2`)
 - [`notes/can_id_provisioning.md`](notes/can_id_provisioning.md) — CAN commissioning / identifier working notes (not yet in `LINK` / `DEPLOY`)
-- `code/sim/` — reference implementation, currently at an early stage
-- [`code/sim_rfp.md`](../code/sim_rfp.md) — simulator requirements
+- `sim/` — reference implementation, currently at an early stage
+- [simulator README](../sim/README.md) — simulator requirements
 
 Decision records and superseded specs have no authority: `CORE` and `REG` are normative. They explain how the current documents got there.
 

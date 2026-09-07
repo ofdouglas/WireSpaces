@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=./wiring.schema.json
+# Names are uppercase-leading C++ identifiers, used verbatim in generated names.
+Hosts:
+  - Name: Arduino
+    HostId: 1
+    Interfaces:
+      - Name: Uart
+        Link: VcpUart
+  - Name: Pc
+    HostId: 2
+    Interfaces:
+      - Name: Uart
+        Link: VcpUart
+
+Links:
+  - Name: VcpUart
+    LinkType: UART_HDLC
+    BaudRate: 115200
+
+Wires:
+  - Name: TestWire
+    WireId: 1
+    Hosts: [Arduino, Pc]

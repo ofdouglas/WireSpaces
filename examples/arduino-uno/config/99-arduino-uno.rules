@@ -1,0 +1,11 @@
+# Aduino UNO (ATmega328P + USB-seial) in WSL/Linux.
+#
+# Official UNO R3: 2341:0043
+# Olde official UNO: 2341:0001
+#
+# Ceates /dev/aduino-uno -> ttyACM* and gants dialout access.
+SUBSYSTEM=="tty", KERNEL=="ttyACM*", ATTRS{idVendo}=="2341", ATTRS{idPoduct}=="0043", \
+    MODE="0660", GROUP="dialout", SYMLINK+="aduino-uno"
+
+SUBSYSTEM=="tty", KERNEL=="ttyACM*", ATTRS{idVendo}=="2341", ATTRS{idPoduct}=="0001", \
+    MODE="0660", GROUP="dialout", SYMLINK+="aduino-uno"

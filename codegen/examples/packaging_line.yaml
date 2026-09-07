@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=../wiring.schema.json
+# Illustrative four-cell packaging line: 40 hosts, 17 Links, 19 Wires.
+# Rates are example settings, not hardware timing validation or a safety design.
+# Sensors publish explicit telemetry on LineTelemetry; this is not a passive unicast tap.
+Hosts:
+  - {Name: Plant, HostId: 1, Interfaces: [Backbone]}
+  - {Name: LineCoordinator, HostId: 2, Interfaces: [Backbone]}
+  - {Name: Historian, HostId: 3, Interfaces: [Backbone]}
+  - {Name: Engineering, HostId: 4, Interfaces: [Backbone]}
+  - {Name: InfeedControl, HostId: 10, Interfaces: [Backbone, InfeedMotion, InfeedIo, InfeedVision, InfeedSensors]}
+  - {Name: InfeedAxisA, HostId: 11, Interfaces: [InfeedMotion]}
+  - {Name: InfeedAxisB, HostId: 12, Interfaces: [InfeedMotion]}
+  - {Name: InfeedAxisC, HostId: 13, Interfaces: [InfeedMotion]}
+  - {Name: InfeedIoA, HostId: 14, Interfaces: [InfeedIo]}
+  - {Name: InfeedIoB, HostId: 15, Interfaces: [InfeedIo]}
+  - {Name: InfeedCamera, HostId: 16, Interfaces: [InfeedVision]}
+  - {Name: InfeedMeterA, HostId: 17, Interfaces: [InfeedSensors]}
+  - {Name: InfeedMeterB, HostId: 18, Interfaces: [InfeedSensors]}
+  - {Name: ProcessControl, HostId: 20, Interfaces: [Backbone, ProcessMotion, ProcessIo, ProcessVision, ProcessSensors]}
+  - {Name: ProcessAxisA, HostId: 21, Interfaces: [ProcessMotion]}
+  - {Name: ProcessAxisB, HostId: 22, Interfaces: [ProcessMotion]}
+  - {Name: ProcessAxisC, HostId: 23, Interfaces: [ProcessMotion]}
+  - {Name: ProcessIoA, HostId: 24, Interfaces: [ProcessIo]}
+  - {Name: ProcessIoB, HostId: 25, Interfaces: [ProcessIo]}
+  - {Name: ProcessCamera, HostId: 26, Interfaces: [ProcessVision]}
+  - {Name: ProcessMeterA, HostId: 27, Interfaces: [ProcessSensors]}
+  - {Name: ProcessMeterB, HostId: 28, Interfaces: [ProcessSensors]}
+  - {Name: PackagingControl, HostId: 30, Interfaces: [Backbone, PackagingMotion, PackagingIo, PackagingVision, PackagingSensors]}
+  - {Name: PackagingAxisA, HostId: 31, Interfaces: [PackagingMotion]}
+  - {Name: PackagingAxisB, HostId: 32, Interfaces: [PackagingMotion]}
+  - {Name: PackagingAxisC, HostId: 33, Interfaces: [PackagingMotion]}
+  - {Name: PackagingIoA, HostId: 34, Interfaces: [PackagingIo]}
+  - {Name: PackagingIoB, HostId: 35, Interfaces: [PackagingIo]}
+  - {Name: PackagingCamera, HostId: 36, Interfaces: [PackagingVision]}
+  - {Name: PackagingMeterA, HostId: 37, Interfaces: [PackagingSensors]}
+  - {Name: PackagingMeterB, HostId: 38, Interfaces: [PackagingSensors]}
+  - {Name: PalletizingControl, HostId: 40, Interfaces: [Backbone, PalletizingMotion, PalletizingIo, PalletizingVision, PalletizingSensors]}
+  - {Name: PalletizingAxisA, HostId: 41, Interfaces: [PalletizingMotion]}
+  - {Name: PalletizingAxisB, HostId: 42, Interfaces: [PalletizingMotion]}
+  - {Name: PalletizingAxisC, HostId: 43, Interfaces: [PalletizingMotion]}
+  - {Name: PalletizingIoA, HostId: 44, Interfaces: [PalletizingIo]}
+  - {Name: PalletizingIoB, HostId: 45, Interfaces: [PalletizingIo]}
+  - {Name: PalletizingCamera, HostId: 46, Interfaces: [PalletizingVision]}
+  - {Name: PalletizingMeterA, HostId: 47, Interfaces: [PalletizingSensors]}
+  - {Name: PalletizingMeterB, HostId: 48, Interfaces: [PalletizingSensors]}
+Links:
+  - {Name: Backbone, LinkType: ETHERNET}
+  - {Name: InfeedMotion, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: InfeedIo, LinkType: CAN, ArbitrationBitrate: 500000}
+  - {Name: InfeedVision, LinkType: ETHERNET}
+  - {Name: InfeedSensors, LinkType: RS485, BaudRate: 115200}
+  - {Name: ProcessMotion, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: ProcessIo, LinkType: CAN, ArbitrationBitrate: 500000}
+  - {Name: ProcessVision, LinkType: ETHERNET}
+  - {Name: ProcessSensors, LinkType: RS485, BaudRate: 115200}
+  - {Name: PackagingMotion, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: PackagingIo, LinkType: CAN, ArbitrationBitrate: 500000}
+  - {Name: PackagingVision, LinkType: ETHERNET}
+  - {Name: PackagingSensors, LinkType: RS485, BaudRate: 115200}
+  - {Name: PalletizingMotion, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: PalletizingIo, LinkType: CAN, ArbitrationBitrate: 500000}
+  - {Name: PalletizingVision, LinkType: ETHERNET}
+  - {Name: PalletizingSensors, LinkType: RS485, BaudRate: 115200}
+Groups:
+  CellControls: [InfeedControl, ProcessControl, PackagingControl, PalletizingControl]
+  InfeedDrives: [InfeedAxisA, InfeedAxisB, InfeedAxisC]
+  ProcessDrives: [ProcessAxisA, ProcessAxisB, ProcessAxisC]
+  PackagingDrives: [PackagingAxisA, PackagingAxisB, PackagingAxisC]
+  PalletizingDrives: [PalletizingAxisA, PalletizingAxisB, PalletizingAxisC]
+  InfeedDevices: [InfeedAxisA, InfeedAxisB, InfeedAxisC, InfeedIoA, InfeedIoB, InfeedCamera, InfeedMeterA, InfeedMeterB]
+  ProcessDevices: [ProcessAxisA, ProcessAxisB, ProcessAxisC, ProcessIoA, ProcessIoB, ProcessCamera, ProcessMeterA, ProcessMeterB]
+  PackagingDevices: [PackagingAxisA, PackagingAxisB, PackagingAxisC, PackagingIoA, PackagingIoB, PackagingCamera, PackagingMeterA, PackagingMeterB]
+  PalletizingDevices: [PalletizingAxisA, PalletizingAxisB, PalletizingAxisC, PalletizingIoA, PalletizingIoB, PalletizingCamera, PalletizingMeterA, PalletizingMeterB]
+  LineMeters: [InfeedMeterA, InfeedMeterB, ProcessMeterA, ProcessMeterB, PackagingMeterA, PackagingMeterB, PalletizingMeterA, PalletizingMeterB]
+Wires:
+  - {Name: LineCoordination, WireId: 1, Hosts: [Plant, LineCoordinator], Groups: [CellControls]}
+  - {Name: Maintenance, WireId: 2, Hosts: [Engineering, LineCoordinator], Groups: [CellControls, InfeedDevices, ProcessDevices, PackagingDevices, PalletizingDevices]}
+  - {Name: LineTelemetry, WireId: 3, Hosts: [Historian, LineCoordinator], Groups: [LineMeters]}
+  - {Name: InfeedDriveControl, WireId: 10, Hosts: [InfeedControl], Groups: [InfeedDrives]}
+  - {Name: InfeedIoControl, WireId: 11, Hosts: [InfeedControl, InfeedIoA, InfeedIoB]}
+  - {Name: InfeedVisionControl, WireId: 12, Hosts: [InfeedControl, InfeedCamera]}
+  - {Name: InfeedMeasurement, WireId: 13, Hosts: [InfeedControl, InfeedMeterA, InfeedMeterB]}
+  - {Name: ProcessDriveControl, WireId: 20, Hosts: [ProcessControl], Groups: [ProcessDrives]}
+  - {Name: ProcessIoControl, WireId: 21, Hosts: [ProcessControl, ProcessIoA, ProcessIoB]}
+  - {Name: ProcessVisionControl, WireId: 22, Hosts: [ProcessControl, ProcessCamera]}
+  - {Name: ProcessMeasurement, WireId: 23, Hosts: [ProcessControl, ProcessMeterA, ProcessMeterB]}
+  - {Name: PackagingDriveControl, WireId: 30, Hosts: [PackagingControl], Groups: [PackagingDrives]}
+  - {Name: PackagingIoControl, WireId: 31, Hosts: [PackagingControl, PackagingIoA, PackagingIoB]}
+  - {Name: PackagingVisionControl, WireId: 32, Hosts: [PackagingControl, PackagingCamera]}
+  - {Name: PackagingMeasurement, WireId: 33, Hosts: [PackagingControl, PackagingMeterA, PackagingMeterB]}
+  - {Name: PalletizingDriveControl, WireId: 40, Hosts: [PalletizingControl], Groups: [PalletizingDrives]}
+  - {Name: PalletizingIoControl, WireId: 41, Hosts: [PalletizingControl, PalletizingIoA, PalletizingIoB]}
+  - {Name: PalletizingVisionControl, WireId: 42, Hosts: [PalletizingControl, PalletizingCamera]}
+  - {Name: PalletizingMeasurement, WireId: 43, Hosts: [PalletizingControl, PalletizingMeterA, PalletizingMeterB]}

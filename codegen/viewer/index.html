@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>@@TITLE@@ · WireSpaces</title>
+  <style>@@STYLE@@</style>
+</head>
+<body>
+  <header><div><span class="eyebrow">WIRESPACES / TOPOLOGY</span><h1>@@TITLE@@</h1></div><span class="readonly">Read-only · offline</span></header>
+  <main>
+    <div id="diagnostics" role="status"></div>
+    <section class="toolbar" aria-label="Topology controls">
+      <label>Wire<select id="wire"><option value="">Physical topology</option></select></label>
+      <label>Inspect host<select id="host"></select></label>
+      <label>Arrival at host<select id="ingress"><option value="">Local origin</option></select></label>
+      <label class="check"><input id="selected-only" type="checkbox"> Selected tree only</label>
+      <button id="fit" type="button">Fit graph</button>
+      <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+    </section>
+    <p id="summary" aria-live="polite"></p>
+    <div class="workspace">
+      <section class="graph-panel" aria-label="Topology graph">
+        <div class="legend"><span class="member">■ Member</span><span class="transit">■ Transit</span><span>● Physical Link</span><span class="egress">━ Preview egress</span><span class="ingress">━ Ingress</span></div>
+        <svg id="graph" role="group" aria-label="Host and shared Link topology; use the controls or select a node to inspect" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMin meet"></svg>
+        <p class="hint">Drag the background to pan. Use + / − or the wheel to zoom. Nodes are inspection targets, not editable objects.</p>
+      </section>
+      <aside aria-label="Selection inspector">
+        <h2 id="selection-title">Inspection</h2>
+        <p id="selection-role"></p>
+        <div id="details"></div>
+        <h3>Forwarding preview</h3>
+        <p id="preview" aria-live="polite"></p>
+        <p class="hint">Attachment-level preview only. No packets are sent. Local delivery still depends on destination and endpoint bindings; membership is not authority.</p>
+        <details><summary>Authored declarations</summary><pre id="provenance"></pre></details>
+      </aside>
+    </div>
+    <details class="source"><summary>Complete authored configuration (normalized JSON view)</summary><pre id="source"></pre></details>
+    <footer>No save or editing actions. Regenerate this file after changing the source YAML. SHM labels do not implement memory ownership, coherency or restart handling.</footer>
+  </main>
+  <script id="topology-data" type="application/json">@@MODEL@@</script>
+  <script>@@SCRIPT@@</script>
+</body>
+</html>

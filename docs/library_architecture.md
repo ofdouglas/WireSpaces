@@ -100,7 +100,7 @@ Everything above then depends downward on them, and the absent dependencies belo
 
 ## 2.2 Namespaces and headers
 
-The existing simulator establishes the convention: `wirespaces::sim` under `include/wirespaces/sim/`. Core protocol types are the library's main subject, so they sit directly in `wirespaces`, with adjuncts one level down:
+The repository uses directory-rooted includes without a separate `include/` tree: the repository root exposes `core/`, `sim/`, and `platform/`, while `cpp/` exposes reusable C++ modules such as `foundation/`, `crc/`, and `links/`. Namespaces still describe ownership rather than mirroring every directory. Core protocol types are the library's main subject, so they sit directly in `wirespaces`, with adjuncts one level down:
 
 ```text
 wirespaces              canonical types, endpoints, forwarding, results
@@ -112,20 +112,20 @@ wirespaces::sim         existing host simulator
 
 Two layers maximum, per the project style. Headers follow declarations-first with out-of-line template definitions below a banner in the same file.
 
-## 2.3 Reuse from `Design/Firmware`
+## 2.3 Embedded foundation and reusable modules
 
-`Design/Firmware` already contains most of the utility layer this library would otherwise invent, and reusing it is worth more than the convenience: a container that has been exercised by the bootloader and HDLC code is better tested than a fresh one, and one `Span` across the whole codebase avoids the conversion boilerplate that two would create.
+The first utility implementations came from `Design/Firmware`. The selected pieces now live in WireSpaces under `cpp/`, adapted to the project namespace and build so a clean checkout has one embedded-friendly foundation API and no ambient sibling-repository dependency.
 
-**Direct reuse, no changes needed:**
+**Imported building blocks:**
 
 | Component | Use here |
 |---|---|
-| `util/span.h` — `util::Span<T>` | every borrowed view in this document. There is no WireSpaces `Span` |
-| `data_structures/ring_buffer.h` — `RingBuffer<T, N>` | Queue Endpoint storage (§5.3) |
-| `hal/clock.h` — `hal::PlatformClock` | arrival timestamps and cadence (§9) |
-| `util/static_string.h` — `util::StaticString<N>` | Wire and Link names in diagnostics, not on any wire |
+| `cpp/foundation/span.h` — `wirespaces::foundation::Span<T>` | every borrowed view in this document |
+| `cpp/containers/ring_buffer.h` — `wirespaces::containers::RingBuffer<T, N>` | Queue Endpoint storage (§5.3) |
+| `cpp/hal/clock.h` — `wirespaces::hal::PlatformClock` | arrival timestamps and cadence (§9) |
+| `cpp/foundation/static_string.h` — `wirespaces::foundation::StaticString<N>` | Wire and Link names in diagnostics, not on any wire |
 | `interfaces/stream_interface.h` — `Stream::StreamInterface` | the byte-stream Link driver case (§8.1) |
-| `crc/crc_algorithm.h` | implemented candidates for the retained provisional CAN aggregate-CRC direction in `LINK §2.11` (see below) |
+| `cpp/crc/crc_algorithm.h` | implemented candidates for the retained provisional CAN aggregate-CRC direction in `LINK §2.11` (see below) |
 
 `RingBuffer` is a better fit than it first appears, and for a reason worth recording. It documents itself as safe for **one producer and one consumer**, which is exactly the multiplicity `DISP-10` fixes for a receive Queue: the framework writes, one Service reads. It also allocates `Capacity + 1` slots rather than sacrificing one, so its logical capacity is its usable capacity — which is what `CORE §9.5` asks for. Where a Queue Endpoint declares multiple writers, the producer-lock policy of §9 wraps the enqueue side and the ring's own guarantee covers the rest.
 
@@ -145,7 +145,6 @@ One real gap: the implementation has no incremental `update`/`finalize`, only a 
 **Needs work before reuse:**
 
 - `data_structures/memory_pool.h` does not currently compile — a missing brace after the namespace, a `.data()` call on a pointer, and an assignment to a reference member. It is also not needed in phase 1, since nothing pools. Worth knowing before someone reaches for it.
-- `RingBuffer` is declared at global scope rather than in `data_structures`, against the project's own namespace rule. A one-line fix, but it touches its existing users.
 - `can/can_frame.h` is not the right base for the CAN profile. `Can::CanFrame` carries a `crc_` member and HDLC payload framing because it was built for the bootloader's CAN-over-HDLC transport, and its identifier is a template parameter constrained to an enum. WireSpaces needs a plain 11-bit identifier, a DLC, and eight bytes. Either a minimal frame type here or a refactor there — not a direct reuse.
 - `util/integer.h` is worth knowing about but **not** worth acting on first. `util::Uint24_s` demonstrates checked serialization of a narrow value in a wider container, and its TODO asks for a general form. The current preferred Participant and Wire values already use their full provisional container widths, while packed `Endpoint` has its own validity rule. An earlier draft made resolving that TODO a precondition for §4.1; §4.1 now explains why that was wrong on both the technical claim and the sequencing. The stopping condition lives there.
 
@@ -943,19 +942,24 @@ What is worth protecting is narrower than the earlier claim but more defensible:
 
 # 12. Build and Test Layout
 
-Following the project's component structure, with the core as a sibling of the existing simulator:
+Following the project's flat production-file convention:
 
 ```text
-code/
-  CMakeLists.txt                     adds core, then sim
-  core/
-    CMakeLists.txt
-    include/wirespaces/              public headers
-    src/                             non-template bodies
-    test/                            gtest, one file per module
-  profile/can/                       later
-  platform/host/                     host port of §9
-  sim/                               existing; becomes a consumer of core
+WireSpaces/
+  CMakeLists.txt                     composes core, cpp, and sim
+  core/                              C headers and bodies; test/ beneath
+  cpp/
+    foundation/                      Array, Span, StaticString
+    crc/                             CRC API and algorithms
+    links/<profile>/                 Link implementations; test/ beneath
+    services/<service>/              Service implementations; test/ beneath
+  platform/<target>/                 target integration and compatibility
+  sim/                               host simulator headers and bodies
+    examples/                        simulator programs
+    test/                            simulator tests
+  examples/<target>/                 complete target examples
+  tools/                             host tooling
+  tests/hardware/                    hardware integration tests
 ```
 
 Targets:
@@ -968,13 +972,13 @@ wirespaces_vectors       later: emits and checks CONFORM golden vectors
 
 ## 12.1 Consuming `Design/Firmware`
 
-The two trees build differently: `Design/Firmware` uses Make with a hand-maintained `mk/modules.mk` module list and fetches gtest itself, while `WireSpaces/code` uses CMake. Everything §2.3 recommends reusing is header-only except `crc/crc.cpp` — roughly four hundred lines in total.
+The two trees build differently: `Design/Firmware` uses Make with a hand-maintained `mk/modules.mk` module list, while WireSpaces uses a repository-root CMake build. The selected utility code is small and now lives in the corresponding flat modules under `cpp/`.
 
 The decisive fact is that **these are separate repositories**: `WireSpaces` is `ofdouglas/WireSpaces`, and `Firmware` lives inside `ofdouglas/tinkering`. An earlier draft of this section recommended simply adding `${FIRMWARE_ROOT}` to the include path. That is worse than it appeared. It makes a clean checkout of `WireSpaces` unbuildable on its own, and makes it buildable only when an unrelated repository happens to be checked out at the right relative filesystem location, at whatever revision it happens to be on. Nothing pins the version, nothing records what was used, and a build that succeeds on one machine fails on the next for reasons the repository does not describe. Four hundred lines of utility code is not enough value to make clean builds depend on ambient filesystem layout.
 
 The dependency should be explicit and reproducible. Three arrangements are:
 
-- **Vendored extraction with recorded provenance.** Copy the needed files into `code/core/external/`, with the upstream repository, path, and **commit hash** recorded alongside. This is the recommendation for phase 1. The objection to copying was silent divergence, and the answer is that recording the source commit makes divergence *visible* — an update becomes a deliberate, reviewable act rather than something that either happens invisibly or never happens at all.
+- **Vendored extraction with recorded provenance.** Copy the needed files into `cpp/<module>/`, with the upstream repository, path, and **commit hash** recorded alongside. This is the implemented phase-1 arrangement. The objection to copying was silent divergence, and the answer is that recording the source commit makes divergence *visible* — an update becomes a deliberate, reviewable act rather than something that either happens invisibly or never happens at all.
 - **Pinned fetch.** CMake `FetchContent` against `ofdouglas/tinkering` at a fixed tag or commit. Reproducible and avoids duplication, at the cost of pulling an entire unrelated repository to obtain six headers, and of requiring network access for a first build.
 - **A real shared package.** Give the utility layer its own repository or CMake package that both consumers depend on by version. Correct, and clearly disproportionate today.
 
@@ -1047,7 +1051,7 @@ Snapshot read coherence is no longer provisional: it is a seqlock (§9.2). The u
 
 Six things need a decision before or during the first increment, and none is mine to make:
 
-1. **Where the core library lives.** The project's C++ rules point reusable platform-independent libraries at `Design/Firmware`, and this qualifies. Against that, the core is defined by this document set and validated by its conformance vectors, so keeping it in `WireSpaces/code/core/` keeps spec, code, and vectors in one place. The recommendation is to keep it here until a second real target consumes it, then promote — which is the same "wait for the second demand" rule the rest of the project uses. Note that §2.3's dependency on `Design/Firmware` weakens the case for separation somewhat: a core that already includes six `Firmware` headers is not meaningfully standalone.
+1. **Where the core library lives.** The project's C++ rules point reusable platform-independent libraries at `Design/Firmware`, and this qualifies. Against that, the core is defined by this document set and validated by its conformance vectors, so keeping it in `WireSpaces/cpp/` keeps spec, code, and vectors in one place. The recommendation is to keep it here until a second real target consumes it, then promote — which is the same "wait for the second demand" rule the rest of the project uses. The earlier ambient dependency on `Design/Firmware` has been removed: the imported foundation code now lives in WireSpaces, so this repository builds standalone.
 
 2. **How strictly `Endpoint` construction should be controlled.** The canonical value is already one packed Namespace[2] + Id[14] type. Aggregate construction is compact, while a checked factory could make Id zero unrepresentable at the cost of a less convenient static-configuration surface.
 

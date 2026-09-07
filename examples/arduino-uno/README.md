@@ -1,0 +1,289 @@
+# WireSpaces demo using ATMEGA328P (Arduino UNO)
+
+## Packet configuration
+
+`wiring_constants.h` owns the upload and echo `ConnectionAddress` constants,
+shared by the full BITS application and the constrained boot-profile sender.
+The topology generator still only supplies topology identities and routes;
+service peers and endpoints remain application choices.
+
+```cpp
+packet.initialize(payload_size, wiring_constants::kUploadConnection,
+                  wirespaces::ControlFields::bits());
+```
+
+Check the returned boolean before accessing the payload. Successful complete
+initialization sets all addresses and control fields and clears the ingress tag;
+capacity failure leaves the packet unchanged. `ControlFields::simple(qos)` and
+`ControlFields::bits(qos)` default to normal QoS without extensions. Explicit
+`ControlFields` aggregates remain available for extensions. Response addressing
+remains separate via `initializeResponseTo()`.
+
+BITS's existing `ConnectionConfig` name aliases the common address type. No
+packet storage fields, generated connection defaults, or WireSplice behavior
+are added. Constants are not guaranteed to be free of AVR SRAM cost: with the
+current toolchain these boot-profile builds use 36 bytes of static data versus
+30 before this adapter (both flash size gates still pass).
+
+## Demo
+
+The demo and full BITS application own a `DomainContext` containing immutable
+HostInfo and a Router. Services bind explicitly to that context; no default
+context is registered. `kDiagnosticsPublication` supplies heartbeat's Wire and
+destination, while the context supplies its source Host and the service supplies
+its endpoint. The UART receiver calls `domain.receive(...)` so ingress membership
+and dispatch destination checks use the same identity. There is no longer a
+`setLocalHostInfo()` initialization step in these applications.
+
+Links, services and dispatch tables remain application-owned in dependency order.
+The context cannot be copied or moved; its route table and egress forwarder must
+outlive it, and it must outlive its services. The older Router/service entry
+points remain compatible with existing callers. In particular, the three-argument
+`Router::receive()` and one-argument `Dispatcher::dispatch()` still use legacy
+global identity; new context callers use `domain.receive()` or explicit HostInfo
+overloads instead. This refactor adds no multi-domain scheduler or synchronization.
+
+The example runs a minimal WireSpaces heartbeat publisher:
+
+- ATmega328P Timer 0 supplies the millisecond clock.
+- `HeartbeatService` creates one canonical PDU per second.
+- `StackReportService` publishes peak painted-stack utilization once per second.
+- `LedControlService` controls the UNO built-in LED on digital pin 13.
+- The core Router selects the UART egress for Wire 1.
+- The HDLC Link layer frames and byte-stuffs the canonical header and payload.
+- UART0 transmits at 115200 baud through the UNO USB serial connection.
+
+The heartbeat payload contains the current 32-bit millisecond uptime. The
+first-stage HDLC framing does not yet append a CRC.
+
+Build from WSL:
+
+```sh
+make
+```
+
+Flash through PICkit 5 using MPLAB IPE's AVR ISP support:
+
+```sh
+make flash
+```
+
+The flash targets select PICkit 5 independently of the serial port. Override
+`IPECMD`, `PICKIT`, or `AVR_ISP_SPEED` when necessary. The Makefile retries
+intermittent ISP failures up to `FLASH_ATTEMPTS` times (default three).
+
+Serial verification defaults to `/dev/arduino-uno`:
+
+```sh
+make test-ping PORT=/dev/arduino-uno
+```
+
+Override the port when necessary:
+
+```sh
+make test-ping PORT=/dev/ttyACM1
+```
+
+### WSL udev access
+
+In WSL, attach the board with `usbipd` first, then install the udev rule:
+
+```sh
+./config/install-udev.sh
+```
+
+If WSL reports `bash\r: No such file or directory`, the script has Windows line endings. Run:
+
+```sh
+bash ./config/install-udev.sh
+```
+
+Or convert line endings safely (do not use `tr -d '\r'` — it can corrupt words like `dirname`):
+
+```sh
+python3 -c "p='config/install-udev.sh'; d=open(p,'rb').read().replace(b'\r\n',b'\n'); open(p,'wb').write(d)"
+```
+
+Add your user to `dialout` if needed (log out/in afterward):
+
+```sh
+sudo usermod -aG dialout "$USER"
+```
+
+The rule matches official Arduino UNO USB IDs (`2341:0043` and `2341:0001`), sets group `dialout`, and creates `/dev/arduino-uno`.
+
+The generated files are `build/heartbeat.elf` and `build/heartbeat.hex`.
+
+Receive and log WireSpaces packets until interrupted:
+
+```sh
+make receive
+```
+
+`receiver.py` incrementally decodes HDLC framing, validates its trailing
+CRC-16/CCITT-FALSE, parses the canonical WireSpaces header, and emits each
+packet through Python's `logging` module. The two CRC bytes are transmitted
+most-significant byte first and are themselves subject to byte stuffing.
+Future formatting and log destinations can be added with standard logging
+formatters and handlers without changing serial/framing code.
+
+For a bounded live test that resets the UNO and receives one packet:
+
+```sh
+python3 receiver.py --port /dev/arduino-uno --baud 115200 \
+    --reset --count 1 --timeout 5
+```
+
+Run the C++ and Python framing/receiver unit tests:
+
+```sh
+make test-receiver
+```
+
+Ping the Arduino and require a matching response:
+
+```sh
+make test-ping
+```
+
+The demo's route/destination rejection and ingress reflection checks are available
+with `make test-ingress`. The MCP2515 test harness has a host-only reset/readiness
+regression in `make test-can-harness`; it requires the same pyserial/python-can
+dependencies as the hardware test. See `codegen/deployment_studies.md` at the
+repository root for the latest hardware verification scope and results.
+
+The hardware test sends a directed request from PC Participant 2 to Arduino
+Participant 1. Its default sequence, `0x7E7D`, deliberately contains both HDLC
+reserved bytes so the exchange tests byte stuffing in both directions.
+
+Validate the live stack report:
+
+```sh
+make test-stack
+```
+
+The AVR monitor paints unused SRAM once during startup, scans the paint boundary
+every 4096 superloop iterations, and reports peak-used and available bytes.
+The initialization guard and startup/main stack frames are conservatively
+counted as used.
+
+Control the built-in LED through directed WireSpaces requests:
+
+```sh
+make led-on
+make led-off
+PYTHONPATH=../../tools/python python3 -m wirespaces.led_control 10% --port /dev/arduino-uno
+PYTHONPATH=../../tools/python python3 -m wirespaces.led_control 128 --port /dev/arduino-uno
+make led-ramp
+```
+
+The controller waits for an acknowledgement from Arduino Participant 1 before
+reporting success. The LED control Service uses Common Endpoint `0x3FFB` and an
+8-bit ratiometric brightness value, where `0/255` is off and `255/255` is fully
+on. Because the built-in D13/PB5 LED is not connected to a hardware PWM output,
+Timer 1 interrupts generate approximately 977 Hz PWM. The ramp test sends
+acknowledged 10% steps from 0% through 100% over one second.
+
+Run the bounded hardware smoke test:
+
+```sh
+make verify
+```
+
+Expected output includes:
+
+```text
+WS packet wire=1 src=1 dst=broadcast qos=NORMAL ... payload[4]=...
+```
+
+The four payload bytes are the little-endian heartbeat uptime. The CRC trailer
+is removed by the Link decoder before canonical packet parsing.
+
+## BITS RAM transfer test
+
+The standalone `bits_ram_transfer` firmware exercises both Compact BITS roles
+without changing the heartbeat demo. The PC uploads an arbitrary object into a
+fixed 256-byte UNO receive buffer. Once reception completes, the UNO snapshots
+the object into a separate stable transmit buffer and starts a second BITS
+transfer that echoes it into a PC-side RAM receiver. The PC command succeeds
+only when both transfers complete and the returned bytes match.
+
+Two User0 endpoints keep the simultaneous directions independent:
+
+- endpoint 1: PC transmitter to UNO RAM receiver;
+- endpoint 2: UNO RAM transmitter to PC receiver.
+
+Both sides use Host 1 for the UNO, Host 2 for the PC, and Wire 1. UNO segment
+payloads are at most 24 bytes, and its receive window is backed by two
+caller-owned packet slots.
+
+Build and flash the test firmware:
+
+```sh
+make bits-ram-transfer
+make flash-bits PORT=/dev/arduino-uno
+```
+
+Run a deterministic 128-byte round trip:
+
+```sh
+make verify-bits PORT=/dev/arduino-uno
+```
+
+The PC tool also accepts exact file or hexadecimal input and generated objects
+from 1 through 256 bytes:
+
+```sh
+PYTHONPATH=../../tools/python python3 -m wirespaces.bits_ram_transfer \
+    --port /dev/arduino-uno --file image.bin
+
+PYTHONPATH=../../tools/python python3 -m wirespaces.bits_ram_transfer \
+    --port /dev/arduino-uno --hex "00 7e 7d ff 01"
+
+PYTHONPATH=../../tools/python python3 -m wirespaces.bits_ram_transfer \
+    --port /dev/arduino-uno --size 256 --seed 0x1234
+```
+
+Run the PC Compact BITS state-machine tests without hardware:
+
+```sh
+make test-bits
+```
+
+## BITS constrained receiver RAM test
+
+The `bits_boot_profile_ram` firmware is the receiver-only precursor to the
+4 KB bootloader. It directly composes the synchronous, one-window Compact BITS
+engine with WireSpaces headers and UART HDLC. It does not link `Dispatcher`,
+`Router`, queued ingress, timers, or a BITS transmitter.
+
+Build and check both size gates:
+
+```sh
+make bits-boot-profile-ram
+make bits-boot-profile-size
+```
+
+The first image contains the complete hardware-test instrumentation and must
+remain at or below 4,096 bytes. The second removes RAM-pattern verification but
+retains a minimal user-datagram service; it must remain at or below 3,350 bytes
+before board-specific flash code is added. Both targets write ELF and map files
+under `build/boot_profile/`.
+
+Flash the hardware-test image through PICkit 5 and run
+the PC test:
+
+```sh
+make flash-bits-boot-profile PORT=/dev/arduino-uno
+make test-bits-boot-profile PORT=/dev/arduino-uno
+```
+
+The test verifies an exact BITS user-datagram echo, transfers a 256-byte object
+where `data[i] == uint8_t(i)`, and repeats with 251 bytes to exercise a partial
+final segment. The Arduino stores each object in RAM and returns its validation
+result in a BITS user datagram.
+
+
+## Planned WireSpaces demo
+
+* 4-6 statically allocated packet buffers, sized to hold up to N=4 CAN PDUA payloads (the common upper bound for WS small packet size widespread compatibility)

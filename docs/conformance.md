@@ -27,7 +27,7 @@ Useful vectors:
 - congestion/send-result behavior;
 - Link telemetry snapshot examples.
 
-This helps prevent software and RTL implementations from quietly becoming different dialects. The simulator MVP should implement a subset of these vectors; see `code/sim_rfp.md`.
+This helps prevent software and RTL implementations from quietly becoming different dialects. The simulator MVP should implement a subset of these vectors; see the [simulator README](../sim/README.md).
 
 One check is not a vector at all but belongs with them. Because the Endpoint API is a portability contract rather than an implementation detail (`SVC-9`), the strongest test of it is to **compile one unmodified Service against two implementations** and run the same behavioral cases against both. Golden vectors verify that implementations agree on bytes; only this verifies that they agree on the surface Services are written against. It is worth doing as soon as a second implementation exists, since API divergence is cheap to fix early and expensive once Services depend on it.
 

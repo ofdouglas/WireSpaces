@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=../wiring.schema.json
+# Topology only: no endpoints or authorization policy.
+# CAN rates are illustrative: confirm arbitration/data timing for the actual system.
+Hosts:
+  - Name: Autonomy
+    HostId: 1
+    Interfaces: [PlantEthernet]
+  - Name: Motion
+    HostId: 2
+    Interfaces: [PlantEthernet, ChassisCan]
+  - Name: Safety
+    HostId: 3
+    Interfaces: [ChassisCan]
+  - Name: Payload
+    HostId: 4
+    Interfaces: [PlantEthernet, PayloadCan]
+  - Name: Bms
+    HostId: 5
+    Interfaces: [ChassisCan, ChargeCan]
+  - Name: SensorIo
+    HostId: 6
+    Interfaces: [ChassisCan]
+  - Name: Lift
+    HostId: 7
+    Interfaces: [PayloadCan]
+  - Name: Gripper
+    HostId: 8
+    Interfaces: [PayloadCan]
+  - Name: ChargeInterface
+    HostId: 9
+    Interfaces: [ChargeCan]
+
+Links:
+  - {Name: PlantEthernet, LinkType: ETHERNET}
+  - {Name: ChassisCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: PayloadCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+  - {Name: ChargeCan, LinkType: CAN_FD, ArbitrationBitrate: 500000, DataBitrate: 2000000}
+
+Groups:
+  PayloadDevices: [Lift, Gripper]
+  PlatformHosts: [Autonomy, Motion, Safety, Payload, Bms, SensorIo, Lift, Gripper, ChargeInterface]
+
+Wires:
+  - Name: Plant
+    WireId: 10
+    Hosts: [Autonomy, Motion, Payload]
+  - Name: SafetyControl
+    WireId: 20
+    Hosts: [Motion, Safety, Payload]
+  - Name: Power
+    WireId: 30
+    Hosts: [Motion, Payload, Bms, Autonomy]
+  - Name: Bumper
+    WireId: 40
+    Hosts: [Motion, Safety, SensorIo, Autonomy]
+  - Name: NavSense
+    WireId: 50
+    Hosts: [Autonomy, SensorIo, Motion]
+  - Name: PayloadAct
+    WireId: 60
+    Hosts: [Payload]
+    Groups: [PayloadDevices]
+  - Name: Charge
+    WireId: 70
+    Hosts: [Bms, ChargeInterface]
+  - Name: Platform
+    WireId: 80
+    Groups: [PlatformHosts]

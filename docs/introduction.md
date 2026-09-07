@@ -341,7 +341,7 @@ Only after the above exist should the project freeze more advanced details such 
 
 Agents should produce **small concrete reference implementations and tests**, not generalized framework hierarchies, unless the same abstraction is already demanded by more than one real Link/target.
 
-The current implementation state lives in `code/sim/`, which is at step 0: a process shell with a no-op network seam.
+The current implementation state lives in `sim/`, which is at step 0: a process shell with a no-op network seam.
 
 ---
 

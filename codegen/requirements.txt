@@ -1,0 +1,5 @@
+# Reproducible host-side compiler dependencies; no firmware dependencies.
+PyYAML==6.0.2
+networkx==3.6.1
+pydantic==2.12.5
+jsonschema==4.25.1

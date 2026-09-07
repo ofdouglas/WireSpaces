@@ -66,7 +66,7 @@ class RealizationTest(unittest.TestCase):
     def test_all_durable_examples_match_editor_schema(self):
         validator = Draft202012Validator(deployment_json_schema())
         paths = list((ROOT / "examples").glob("*.yaml")) + [ROOT / "demo.yaml",
-            ROOT.parent / "examples/arduino-uno/demo.yaml", ROOT.parent / "hardware/bench/topology.yaml"]
+            ROOT.parent / "examples/arduino-uno/demo.yaml", ROOT.parent.parent / "ws-hardware/libraries/legacy/bench/topology.yaml"]
         for path in paths:
             with self.subTest(path=path):
                 modeline = path.read_text().splitlines()[0]

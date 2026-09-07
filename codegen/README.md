@@ -253,7 +253,7 @@ or authorization policies.
 
 Inspect resolution without generating C++:
 
-    codegen/.venv/bin/python codegen/wiring_codegen.py hardware/bench/topology.yaml --local-host Gateway --explain
+    codegen/.venv/bin/python codegen/wiring_codegen.py ../ws-hardware/libraries/legacy/bench/topology.yaml --local-host Gateway --explain
 
 The deterministic JSON includes all hosts' egress assignments and memberships,
 expanded Wire members, transit hosts, selected interface attachments, and route
@@ -264,7 +264,7 @@ zero mask is local-only. --explain cannot be combined with --output.
 
 - codegen/demo.yaml: standalone inferred two-host UART example.
 - examples/arduino-uno/demo.yaml: application-owned deployment used by its Makefile.
-- hardware/bench/topology.yaml: all seven planned PCB Links, including two shared CAN-FD
+- ../ws-hardware/libraries/legacy/bench/topology.yaml: all seven planned PCB Links, including two shared CAN-FD
   buses, UART multidrop and three ring Links. LongBenchPath deliberately travels
   through Gateway, LeafA, and LeafB to LeafC. Other test Wires exercise the other
   Links using explicit selections. UART rates are example settings, not hardware
@@ -432,3 +432,5 @@ declarations, preserve YAML comments/order/shorthand, show compiler diagnostics
 before writes and offer a reviewed diff/undo. Derived routes must never become
 the editable source. Device/domain grouping and read-only observation semantics
 need explicit decisions first; see the deployment studies.
+
+The bench fixture moved to the sibling ws-hardware repository; these examples and bench-fixture tests require both repositories checked out side by side.

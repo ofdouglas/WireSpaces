@@ -8,6 +8,18 @@ Cross-references use document codes. Section numbers in older entries refer to l
 
 ---
 
+# Revision 0.15 — Host terminology, Transport Entity boundaries, and unified CAN11 VCN
+
+The main set now uses Host, HostId, SrcHostId, and DestHostId for the existing deployment-scoped Endpoint Domain identity. This does not change the provisional six-byte canonical descriptor. Older revision narratives and proposal filenames retain their original terminology.
+
+An Endpoint exposes one Transport Entity boundary with one or more declared bounded ingress elements. Simple datagram Endpoints retain one Queue or Snapshot. Receive acceptance may classify and retain data; protocol state transitions and Service callbacks run later. Copies remain the baseline, while explicit ownership or immutable leases may preserve retained references. This adopts the boundary needed by the BITS proposal without standardizing its detailed protocol, API, or TransportType allocation.
+
+CAN11 now uses unified VCN + Direction with Guest and Native encodings. The preferred Native budget is QoS2/WireAlias3/VCN5/Direction1. Each alias selects one Wire and immutable map; several aliases may represent overlapping Wires or coexist during migration. TX selection is explicit and unique. Spare-alias migration requires receiver readiness, pinned accepted work, and stale-frame exclusion before retirement/reuse. The default two-Main map reserves VCN3 for control; Guest meanings are deployment-wide and widen without renumbering existing default entries. Native VCN8 and Compact/General are removed from the baseline; Compact/General remains experimental.
+
+`proposal_disposition.md` records the disposition of all eight current proposals. Exact CAN profile details and migration management, commissioning identity, and detailed BITS integration remain open in `REG`. Implementation guidance and baseline conformance expectations follow the revised CAN11 direction; this revision does not claim code implementation.
+
+---
+
 # Revision 0.14 — Participant identity, Logical Buses, and revised CAN11 profiles
 
 Revision 6 and its accepted CAN11 refinement replaced the canonical Origin/Node architecture. Every independently routed Endpoint Domain now has one deployment-scoped `ParticipantId`, used on every Wire it joins. Canonical `Origin`, `Node`, `NodeId`, and `Direction` are retired; the ordinary PDU instead carries canonical source and destination Participant identity, and multiple Participants may independently source traffic on one Wire. `Direction` survives only where a constrained Link profile uses it to reconstruct source and destination and has no canonical request/reply or authority meaning.

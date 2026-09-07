@@ -50,8 +50,8 @@ The preferred ordinary canonical descriptor is **48 bits / 6 bytes**:
 ```text
 byte 0      Control
 byte 1      WireNumber
-byte 2      SrcParticipantId
-byte 3      DestParticipantId
+byte 2      SrcHostId
+byte 3      DestHostId
 bytes 4..5  Endpoint, little-endian
 ```
 
@@ -65,8 +65,8 @@ Control: 8 bits
     TransportType         3   // bits 2..0
 
 WireNumber                8   // byte 1
-SrcParticipantId          8   // byte 2
-DestParticipantId         8   // byte 3
+SrcHostId          8   // byte 2
+DestHostId         8   // byte 3
 
 Endpoint: 16 bits, serialized little-endian in bytes 4..5
     Namespace             2   // bits 15..14
@@ -104,11 +104,11 @@ endpoint_id           = endpoint & 0x3FFF
 
 The reserved-field check from §1.2 applies to `reserved` before further descriptor interpretation.
 
-This byte-oriented form replaces the former `RoutingWord`. Canonical routing is represented explicitly by `WireNumber`, `SrcParticipantId`, and `DestParticipantId`; there is no canonical `NodeId`, `Direction`, `WireAlias`, or `RoutingWord`.
+This byte-oriented form replaces the former `RoutingWord`. Canonical routing is represented explicitly by `WireNumber`, `SrcHostId`, and `DestHostId`; there is no canonical `NodeId`, `Direction`, `WireAlias`, or `RoutingWord`.
 
 ## 2.1 Provisional width status
 
-The six-byte shape is the preferred implementation direction, not a frozen interoperability allocation. In particular, the 8-bit `WireNumber`, 8-bit participant identifiers, and resulting 14-bit Endpoint Id require validation against a representative topology corpus before freeze.
+The six-byte shape is the preferred implementation direction, not a frozen interoperability allocation. In particular, the 8-bit `WireNumber`, 8-bit host identifiers, and resulting 14-bit Endpoint Id require validation against a representative topology corpus before freeze.
 
 That corpus must include multicore Endpoint Domains, redundant controllers, gateways, multiple constrained buses, overlapping Wires, device-private and debug/platform Wires, local/sentinel reservations, and plausible product growth. The review must record peak consumption, reservation cost, and remaining headroom. Poor headroom reopens the allocation widths; it does not silently introduce aliases or truncation.
 
@@ -118,7 +118,7 @@ That corpus must include multicore Endpoint Domains, redundant controllers, gate
 
 The relationship between canonical `Control` and a Classical CAN `PduControl` is **open and provisional**.
 
-The previous mask-and-OR correspondence is no longer valid: canonical bits 5..4 are now reserved, while `Namespace` is part of the 16-bit Endpoint. CAN11 also reconstructs canonical QoS, Wire, and participant identity from the selected Link Binding and CAN identifier rather than necessarily carrying the canonical descriptor verbatim.
+The previous mask-and-OR correspondence is no longer valid: canonical bits 5..4 are now reserved, while `Namespace` is part of the 16-bit Endpoint. CAN11 also reconstructs canonical QoS, Wire, and host identity from the selected Link Binding and CAN identifier rather than necessarily carrying the canonical descriptor verbatim.
 
 `LINK §2` retains reusable PDUA framing and capacity work, but the following require redesign and revalidation together:
 

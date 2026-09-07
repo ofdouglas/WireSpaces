@@ -2,9 +2,11 @@
 
 Network and messaging stack for hierarchical embedded systems.
 
-A **Wire** is a loop-free **Logical Bus** and propagation domain realized by one or more configured Links. One or more **Participants** may independently source traffic onto it; traffic propagates over the Wire's configured Link topology, and canonical source/destination identity controls who authored and who accepts a PDU rather than selecting an ordinary forwarding path.
+A **Host** is an independently routed and dispatchable Endpoint Domain; a physical device may contain several Hosts.
 
-Each Endpoint Domain has one deployment-scoped `ParticipantId`, used on every Wire it joins. The canonical PDU carries `SrcParticipantId` and `DestParticipantId`; forwarding is driven by static/read-mostly Wire membership. Constrained Links may elide or project fields when their Link Binding and frame context reconstruct the same canonical Wire, source, and destination.
+A **Wire** is a loop-free **Logical Bus** and propagation domain realized by one or more configured Links. One or more **Hosts** may independently source traffic onto it; traffic propagates over the Wire's configured Link topology, and canonical source/destination identity controls who authored and who accepts a PDU rather than selecting an ordinary forwarding path.
+
+Each Endpoint Domain has one deployment-scoped `HostId`, used on every Wire it joins. The canonical PDU carries `SrcHostId` and `DestHostId`; forwarding is driven by static/read-mostly Wire membership. Constrained Links may elide or project fields when their Link Binding and frame context reconstruct the same canonical Wire, source, and destination.
 
 The same Endpoint and Service model is meant to survive whether a Wire is realized inside one device, as a shared-memory channel between cores, across a CAN bus, over Ethernet, or through an FPGA datapath.
 
@@ -19,7 +21,7 @@ Read in this order if you are new to the project:
 | Document | What it covers |
 |---|---|
 | [introduction.md](introduction.md) | What WireSpaces is and why. Non-goals, maturity ladder, worked examples, roadmap |
-| [core_architecture.md](core_architecture.md) | **The main document.** The protocol model and Participant runtime — everything meant to be buildable now |
+| [core_architecture.md](core_architecture.md) | **The main document.** The protocol model and Host runtime — everything meant to be buildable now |
 | [bit_layout.md](bit_layout.md) | Byte and bit ordering conventions, and canonical descriptor packing |
 | [link_profiles.md](link_profiles.md) | Per-carrier encodings: Classical CAN, UART, Ethernet, I2C/SPI, and others |
 | [deployment.md](deployment.md) | Discovery, commissioning, Wiring, host tooling |
@@ -32,6 +34,7 @@ Read in this order if you are new to the project:
 
 Other material:
 
+- [proposal_disposition.md](proposal_disposition.md) (`INTEGRATION`) — source-by-source integration status and remaining decisions
 - [`archive/`](archive/) — superseded specifications and adopted decision records (provenance only; not normative)
   - [`decision-bounded-endpoint-delivery.md`](archive/decision-bounded-endpoint-delivery.md) — revision 0.9 delivery-model decision record (detail beyond `HIST §4.2`)
 - [`notes/can_id_provisioning.md`](notes/can_id_provisioning.md) — CAN commissioning / identifier working notes (not yet in `LINK` / `DEPLOY`)
@@ -64,5 +67,5 @@ If you are generating code or designs from these documents:
 3. The invariants in `architecture_register.md §4` are the constraints most worth checking work against.
 4. Use `conformance.md` for test vectors and boundary cases; use `implementation.md` for language and scaling choices.
 5. Prefer small concrete implementations and tests over generalized framework hierarchies. Do not introduce an abstraction until two real Links or targets need it.
-6. Nothing in `archive/` is current.
+6. Nothing in `archive/` is current. `proposed/` files are provenance/design input; consult `proposal_disposition.md` and `REG` for incorporation status.
 7. `LIB §12.1` rejects ambient sibling `Design/Firmware` include paths and recommends a reproducible vendored extraction with recorded provenance for phase 1; the final core-library location remains open.

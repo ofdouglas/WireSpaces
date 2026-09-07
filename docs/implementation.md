@@ -38,11 +38,11 @@ Advanced table synchronization arrives only after a measured runtime-reconfigura
 
 # 2. Implementation Scaling Profiles
 
-The same canonical Participant/Wire/Endpoint architecture should scale through substantially different implementations:
+The same canonical Host/Wire/Endpoint architecture should scale through substantially different implementations:
 
-- **Tiny bare-metal MCU:** one local Participant, one Link, canonical `kLocalBus` or one named Wire, direct participant representation where possible, copy storage, linear/switch Endpoint dispatch, and no locks.
-- **Normal single-core MCU:** one or several locally hosted Participants, fixed Endpoint and Wire-mask tables, copy queues, critical-section producer exclusion where required, and several Services.
-- **Multicore MCU:** several internal Endpoint Domains with distinct Participant IDs, shared-memory Links, per-Endpoint storage, generated Wire membership, and explicitly measured concurrent routing/dispatch.
+- **Tiny bare-metal MCU:** one local Host, one Link, canonical `kLocalBus` or one named Wire, direct host representation where possible, copy storage, linear/switch Endpoint dispatch, and no locks.
+- **Normal single-core MCU:** one or several locally hosted Hosts, fixed Endpoint and Wire-mask tables, copy queues, critical-section producer exclusion where required, and several Services.
+- **Multicore MCU:** several internal Endpoint Domains with distinct Host IDs, shared-memory Links, per-Endpoint storage, generated Wire membership, and explicitly measured concurrent routing/dispatch.
 - **Embedded gateway:** many Link tasks, immutable/read-mostly `Wire -> LinkMask` or `(Wire, ingress) -> EgressMask` tables, direct forwarding, profile-specific VCN/projection state below the canonical Router, and optional zero-copy only where measurements justify it.
 - **Host PC:** conventional threads and queues with the same canonical semantics; maps are acceptable, but optimization waits for evidence.
 - **FPGA softcore:** generated tables, DMA/FIFOs, bounded VCN/projection lookup, and potentially zero-copy payload movement.
@@ -70,12 +70,12 @@ A typical ingress execution is:
 ```text
 Link driver receives carrier unit
     -> profile LLL validates and reconstructs canonical
-       {Wire, SrcParticipant, DestParticipant, Endpoint}
+       {Wire, SrcHost, DestHost, Endpoint}
     -> optional semantically equivalent early destination filter
     -> Router selects egress Link mask from Wire plus ingress
     -> ForwardingEngine preserves canonical values on every egress
-    -> Dispatcher selects directed local Participant, or fans broadcast out
-       to all matching local Participant/Endpoint bindings
+    -> Dispatcher selects directed local Host, or fans broadcast out
+       to all matching local Host/Endpoint bindings
 ```
 
 A typical egress execution is:
@@ -85,10 +85,10 @@ Service submits canonical PDU
     -> Wire-mask forwarding selects each egress Link
     -> each egress LLL independently checks its profile binding
     -> representable values are encoded
-    -> unrepresentable Wire/Participant/profile combinations are rejected
+    -> unrepresentable Wire/Host/profile combinations are rejected
 ```
 
-The generic Router never examines VCNs, participant projection, or profile-local CAN codes. Those exist entirely inside the ingress canonicalizer, egress encoder, and their static profile configuration.
+The generic Router never examines VCNs, host projection, or profile-local CAN codes. Those exist entirely inside the ingress canonicalizer, egress encoder, and their static profile configuration.
 
 Execution measurements must cover both superloop orderings identified by `LIB §11`: service Links before draining Endpoints, and drain Endpoints before servicing Links. For RTOS targets, measure Link-task/Service-task handoff and prove the configured exclusion rules rather than assuming the host threading model carries over.
 
@@ -112,12 +112,14 @@ Report actual ROM and RAM separately, including route keys, local-delivery/splic
 
 CAN11 profile accounting must distinguish:
 
-- direct Native Participant-Compressed, with no projection table;
-- projected Native Participant-Compressed, including bounded code-to-Participant data;
-- Native VCN, including bounded `VCN -> {ParticipantA, ParticipantB}` data;
-- Guest VCN, including allocation and fixed-QoS configuration.
+- Guest4 VCN, including the allocated block, fixed QoS, and deployment-wide relationship definition;
+- prospective Guest5/Guest6 growth profiles, preserving existing default-map meanings;
+- Native VCN with the default map and explicit Host role bindings;
+- Native VCN with custom maps, multiple Wire aliases, deterministic TX selection, and migration headroom.
 
-For each, report profile codec flash, constant data/ROM, mutable RAM, worst-case stack, lookup time, configured entry capacity, and unused-capacity cost. Measure VCN cost against communication-graph edges and projection cost against represented Participants. Do not choose a canonical VCN/projection storage ABI, fingerprint scheme, or atomic activation design merely to make the spreadsheet concrete; compare candidate representations behind the Link-profile seam.
+For each, report profile codec flash, constant data/ROM, mutable RAM, worst-case stack, lookup time, configured entry capacity, and unused-capacity cost. Measure VCN cost against communication-graph edges and alias cost against active Wire/map bindings, including spare aliases for migration. Compare candidate representations behind the Link-profile seam; table ABI, fingerprints, and the complete migration protocol remain open (`LINK §2.14`).
+
+Compact/General Host compression may be measured as an experimental alternative. Reintroducing it into the baseline requires a demonstrated material resource or complexity advantage over unified VCN on representative deployments.
 
 ---
 
@@ -126,12 +128,11 @@ For each, report profile codec flash, constant data/ROM, mutable RAM, worst-case
 Maintain reproducible build profiles that differ by one feature at a time. At minimum measure:
 
 - canonical descriptor codec only;
-- direct CAN11 participant-compressed ingress/egress;
-- projected participant-compressed;
-- Native VCN;
-- Guest VCN;
+- Guest4 VCN ingress/egress, with Guest5/Guest6 candidate growth comparisons;
+- Native VCN using default and custom maps;
+- one versus several Native aliases, including overlapping receive bindings and unique TX selection;
 - forwarding disabled, dense Wire-mask forwarding, and ingress-specific forwarding;
-- one local Participant versus several local Participants with broadcast fanout;
+- one local Host versus several local Hosts with broadcast fanout;
 - software destination filtering versus available hardware filtering.
 
 For every profile, capture:
@@ -147,7 +148,7 @@ hardware acceptance filters consumed
 false-positive frames admitted by coarse hardware filters
 ```
 
-CAN filter measurements are profile-specific. Guest VCN should record filters needed for its allocated contiguous block. Native VCN and Participant-Compressed should record whether QoS/address layouts can be covered by available masks without admitting excessive unrelated traffic. A filter count unsupported by the selected controller is a deployment cost, not a reason to change canonical semantics.
+CAN filter measurements are profile-specific. Guest VCN should record filters needed for its allocated contiguous block. Native VCN should record whether QoS/alias/VCN layouts can be covered by available masks without admitting excessive unrelated traffic. A filter count unsupported by the selected controller is a deployment cost, not a reason to change canonical semantics.
 
 Early destination filtering is an optimization, not destination routing. Compare no early filter, software filter immediately after profile decode, and hardware/RTL filtering where available. Verify identical accepted traffic and forwarding behavior, then report CPU time, interrupt rate, queue pressure, and any extra filter resources. Directed traffic not accepted locally may still require transparent forwarding on other Wire links.
 
@@ -155,7 +156,7 @@ Early destination filtering is an optimization, not destination routing. Compare
 
 # 6. Topology Corpus and Provisional Widths
 
-Before freezing `ParticipantId`, provisional `WireNumber`, or the current preferred six-byte descriptor layout, run a representative topology corpus containing:
+Before freezing `HostId`, provisional `WireNumber`, or the current preferred six-byte descriptor layout, run a representative topology corpus containing:
 
 - multicore/internal Endpoint Domains;
 - redundant controllers;
@@ -165,7 +166,7 @@ Before freezing `ParticipantId`, provisional `WireNumber`, or the current prefer
 - sentinel/reserved allocations;
 - plausible product variants and growth.
 
-For every case record peak Participant IDs, peak Wire numbers, reserved/private allocation cost, maximum Links per Wire, local Participant fanout, CAN11 VCN edge count, projection entry count, and remaining margin. Include cases that do not fit CAN11 cleanly; the corpus is meant to expose crossovers, not prove the preferred widths by construction.
+For every case record peak Host IDs, peak Wire numbers, reserved/private allocation cost, maximum Links per Wire, local Host fanout, CAN11 VCN edge count per alias, active and spare alias counts, Guest growth needs, and remaining margin. Include cases that do not fit CAN11 cleanly; the corpus is meant to expose crossovers, not prove the preferred widths by construction.
 
 The 8-bit identity choices and six-byte layout are current preferred provisional implementation inputs. Tests may pin current encoding for regression, but documentation, APIs, and generated artifacts must not describe them as interoperability-frozen until corpus and profile evidence is reviewed.
 
@@ -178,15 +179,16 @@ CAN29 is the expected richer CAN option, but its final representation is not def
 Record the crossover using:
 
 - number of canonical Wires required on one physical CAN bus;
-- number and shape of participant communication edges;
-- VCN and projection ROM/RAM;
+- number and shape of host communication edges;
+- VCN-map, alias-binding, and TX-selection ROM/RAM;
+- spare-alias capacity and migration state;
 - profile codec flash and execution time;
 - hardware filter consumption and false positives;
 - CAN payload bytes lost to profile metadata and resulting fragmentation;
 - configuration entries and generated-data size;
 - deployment cases rejected as unrepresentable.
 
-Evidence should compare at least direct CAN11, projected CAN11, VCN CAN11, and a candidate CAN29 representation on the same topology/traffic corpus. Prefer CAN29 when several Wires must share one physical bus, compact/general graph constraints fit poorly, VCN/configuration state becomes awkward, filter pressure is material, or the richer identifier measurably improves payload efficiency. These are crossover criteria, not a normative CAN29 bit allocation.
+Evidence should compare Guest VCN, default-map and custom-map Native VCN, and a candidate CAN29 representation on the same topology/traffic corpus. Native CAN11 already permits several Wires on one bus. Prefer CAN29 when alias or per-map VCN limits, migration headroom, configuration cost, filter pressure, or payload efficiency justify the richer identifier. Compact/General comparisons remain optional experiments. These are crossover criteria, not a normative CAN29 bit allocation.
 
 ---
 

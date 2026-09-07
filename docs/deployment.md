@@ -14,13 +14,13 @@ WireSpaces should support both explicitly configured deployment and very low-con
 
 ## 1.1 Organizer
 
-A host-side **Organizer** is a temporary/explicit configuration authority. It is not a permanent participant role and does not become part of canonical Wire forwarding.
+A host-side **Organizer** is a temporary/explicit configuration authority. It is not a permanent host role and does not become part of canonical Wire forwarding.
 
 An Organizer may:
 
 - discover devices;
 - read stable identity;
-- assign one deployment-scoped ParticipantId to each Endpoint Domain;
+- assign one deployment-scoped HostId to each Endpoint Domain;
 - enumerate gateway Link Interfaces;
 - inspect Link capabilities;
 - assign WireNumbers and define each Wire's member Links;
@@ -31,7 +31,7 @@ An Organizer may:
 - inspect active configuration;
 - export discovered Wiring as a candidate static configuration.
 
-The Organizer runs the graph/configuration algorithm. Embedded Participants execute the resulting bounded local state.
+The Organizer runs the graph/configuration algorithm. Embedded Hosts execute the resulting bounded local state.
 
 Official project tools should initially be simple and conservative: explicit validation, bounded topology assumptions, obvious errors over clever inference, ephemeral development configuration, and export to static configuration. They should not attempt to become a general distributed routing protocol.
 
@@ -39,24 +39,24 @@ All of the operations above are privileged (`CORE §22`).
 
 ## 1.2 Pre-addressing bootstrap
 
-Shared media such as CAN cannot enumerate unconfigured Participants by normal application traffic. Commissioning uses four phases (`REG §2.1`):
+Shared media such as CAN cannot enumerate unconfigured Hosts by normal application traffic. Commissioning uses four phases (`REG §2.1`):
 
 ```text
-Unconfigured   Link commissioning control only; no ordinary ParticipantId source
+Unconfigured   Link commissioning control only; no ordinary HostId source
 Selected       exactly one physical instance addressable for commissioning
 Staged         configuration prepared, not yet active
 Committed      ordinary Endpoint and Wire semantics enabled
 ```
 
-Collision-avoidance encoding is Link-profile-specific and not frozen. Three rules are not negotiable:
+Collision-avoidance encoding is Link-profile-specific and not frozen. The anonymous identical-response/prefix-search proposal is a candidate; its historical identifier layout and 64-bit DeviceId choice are not adopted. Native alias/VCN control space and Guest control behavior must be specified independently of ordinary custom maps. Three rules are not negotiable:
 
-- **Below Wire semantics.** Commissioning uses reserved Link-control space (`LINK §2.15`), not application traffic. `Unconfigured` Participants emit **no ordinary Service traffic** (`CFG-11`).
+- **Below Wire semantics.** Commissioning uses reserved Link-control space (`LINK §2.15`), not application traffic. `Unconfigured` Hosts emit **no ordinary Service traffic** (`CFG-11`).
 - **`Selected` before `Staged`.** Selection resolves arbitration (one addressable instance); staging validates the full set before activation.
-- **Transmit ownership in every phase.** One owner per identifier/time slot always (`LINK-10`). On CAN, two simultaneous unconfigured replies can corrupt unrelated traffic.
+- **Transmit ownership in every phase.** Ordinary identifiers have one physical transmitter (`LINK-10`). Any future shared anonymous response must be an explicitly defined identical-bitstream exception, including frame type, identifier, DLC/data, timing, and controller behavior. Same identifier alone is insufficient; differing responses can corrupt traffic. The exception remains unvalidated and cannot be assumed by a production profile.
 
 ## 1.3 Recursive discovery through gateways
 
-A host may discover a gateway on an upstream Wire, ask that gateway to enumerate/manage a downstream Link, then repeat. This enables centralized configuration of a physical hierarchy without requiring every Participant to run distributed routing algorithms.
+A host may discover a gateway on an upstream Wire, ask that gateway to enumerate/manage a downstream Link, then repeat. This enables centralized configuration of a physical hierarchy without requiring every Host to run distributed routing algorithms.
 
 What each gateway must report for this to work is §1.10.
 
@@ -66,7 +66,7 @@ Auto-Wiring should produce ordinary static/read-mostly runtime forwarding tables
 
 ```text
 discover topology
-    -> assign ParticipantIds and name Wires
+    -> assign HostIds and name Wires
     -> define Wire member Links and Link-local representations
     -> validate capabilities/loops/scopes/splices
     -> generate local propagation tables
@@ -78,38 +78,38 @@ This is **dynamic configuration of a static data plane**, not continuously conve
 
 The distinction is load-bearing. A gateway never infers a route from observed traffic, and never installs one to repair a gap it noticed; it reports local facts and the Organizer decides (§1.10).
 
-Each configured Wire is a loop-free Logical Bus. Generated propagation state follows the Wire's member-Link topology; canonical destination controls Participant acceptance rather than ordinary next-hop selection. Several Wires may overlap on the same Links, while remaining distinct propagation scopes with independent masks or ingress/egress matrices.
+Each configured Wire is a loop-free Logical Bus. Generated propagation state follows the Wire's member-Link topology; canonical destination controls Host acceptance rather than ordinary next-hop selection. Several Wires may overlap on the same Links, while remaining distinct propagation scopes with independent masks or ingress/egress matrices.
 
 ## 1.5 Static configuration is optional
 
 A small/simple system may redo discovery/configuration every boot indefinitely. Exporting to a static Manifest is useful for repeatability and serious deployment, but is not a prerequisite to using WireSpaces successfully.
 
-## 1.6 ParticipantId allocation
+## 1.6 HostId allocation
 
-Every independently routed/dispatchable Endpoint Domain has exactly one ParticipantId within a deployment identity universe. Distinct Endpoint Domains have distinct Participant IDs, and one Endpoint Domain uses the same ParticipantId on every Wire it joins.
+Every independently routed/dispatchable Endpoint Domain has exactly one HostId within a deployment identity universe. Distinct Endpoint Domains have distinct Host IDs, and one Endpoint Domain uses the same HostId on every Wire it joins.
 
-ParticipantId is a deployment role identity, not a physical-device identity. Replacement hardware may therefore take over the same assigned role, while a device containing several Endpoint Domains receives one ParticipantId for each domain. The current preferred provisional 8-bit allocation, pending the representative topology/headroom corpus, assigns `0x00..0xFE` to ordinary Participants and `0xFF` to the canonical broadcast destination; `0xFF` remains invalid as a source.
+HostId is a deployment role identity, not a physical-device identity. Replacement hardware may therefore take over the same assigned role, while a device containing several Endpoint Domains receives one HostId for each domain. The current preferred provisional 8-bit allocation, pending the representative topology/headroom corpus, assigns `0x00..0xFE` to ordinary Hosts and `0xFF` to the canonical broadcast destination; `0xFF` remains invalid as a source.
 
-Wiring and generated bindings express canonical `SrcParticipantId` and `DestParticipantId`; they do not assign permanent controller/leaf routing roles. A constrained profile's Direction field is Link-local reconstruction state only.
+Wiring and generated bindings express canonical `SrcHostId` and `DestHostId`; they do not assign permanent controller/leaf routing roles. A constrained profile's Direction field is Link-local reconstruction state only.
 
 ## 1.7 Stable device identity
 
-A 128-bit UUID is a useful device identity for tooling/history. It is separate from:
+A 128-bit UUID is the current tooling identity direction. The provisioning proposal instead uses a permanent 64-bit DeviceId; that conflict remains open (`REG §6.10`) and neither value is a HostId. Do not silently narrow a UUID or claim the provisioning choice is settled. A stable device identity provides continuity for tooling/history. It is separate from:
 
 ```text
 WireNumber
-ParticipantId
+HostId
 Endpoint
 current topology
 ```
 
-Tooling can therefore remember physical continuity across Participant-role replacement or reassignment. Wire UUIDs and names exist for the same reason (`CORE §4.1`).
+Tooling can therefore remember physical continuity across Host-role replacement or reassignment. Wire UUIDs and names exist for the same reason (`CORE §4.1`).
 
 ## 1.8 Identity universes and splices
 
-Plain forwarding never merges independently assigned ParticipantId universes. A Wire spanning several Links assumes one coordinated canonical identity universe; interconnecting separately engineered systems requires coordinated ParticipantId assignment, explicit identity translation, or a composition/application gateway boundary.
+Plain forwarding never merges independently assigned HostId universes. A Wire spanning several Links assumes one coordinated canonical identity universe; interconnecting separately engineered systems requires coordinated HostId assignment, explicit identity translation, or a composition/application gateway boundary.
 
-A splice is an explicit configured Wire-scope projection. It preserves canonical source, destination, Endpoint, applicable control metadata/extensions, and payload while deliberately changing Wire scope. It does not silently resolve ParticipantId collisions between identity universes.
+A splice is an explicit configured Wire-scope projection. It preserves canonical source, destination, Endpoint, applicable control metadata/extensions, and payload while deliberately changing Wire scope. It does not silently resolve HostId collisions between identity universes.
 
 ## 1.9 Ephemeral configuration must announce itself
 
@@ -139,7 +139,7 @@ This makes strong static configuration a natural maturation path — Level 1 to 
 
 ## 1.10 Gateway discovery reporting
 
-A gateway is a Participant with two or more WS-capable Link Interfaces and the ability to propagate Wire traffic between them. Its discovery response should carry enough for host tooling to continue mapping outward without guessing.
+A gateway is a Host with two or more WS-capable Link Interfaces and the ability to propagate Wire traffic between them. Its discovery response should carry enough for host tooling to continue mapping outward without guessing.
 
 At minimum:
 
@@ -155,7 +155,7 @@ Usefully also:
 per-interface Link/profile type and Link state
 per-interface Link capabilities (CORE §17)
 existing forwarding and splice configuration
-observed Participants on each interface
+observed Hosts on each interface
 ```
 
 Reporting **current Wire membership per interface** is what makes the loop-free Logical-Bus rule enforceable: the host can see that an interface already carries Wire 42 and therefore refuse a configuration that propagates Wire 42 back into itself. Without it, a host performing recursive discovery (§1.3) cannot distinguish an unconfigured branch from one it has already wired.
@@ -170,11 +170,11 @@ A future Wiring/Manifest format can capture deploy-time facts such as:
 
 - Physical Links and Link Interfaces;
 - Link profiles and capabilities;
-- Endpoint Domains and their deployment-scoped ParticipantIds;
+- Endpoint Domains and their deployment-scoped HostIds;
 - WireNumbers and Wire member Links;
 - loop-free propagation topology, including overlapping Wires;
 - canonical source/destination Endpoint bindings;
-- Link-local elision or participant-projection maps;
+- Link-local elision or host-projection maps;
 - Wire splices;
 - gateway Wire-to-Link masks or ingress/egress matrices;
 - Service placement and TX bindings;
@@ -198,7 +198,7 @@ Three uses, in order of near-term value:
 
 Static prevention is the preferred mechanism for serious deployments, rather than relying on runtime backpressure as a steady-state scheduler (`CORE §15.2`).
 
-The intended shape is that Services declare conservative traffic claims (`CORE §21.2`), tooling projects them across configured Wires and Links, and obvious saturation is caught before installation. Polling cadence on master-initiated Links must be included, because it bounds a Participant's effective TX rate (`CORE §1.7`).
+The intended shape is that Services declare conservative traffic claims (`CORE §21.2`), tooling projects them across configured Wires and Links, and obvious saturation is caught before installation. Polling cadence on master-initiated Links must be included, because it bounds a Host's effective TX rate (`CORE §1.7`).
 
 The analysis method itself is undesigned; early value comes from catching impossible deployments, not from proving timing theorems. See `FUTURE §4`.
 
@@ -209,9 +209,9 @@ Tooling extends `CORE §19.1`: it sees the whole deployment and should reject co
 **Wires and Endpoints**
 
 ```text
-a Wire with no member Link or Participant
-an Endpoint referenced for a Participant that does not host it
-two producer implementations claiming one (ParticipantId, Endpoint)
+a Wire with no member Link or Host
+an Endpoint referenced for a Host that does not host it
+two producer implementations claiming one (HostId, Endpoint)
 incompatible Endpoint types, schemas, operations, or concurrency models
                                              across the ends of one Wire
 a Service granted a transmit binding it has no authority to use
@@ -220,9 +220,9 @@ a Service granted a transmit binding it has no authority to use
 **Identity and scope**
 
 ```text
-a duplicate ParticipantId anywhere in one deployment identity universe
-one Endpoint Domain assigned different ParticipantIds on different Wires
-a transparently forwarded Wire joining inconsistent ParticipantId universes
+a duplicate HostId anywhere in one deployment identity universe
+one Endpoint Domain assigned different HostIds on different Wires
+a transparently forwarded Wire joining inconsistent HostId universes
 a device-private WireNumber configured to leave its device without a splice
 a splice with a kLocalBus end
 a splice treated as resolving an identity-universe collision
@@ -281,53 +281,62 @@ The coupled-constraint check is the one a generator is most likely to omit — p
 
 Tooling must **not** reject Level 0 systems with no Manifest (`INTRO §6`). `kLocalBus` is nevertheless a canonical reserved WireNumber: it is locally dispatchable, bound to at most one Link Interface in a Router/Endpoint Domain, and is neither transparently forwarded nor spliced as itself.
 
-## 2.4 CAN11 Link Binding configuration
+## 2.4 CAN11 VCN configuration
 
-One CAN11 Link Binding records exactly one Wire and exactly one static profile:
+CAN11 uses the unified VCN model in `LINK §2`. One authoritative deployment source defines Hosts, Wires, Guest relationships, Native alias bindings, and TX selection. Device tables are generated slices, never independently authored map namespaces.
 
-```text
-Guest VCN
-Native VCN
-Native Participant-Compressed
-```
+**Guest** configuration contains one canonical Wire, one bus-owner-reserved aligned CAN-ID block, fixed QoS, an exact profile version, and the applicable slice of the deployment-wide Guest VCN definition. Guest-4 is the initial 16-ID form; Guest-5/6 are growth directions. A Guest VCN has the same Host relationship across the deployment even where Link Bindings supply different Wires. Widening exposes additional default entries without reinterpreting existing ones; actual block changes still require coordinated cutover.
 
-`WireNumber` is reconstructed from the Link Binding and is not represented in the CAN11 frame. Separately suitable bindings, including non-overlapping Guest allocations, may coexist on one physical CAN bus when ingress classification remains unique. Use CAN29 or another richer profile when several WS Wires must share one physical CAN interface without separate suitable bindings, or when VCN or participant-compressed constraints are awkward.
-
-Both VCN profiles configure a bounded map:
+**Native** configuration contains up to eight alias bindings:
 
 ```text
-VCN -> {ParticipantA, ParticipantB}
+WireAlias -> {WireNumber, DefaultMap or ExplicitMap, profile parameters}
 ```
 
-Direction selects the canonical source and destination. A broadcast entry has one Participant and `kBroadcast`, with only the Participant-to-broadcast direction valid. Guest VCN additionally records one contiguous aligned CAN-ID base/range reserved by the bus owner and one fixed canonical QoS. Native VCN carries QoS and supports arbitrary canonical Participant IDs through the VCN map.
+Each alias has one Wire and one immutable map. Several aliases may represent separate Wires or the same Wire during migration. Default maps bind MainA, MainB, and NodeN positions to ordinary HostIds; these are profile positions without authority. Unbound positions remain inactive. Explicit maps name arbitrary modest Host pairs, subject to profile control reservations and uniqueness rules.
 
-Native Participant-Compressed uses the profile's compact/general participant codes. Direct mode maps codes to the same-valued canonical ParticipantIds; optional projection records a bounded Link-local code-to-ParticipantId map. Projection changes representation only, not canonical identity, and does not remove the rule that every ordinary addressed pair include at least one participant in the compact set. The general all-ones code is reserved for broadcast/control according to Direction, not ordinary addressed traffic.
+A separate deterministic TX selection chooses exactly one active alias for each admitted canonical tuple on the interface. The Router does not select aliases. Two RX aliases representing the same tuple are permitted; two competing TX selections are not. No first-match selection, traffic learning, automatic fallback, or double transmission under old and new aliases is allowed.
 
-In addition to the generic checks in §2.3, tooling rejects:
+Tooling rejects, in addition to §2.3:
 
 ```text
-more than one Wire assigned to one CAN11 Link Binding
-no profile, more than one profile, or artifacts naming different profiles
-a VCN whose two participant endpoints are the same
-duplicate VCN entries for the same unordered participant pair
-duplicate broadcast VCNs with the same source Participant
-an addressed pair unrepresentable by the selected static profile/map
-reserved control encodings allocated as ordinary traffic
-Guest CAN-ID base/range that is unaligned, noncontiguous, out of bounds,
-    or not reserved by the bus owner
-Guest transmit QoS different from the binding's fixed QoS
-profile configuration supplied to a different selected profile
+missing, inconsistent, or runtime-inferred profile/version
+ambiguous ingress classification or overlapping Guest allocations
+unaligned, out-of-range, noncontiguous, or unreserved Guest block
+Guest TX QoS differing from the binding's fixed QoS
+conflicting deployment-wide Guest VCN meanings
+an alias selecting more than one Wire or VCN map
+more than eight active Native aliases or out-of-range VCNs
+self-pairs, duplicate unordered pairs, or duplicate broadcast-source
+    entries within one map
+invalid/unbound default positions or two positions assigned one Host
+ordinary use of reserved control or broadcast-source encodings
+unrepresentable Host/Endpoint/Transport/extension combinations
+missing or ambiguous TX selection for an admitted canonical tuple
+in-place mutation of an active alias binding
+live migration without spare-alias capacity or receiver readiness
+retirement/reuse without a proven stale-frame exclusion boundary
 ```
 
-Within one QoS class, Native VCN allocation affects CAN arbitration priority; tooling should expose that order rather than silently assign surprising priority.
+Within a QoS class, alias and VCN values influence CAN arbitration. Tooling displays that ordering and any control-priority limitations. It also reports alias capacity used by migration, not just by steady-state Wires.
+
+### Native alias migration
+
+Prepare a new binding under a spare alias; install and validate it at all affected receivers; then explicitly move sender TX selections. Keep the old binding available until accepted TX and RX/reassembly work is completed or cancelled. A PDU already accepted for transmission retains its selected representation. Retire and reuse an alias only under `LINK §2.14`'s stale-frame exclusion rules.
+
+With no spare alias, live migration is unavailable. Keep the old configuration or use coordinated offline reconfiguration with traffic disabled and queues/reassembly safely drained or discarded. A local reset alone does not establish peer readiness or clear remote traffic.
+
+Alias 0 may initially select `kLocalBus` and the default map, but it is not permanently reserved. Changing that binding follows the same rules; it never transparently promotes or splices LocalBus traffic. Guest has no alias migration mechanism and needs a separately defined coordinated cutover.
+
+This establishes the update boundary. Fingerprint encoding, readiness/commit messages, exact drain/flush timing, reuse limits, and partial-migration recovery remain open.
 
 ## 2.5 Configuration compatibility checking
 
-Generated configuration is distributed across devices, and the pieces have to agree. A device flashed from another generation may otherwise reconstruct a valid-looking Wire, participant pair, profile, or projection and confidently apply the wrong semantics. Every field can be individually valid while the combination is incompatible.
+Generated configuration is distributed across devices, and the pieces have to agree. A device flashed from another generation may otherwise reconstruct a valid-looking Wire, host pair, profile, or projection and confidently apply the wrong semantics. Every field can be individually valid while the combination is incompatible.
 
 **Generated artifacts must therefore make incompatible routing, Endpoint, Link-profile, and representation configuration detectable. A detected incompatibility fails closed or enters an explicitly configured degraded mode.**
 
-The compatibility indication may be a version, digest, fingerprint, or another bounded generated check. A mismatch is reported, not repaired: the device says what it has, the host decides. A Participant that adapts to a peer's configuration has started doing distributed routing (§1.4).
+The compatibility indication may be a version, digest, fingerprint, or another bounded generated check. A mismatch is reported, not repaired: the device says what it has, the host decides. A Host that adapts to a peer's configuration has started doing distributed routing (§1.4).
 
 The exact mechanism, scope, and computation remain open. It never authorizes guessed semantics or a silent fallback.
 
@@ -335,21 +344,17 @@ The exact mechanism, scope, and computation remain open. It never authorizes gue
 
 The same configuration is emitted in very different forms: C++ tables, RTL parameters, a host tool's view of the deployment, generated Python constants. A single deployment may contain all four (`IMPL §2`, `CORE §25`).
 
-> **One authoritative Wiring source generates every participating projection**, and validation rejects projections that disagree about a Wire, a Participant or VCN map, an Endpoint binding, a profile, a bound, or a capability.
+> **One authoritative Wiring source generates every participating projection**, and validation rejects projections that disagree about a Wire, a Host or VCN map, an Endpoint binding, a profile, a bound, or a capability.
 
-Hand-maintaining a second copy of anything in that list is the most reliable way to produce a deployment that is internally inconsistent in a way no single device can detect. The RTL Participant and the firmware Participant each behave exactly as configured; they were simply configured differently. Generating both from one source makes the disagreement a build error instead.
+Hand-maintaining a second copy of anything in that list is the most reliable way to produce a deployment that is internally inconsistent in a way no single device can detect. The RTL Host and the firmware Host each behave exactly as configured; they were simply configured differently. Generating both from one source makes the disagreement a build error instead.
 
 Two artifacts generated from *different revisions* of the same source are the common case in practice, so compatibility checking must apply to generated projections rather than only device identity.
 
-### Later TODO — CAN11 configuration transition
+### Remaining CAN11 configuration-transition work
 
-Before CAN11 configuration compatibility is frozen, specify:
+Native active bindings are immutable and replacements use spare aliases (§2.4). Before profile freeze, specify exact fingerprint coverage, receiver-readiness proof, TX-selector publication, retirement/reuse and stale-frame exclusion, and recovery after interrupted migration. Guest map/block cutover remains separate because Guest has no alias selector.
 
-- exact VCN/projection fingerprint coverage;
-- atomic activation requirements for replacement VCN/projection maps;
-- behavior of affected in-progress reassembly when a map or profile changes.
-
-These are explicit later design items; this document does not select a mechanism.
+Compatibility mismatch is reported locally and fails closed. A future map-independent Link-control protocol may expose it remotely; ordinary malformed traffic still causes no automatic infrastructure-error reply.
 
 ---
 
@@ -363,7 +368,7 @@ Engineer PC
 USB / UART / Ethernet / FTDI FIFO   (maintenance Link)
     |
 Main SoC / FPGA gateway
-    +-- CAN_A, CAN_B, RS-485 -> Participants
+    +-- CAN_A, CAN_B, RS-485 -> Hosts
     +-- internal FPGA/CPU domains
     +-- RTL Endpoints
 ```
@@ -386,15 +391,15 @@ Auto-Wiring (§1) deliberately *creates* configuration. A separate and complemen
 In promiscuous/bring-up mode, an implementation may:
 
 - observe PDUs regardless of whether local configuration recognizes them;
-- log unknown WireNumbers, ParticipantIds, Endpoints, and Services;
-- interrogate observed Participants;
+- log unknown WireNumbers, HostIds, Endpoints, and Services;
+- interrogate observed Hosts;
 - perform explicitly privileged exploratory transmissions.
 
 Two boundaries are firm:
 
 > **Promiscuous observation never creates persistent Wiring.** It only reports. Auto-Wiring is the separate mechanism that deliberately installs temporary configuration.
 
-> **Promiscuous mode is a host-tooling and gateway capability.** Ordinary embedded Participants remain strictly configured: the Dispatcher still rejects and counts unknown Endpoints (`CORE §9.1`), and a Participant does not consume directed traffic unless its canonical ParticipantId is the destination.
+> **Promiscuous mode is a host-tooling and gateway capability.** Ordinary embedded Hosts remain strictly configured: the Dispatcher still rejects and counts unknown Endpoints (`CORE §9.1`), and a Host does not consume directed traffic unless its canonical HostId is the destination.
 
 The capability must be absent from normal builds — compiled out for constrained targets and production — rather than merely disabled, per `CORE §22.1`.
 
@@ -419,7 +424,7 @@ Device
 Once commissioned, a typical host path is:
 
 ```text
-InternalDebugWire (e.g. 1020)
+InternalDebugWire (device-private allocation TBD)
     <splice>
 Wire 101
     |
@@ -483,13 +488,13 @@ The plausible schema split is by target scale rather than by feature:
 
 | Class | Target | Character |
 |---|---|---|
-| Compact | Classical CAN, constrained Participants | masks, coarse states, saturating counts, aggressive quantization; a single CAN frame is a design target, not a contract |
+| Compact | Classical CAN, constrained Hosts | masks, coarse states, saturating counts, aggressive quantization; a single CAN frame is a design target, not a contract |
 | Standard | typical MCU with UART/HDLC, CAN FD, shared memory | per-Link and per-QoS detail at ordinary operational precision |
 | Extended | gateways, hosts, multi-Link devices | richer bounded fault and recovery history, timing detail, larger counters |
 
 Standard and Extended are semantic expansions of the same model. They need not be byte-prefix extensions of Compact, and trying to make them so tends to distort the compact encoding for no benefit.
 
-Two rules keep the classes honest. A host may normalize all three into one internal model, but **a field absent from a smaller schema is unavailable, not zero, false, healthy, or unchanged** (`CORE §18.5`). And telemetry must remain a fixed schema per version rather than becoming a runtime tag/type/value language, because a self-describing telemetry format is precisely the kind of unbounded parser a constrained Participant cannot afford and an attacker enjoys.
+Two rules keep the classes honest. A host may normalize all three into one internal model, but **a field absent from a smaller schema is unavailable, not zero, false, healthy, or unchanged** (`CORE §18.5`). And telemetry must remain a fixed schema per version rather than becoming a runtime tag/type/value language, because a self-describing telemetry format is precisely the kind of unbounded parser a constrained Host cannot afford and an attacker enjoys.
 
 Field widths, quantization, endpoint allocation, and pagination are all open (`REG §6.7`).
 

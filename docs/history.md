@@ -8,6 +8,14 @@ Cross-references use document codes. Section numbers in older entries refer to l
 
 ---
 
+# Revision 0.17 — Remove the retired proposal directory
+
+The entire `docs/proposed/` directory is removed from the current tree. The main-set integration record and BITS document now link to immutable proposal versions in commit `02894d3a84e48ffe0ddeb6d27db87abf4af9c99f`; sketch provenance references use the same historical source. Earlier revision narratives remain archival.
+
+The deletion removes competing source locations without promoting unresolved design choices. Current architecture and BITS behavior remain in the main documents, with open decisions in `REG`. The proposal disposition record preserves the distinction between incorporated, superseded and pending material.
+
+---
+
 # Revision 0.16 — Dedicated BITS Transport document
 
 `bits_transport.md` (`BITS-TRANSPORT`) now owns the main-set prototype design for Binary Image Transport, Segmented. `BITS` remains the existing code for `bit_layout.md`. The new document consolidates the updated proposal's fixed 1:1 connection and single-session model, two bounded ingress workstreams, deferred processing, candidate Compact SETUP/SEGMENT layouts, cumulative/selective ACKs, receiver grants, retries/PROBE, unreliable sideband, source/sink responsibilities and conditional CAN11 capacity.

@@ -564,5 +564,5 @@ A **standard idiom for cross-link Wires** (membership spanning Links with a name
 | Input | Role |
 |---|---|
 | `WireSpaces_Sketch_07_AMR_Agent_Brief.md` | Frozen machine description and assignment rules |
-| `docs/proposed/WireSpaces Change Proposal — Global Participants, Multi-Origin Wires, and Revised Addressing.md` | Accepted Candidates 1–2 premises |
+| [Global identity proposal, revision 2 (Git history)](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/WireSpaces%20Change%20Proposal%20%E2%80%94%20Global%20Participants%2C%20Multi-Origin%20Wires%2C%20and%20Revised%20Addressing.md) | Accepted Candidates 1–2 premises |
 | `sketches/README.md` | Sketch structure, friction signals, Wire≠Link guidance |

@@ -712,6 +712,8 @@ Other higher layers remain open:
 
 # 7. Pending Source Material
 
+`docs/proposed/` has been removed from the current tree after main-set integration. `INTEGRATION` retains source-by-source disposition and immutable Git-history links. Removal changes source location, not protocol status: unresolved BITS/CAN choices remain open in §6.
+
 The following older documents have **not** yet been mined. Their model is the superseded generation, but they may hold recoverable detail in the same way `WS_old/network/architecture_overview.md` did.
 
 | Source | Approx. lines | Expected destination |
@@ -731,6 +733,6 @@ The mining method that has worked so far: read for concepts that were *dropped* 
 
 # 8. Revision History
 
-Current revision: **0.16** (dedicated BITS main-set prototype document; protocol-specific invariants and rejection/integrity boundaries incorporated; exact wire/lifetime/completion choices, detailed APIs, implementation and full conformance remain open).
+Current revision: **0.17** (retired proposal directory removed; provenance links pinned to Git history. BITS/CAN protocol choices, detailed APIs, implementation and full conformance retain their existing open status).
 
 Full revision narrative and superseded-source provenance live in [history.md](history.md). `REG` keeps only status; `HIST` is archival and is not part of the control surface.

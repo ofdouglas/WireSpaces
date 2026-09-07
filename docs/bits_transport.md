@@ -11,7 +11,7 @@ Cross-references use document codes and section numbers. `BITS` continues to mea
 
 BITS moves one finite binary object reliably between two configured WS Hosts. It is one TransportType and Transport Entity with two related message classes: a reliable segmented object channel and an optional small **unreliable** user-datagram sideband. It is suitable for firmware/FPGA images, calibration blobs, diagnostic snapshots, crash dumps, captured traces, and finite log batches.
 
-The current design is incorporated from [the updated BITS proposal](proposed/BITS_design_updated.md). That source remains provenance. This document consolidates its behavior and records the boundaries needed to implement a bounded prototype; §15 lists what still prevents protocol freeze. A prototype must label every unresolved choice and must not turn a working encoding into an interoperability claim (`CONFORM §1.1`).
+The current design is incorporated from [the updated BITS proposal](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/BITS_design_updated.md). The source is retained in Git history as provenance; `docs/proposed/` is removed from the current tree. This document consolidates its behavior and records the boundaries needed to implement a bounded prototype; §15 lists what still prevents protocol freeze. A prototype must label every unresolved choice and must not turn a working encoding into an interoperability claim (`CONFORM §1.1`).
 
 | Incorporated direction | Still provisional or unresolved |
 |---|---|

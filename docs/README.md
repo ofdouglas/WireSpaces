@@ -68,5 +68,5 @@ If you are generating code or designs from these documents:
 3. The invariants in `architecture_register.md §4` are the constraints most worth checking work against.
 4. Use `conformance.md` for test vectors and boundary cases; use `implementation.md` for language and scaling choices.
 5. Prefer small concrete implementations and tests over generalized framework hierarchies. Do not introduce an abstraction until two real Links or targets need it.
-6. Nothing in `archive/` is current. `proposed/` files are provenance/design input; consult `proposal_disposition.md` and `REG` for incorporation status.
+6. Nothing in `archive/` is current. The retired `proposed/` directory is available only in Git history; `proposal_disposition.md` links to the source revisions. Consult that record and `REG` for incorporation status.
 7. `LIB §12.1` rejects ambient sibling `Design/Firmware` include paths and recommends a reproducible vendored extraction with recorded provenance for phase 1; the final core-library location remains open.

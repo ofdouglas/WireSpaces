@@ -8,6 +8,16 @@ Cross-references use document codes. Section numbers in older entries refer to l
 
 ---
 
+# Revision 0.16 — Dedicated BITS Transport document
+
+`bits_transport.md` (`BITS-TRANSPORT`) now owns the main-set prototype design for Binary Image Transport, Segmented. `BITS` remains the existing code for `bit_layout.md`. The new document consolidates the updated proposal's fixed 1:1 connection and single-session model, two bounded ingress workstreams, deferred processing, candidate Compact SETUP/SEGMENT layouts, cumulative/selective ACKs, receiver grants, retries/PROBE, unreliable sideband, source/sink responsibilities and conditional CAN11 capacity.
+
+Integration makes the safety boundaries explicit: ingress retention is not sink acceptance; only committed sink acceptance is ACKable; duplicate suppression is scoped to retained session state. A valid authorized SETUP may receive a bounded protocol refusal, while infrastructure/parser rejection remains silent. Flash work stays outside receive hooks. Hop validation does not provide end-to-end integrity, and a small modular window or random session ID does not exclude stale traffic.
+
+The protocol is still provisional. Exact control/ACK encoding and TransportType allocation, delayed-ACK ambiguity, session reuse/tombstones, completion/abort and sink-result APIs remain open. Detailed library/implementation and full conformance integration remain follow-on work. Navigation, CORE boundaries, the architecture register and proposal disposition now point to the main document; the source proposal and earlier revision narratives are unchanged.
+
+---
+
 # Revision 0.15 — Host terminology, Transport Entity boundaries, and unified CAN11 VCN
 
 The main set now uses Host, HostId, SrcHostId, and DestHostId for the existing deployment-scoped Endpoint Domain identity. This does not change the provisional six-byte canonical descriptor. Older revision narratives and proposal filenames retain their original terminology.

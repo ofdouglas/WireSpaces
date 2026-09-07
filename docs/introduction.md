@@ -353,6 +353,7 @@ The current implementation state lives in `sim/`, which is at step 0: a process 
 | `core_architecture.md` | `CORE` | The buildable protocol and Host runtime. The main document |
 | `bit_layout.md` | `BITS` | Byte and bit ordering conventions; canonical descriptor packing |
 | `link_profiles.md` | `LINK` | Per-carrier encodings: Classical CAN, UART, Ethernet, I2C/SPI, others |
+| `bits_transport.md` | `BITS-TRANSPORT` | Bounded finite-object Transport and unreliable sideband; prototype design with explicit open wire/lifetime decisions |
 | `deployment.md` | `DEPLOY` | Discovery, commissioning, Wiring, host tooling |
 | `conformance.md` | `CONFORM` | Reference vectors, boundary tests, exit criteria for provisional status |
 | `implementation.md` | `IMPL` | Language choices, scaling profiles, execution shape |
@@ -362,7 +363,7 @@ The current implementation state lives in `sim/`, which is at step 0: a process 
 | `history.md` | `HIST` | Revision history and provenance (not a control surface) |
 | `proposal_disposition.md` | `INTEGRATION` | Proposal incorporation status and follow-on boundaries |
 
-Cross-references use the document code plus a section number, for example `CORE §6.2`. A bare `§6.2` always means the current document.
+Cross-references use the document code plus a section number, for example `CORE §6.2`. A bare `§6.2` always means the current document. `BITS` continues to mean bit layout; `BITS-TRANSPORT` identifies the BITS protocol document.
 
 Two conventions matter when editing:
 

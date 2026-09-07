@@ -31,6 +31,8 @@ This helps prevent software and RTL implementations from quietly becoming differ
 
 One check is not a vector at all but belongs with them. Because the Endpoint API is a portability contract rather than an implementation detail (`SVC-9`), the strongest test of it is to **compile one unmodified Service against two implementations** and run the same behavioral cases against both. Golden vectors verify that implementations agree on bytes; only this verifies that they agree on the surface Services are written against. It is worth doing as soon as a second implementation exists, since API divergence is cheap to fix early and expensive once Services depend on it.
 
+BITS protocol design and its initial evidence requirements are in `BITS-TRANSPORT §15`. Full BITS conformance integration and byte-exact vectors remain follow-on work; its candidate layouts do not freeze the control byte, ACK encoding, session lifetime, or completion protocol.
+
 ## 1.1 A prototype is an evidence generator, not a source of architecture
 
 The first implementation will encounter every open question in `REG §6` and will have to do *something* at each one. That is fine and unavoidable. What is not fine is the default consequence:

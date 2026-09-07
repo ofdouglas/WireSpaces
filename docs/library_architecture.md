@@ -2,7 +2,7 @@
 
 **Status:** Private first draft; provisional throughout; structure and API shape only, no internals<br>
 **Purpose:** How the prototype core library is organized, where its seams are, and what its public surface looks like<br>
-**Authority:** Software structure only. Protocol behavior belongs to `CORE`, byte layout to `BITS` and `LINK`, test policy to `CONFORM`
+**Authority:** Software structure only. Shared protocol behavior belongs to `CORE`, BITS-specific behavior to `BITS-TRANSPORT`, canonical/carrier byte layout to `BITS` and `LINK`, test policy to `CONFORM`
 
 Cross-references use the document code plus a section number, for example `LIB §3`. A bare `§x` always means the current document.
 
@@ -12,7 +12,7 @@ This sketch is a starting point for prototyping, not a decision record. Everythi
 
 # 1. Scope and Ground Rules
 
-The library is the thing between a Link driver and a Service. The sketches below describe the simple-datagram prototype slice. `CORE §9` and `CORE §20` now allow one Transport Entity boundary with multiple declared ingress elements; receive hooks classify and retain only, with protocol semantics deferred. Detailed Transport Entity/BITS API integration is pending (`REG §6.12/§6.16`), and the single Queue/Snapshot examples below do not constrain compound Transport storage. It owns the canonical PDU representation, forwarding, Endpoint storage, and the Link-facing contracts. It does not own the application, the schedule, or the transport medium.
+The library is the thing between a Link driver and a Service. The sketches below describe the simple-datagram prototype slice. `CORE §9` and `CORE §20` now allow one Transport Entity boundary with multiple declared ingress elements; receive hooks classify and retain only, with protocol semantics deferred. The BITS protocol design is in `BITS-TRANSPORT`; detailed Transport Entity/BITS API integration here is still pending (`REG §6.12/§6.16`), and the single Queue/Snapshot examples below do not constrain compound Transport storage. It owns the canonical PDU representation, forwarding, Endpoint storage, and the Link-facing contracts. It does not own the application, the schedule, or the transport medium.
 
 | In scope | Out of scope |
 |---|---|

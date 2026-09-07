@@ -952,7 +952,7 @@ Protocol processing happens later through a bounded operation in the Transport E
 
 Every Endpoint exposes **one Transport Entity boundary** and declares the bounded storage behind it. A simple datagram Endpoint uses one storage element. A compound Transport may use several when its protocol requires distinct ingress classes, with an explicit classification rule and a bound and exhaustion policy for every element. Their semantics are fixed by the Service/Transport definition, not silently substituted by deployment.
 
-For example, the BITS proposal uses a non-overwriting segment mailbox or Queue and one FIFO shared by protocol control and user sideband datagrams. This is two ingress workstreams behind one Endpoint, not two Endpoint identities or two independent Transport bindings. Classification preserves FIFO arrival order within a workstream; it does not imply a total processing order across workstreams. Detailed BITS protocol and wire-format integration remains separate work (`REG §6.16`).
+For example, BITS (`BITS-TRANSPORT §3`) uses a non-overwriting segment mailbox or Queue and one FIFO shared by protocol control and user sideband datagrams. This is two ingress workstreams behind one Endpoint, not two Endpoint identities or two independent Transport bindings. Classification preserves FIFO arrival order within a workstream; it does not imply a total processing order across workstreams. The BITS prototype design now lives in `BITS-TRANSPORT`; exact encodings, completion and lifetime rules remain provisional (`REG §6.16`).
 
 Two storage models are defined:
 
@@ -2302,6 +2302,8 @@ An empty response from a polled Link is not an error (§1.7).
 
 > **Malformed, unrepresentable, or unauthorized traffic is counted and dropped. No error response is generated to the sender.**
 
+This is the infrastructure/parser rejection boundary. A configured Transport may define an explicit outcome for a well-formed authorized request, such as BITS refusing SETUP while busy (`BITS-TRANSPORT §10`). Such an outcome is processed later by the owning Transport Entity, uses existing TX/reply authority, is bounded and rate-limited, and never responds to a malformed request or another error response. It does not turn Link/Router/Dispatcher failures into reply traffic.
+
 Report upward locally via counters and the telemetry Service (`DEPLOY §3.3`). A local send failure is a synchronous return value to the calling Service (§14.4), not wire traffic.
 
 ### Diagnostic containment
@@ -2530,7 +2532,7 @@ A catalog of such components is explicitly **not** established here; see `FUTURE
 
 A simple datagram Endpoint may implement that boundary directly. More involved transports accept into declared ingress storage (§9.5), then process protocol state serially in their owning context. A bounded processing call handles a declared maximum amount of ingress and timer/TX work; it does not drain an arbitrarily large queue. Service callbacks occur there or in a later Service context, never in Link RX/dispatch acceptance. A statically bounded bank of point-to-point transport connections may sit behind the one boundary without changing Endpoint identity.
 
-This boundary accommodates the proposed BITS finite-object transport. Its detailed state machine, message encodings, and TransportType number are not standardized by adopting the boundary (`REG §6.16`).
+BITS is the current finite-object Transport design under this boundary: one configured 1:1 connection per instance, at most one active object session, reliable segmented data, and optional unreliable sideband. `BITS-TRANSPORT` owns its protocol behavior and candidate encodings. Its TransportType number, exact envelope/ACK encoding, completion and stale-session rules remain open (`REG §6.16`).
 
 The canonical descriptor reserves a 3-bit `TransportType`, but the exact registry is not frozen.
 
@@ -2541,7 +2543,7 @@ The baseline Transport is an **Unreliable Datagram** style:
 - delivery failure is possible;
 - application/Service chooses semantics.
 
-Other Transports may provide reliable segmented transfer, receiver windows/credits, request/response retry behavior, sequence/E2E integrity, or specialized command-source selection. No additional protocol is standardized in the main set yet; BITS is a proposal awaiting detailed integration. The sequenced / end-to-end-protected datagram is a separate candidate (`FUTURE §3.1`); adopting the Transport Entity boundary does not select a protocol implementation order.
+Other Transports may provide reliable segmented transfer, receiver windows/credits, request/response retry behavior, sequence/E2E integrity, or specialized command-source selection. BITS is now a main-set prototype design, not an interoperability-frozen protocol. The sequenced / end-to-end-protected datagram is a separate candidate (`FUTURE §3.1`); adopting the Transport Entity boundary does not select a protocol implementation order.
 
 One boundary is firm regardless: firmware images, files, logs, and similar bulk data belong to a segmenting Transport, **not** to a constrained LLL. Growing a constrained-Link reassembly mechanism into a large transport protocol is the wrong direction.
 

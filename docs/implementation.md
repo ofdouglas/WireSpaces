@@ -194,6 +194,8 @@ Evidence should compare Guest VCN, default-map and custom-map Native VCN, and a 
 
 # 8. Evidence Record
 
+`BITS-TRANSPORT §15` records the finite-object Transport prototype scope and unresolved protocol decisions. Detailed BITS implementation/API sequencing remains a follow-on; the measurements here do not imply a completed BITS implementation.
+
 Keep measurement inputs, compiler/linker flags, target/controller identity, generated configuration counts, and raw map/timing outputs beside each reported result. Report medians and worst observed values where timing varies. A number without its topology and enabled profile is not reusable evidence.
 
 Implementation guidance may change when this evidence changes. Canonical protocol behavior does not change merely because one target's fastest table or filter arrangement is different.

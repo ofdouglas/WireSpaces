@@ -4,203 +4,34 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import logging
-import struct
 import sys
 import time
-from collections.abc import Iterator
 
 import serial
 
+# Keep the original protocol imports available to existing callers.
+from .packet import (
+    HEADER_FORMAT,
+    HEADER_SIZE,
+    ENDPOINT_ID_MASK,
+    ENDPOINT_NAMESPACE_SHIFT,
+    QOS_NAMES,
+    NAMESPACE_NAMES,
+    WireSpacesPacket,
+    format_packet,
+)
+from .hdlc import (
+    HDLC_FLAG,
+    HDLC_ESCAPE,
+    HDLC_ESCAPE_XOR,
+    HDLC_CRC_SIZE,
+    crc16_ccitt_false,
+    encode_hdlc_frame,
+    HdlcStreamDecoder,
+)
 
 LOGGER = logging.getLogger("wirespaces.receiver")
-
-HDLC_FLAG = 0x7E
-HDLC_ESCAPE = 0x7D
-HDLC_ESCAPE_XOR = 0x20
-HEADER_FORMAT = "<BBBBH"
-HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
-ENDPOINT_ID_MASK = 0x3FFF
-ENDPOINT_NAMESPACE_SHIFT = 14
-HDLC_CRC_SIZE = 2
-
-QOS_NAMES = ("CRITICAL", "HIGH", "NORMAL", "BACKGROUND")
-NAMESPACE_NAMES = ("USER0", "USER1", "USER2", "COMMON")
-
-
-@dataclass(frozen=True)
-class WireSpacesPacket:
-    """Decoded canonical WireSpaces header and payload."""
-
-    control: int
-    wire_number: int
-    source_host: int
-    destination_host: int
-    endpoint: int
-    payload: bytes
-
-    @property
-    def qos(self) -> int:
-        """Return the two-bit canonical QoS value."""
-        return (self.control >> 6) & 0x03
-
-    @property
-    def has_extensions(self) -> bool:
-        """Return whether canonical header extensions are present."""
-        return (self.control & 0x08) != 0
-
-    @property
-    def transport_type(self) -> int:
-        """Return the three-bit TransportType value."""
-        return self.control & 0x07
-
-    @property
-    def namespace(self) -> int:
-        """Return the Endpoint namespace value."""
-        return (self.endpoint >> ENDPOINT_NAMESPACE_SHIFT) & 0x03
-
-    @property
-    def endpoint_id(self) -> int:
-        """Return the namespace-local Endpoint ID."""
-        return self.endpoint & ENDPOINT_ID_MASK
-
-    @classmethod
-    def decode(cls, frame: bytes) -> WireSpacesPacket:
-        """Decode one unescaped canonical frame."""
-        if len(frame) < HEADER_SIZE:
-            raise ValueError(
-                f"frame has {len(frame)} bytes; canonical header needs {HEADER_SIZE}"
-            )
-
-        control, wire, source, destination, endpoint = struct.unpack_from(
-            HEADER_FORMAT, frame
-        )
-        return cls(
-            control=control,
-            wire_number=wire,
-            source_host=source,
-            destination_host=destination,
-            endpoint=endpoint,
-            payload=frame[HEADER_SIZE:],
-        )
-
-    def encode(self) -> bytes:
-        """Encode the canonical header and payload before Link framing."""
-        return struct.pack(
-            HEADER_FORMAT,
-            self.control,
-            self.wire_number,
-            self.source_host,
-            self.destination_host,
-            self.endpoint,
-        ) + self.payload
-
-
-def crc16_ccitt_false(data: bytes) -> int:
-    """Calculate non-reflected CRC-16/CCITT-FALSE."""
-    result = 0xFFFF
-    for byte in data:
-        result ^= byte << 8
-        for _ in range(8):
-            result = (
-                ((result << 1) ^ 0x1021)
-                if result & 0x8000
-                else result << 1
-            ) & 0xFFFF
-    return result
-
-
-def encode_hdlc_frame(frame: bytes) -> bytes:
-    """Append little-endian CRC-16 and byte-stuff one flagged HDLC frame."""
-    crc = crc16_ccitt_false(frame)
-    protected_frame = frame + struct.pack("<H", crc)
-    encoded = bytearray((HDLC_FLAG,))
-    for byte in protected_frame:
-        if byte in (HDLC_FLAG, HDLC_ESCAPE):
-            encoded.append(HDLC_ESCAPE)
-            encoded.append(byte ^ HDLC_ESCAPE_XOR)
-        else:
-            encoded.append(byte)
-    encoded.append(HDLC_FLAG)
-    return bytes(encoded)
-
-
-class HdlcStreamDecoder:
-    """Decode byte-stuffed HDLC frames and discard CRC mismatches."""
-
-    def __init__(self, maximum_frame_size: int = 1024) -> None:
-        self._maximum_frame_size = maximum_frame_size
-        self._frame = bytearray()
-        self._in_frame = False
-        self._escaped = False
-
-    def feed(self, data: bytes) -> Iterator[bytes]:
-        """Yield CRC-validated frame bodies without their CRC trailers."""
-        for byte in data:
-            if byte == HDLC_FLAG:
-                if self._in_frame and self._frame and not self._escaped:
-                    if len(self._frame) > HDLC_CRC_SIZE:
-                        frame = bytes(self._frame[:-HDLC_CRC_SIZE])
-                        received_crc = int.from_bytes(
-                            self._frame[-HDLC_CRC_SIZE:],
-                            byteorder="little",
-                        )
-                        expected_crc = crc16_ccitt_false(frame)
-                        if received_crc == expected_crc:
-                            yield frame
-                        else:
-                            LOGGER.warning(
-                                "dropping HDLC frame with CRC mismatch: "
-                                "received=0x%04X expected=0x%04X",
-                                received_crc,
-                                expected_crc,
-                            )
-                self._frame.clear()
-                self._in_frame = True
-                self._escaped = False
-                continue
-
-            if not self._in_frame:
-                continue
-
-            if self._escaped:
-                self._frame.append(byte ^ HDLC_ESCAPE_XOR)
-                self._escaped = False
-            elif byte == HDLC_ESCAPE:
-                self._escaped = True
-            else:
-                self._frame.append(byte)
-
-            if len(self._frame) > self._maximum_frame_size + HDLC_CRC_SIZE:
-                LOGGER.warning(
-                    "dropping HDLC frame larger than %d bytes",
-                    self._maximum_frame_size,
-                )
-                self._frame.clear()
-                self._in_frame = False
-                self._escaped = False
-
-
-def format_packet(packet: WireSpacesPacket) -> str:
-    """Format a packet as a stable, human-readable log record."""
-    qos = QOS_NAMES[packet.qos]
-    namespace = NAMESPACE_NAMES[packet.namespace]
-    destination = (
-        "broadcast"
-        if packet.destination_host == 0xFF
-        else str(packet.destination_host)
-    )
-    payload = packet.payload.hex(" ") if packet.payload else "-"
-    return (
-        f"WS packet wire={packet.wire_number} "
-        f"src={packet.source_host} dst={destination} "
-        f"qos={qos} transport={packet.transport_type} "
-        f"extensions={str(packet.has_extensions).lower()} "
-        f"namespace={namespace} endpoint={packet.endpoint_id} "
-        f"raw_endpoint=0x{packet.endpoint:04X} "
-        f"payload[{len(packet.payload)}]={payload}"
-    )
 
 
 def receive_packets(

@@ -8,7 +8,8 @@ import time
 
 import serial
 
-from wirespaces.receiver import HdlcStreamDecoder, WireSpacesPacket, encode_hdlc_frame
+from wirespaces.hdlc import HdlcStreamDecoder, encode_hdlc_frame
+from wirespaces.packet import WireSpacesPacket
 
 
 def exchange(uart, request, timeout, expect_reply):

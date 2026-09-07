@@ -10,7 +10,8 @@ import time
 
 import serial
 
-from wirespaces.receiver import HdlcStreamDecoder, WireSpacesPacket
+from wirespaces.hdlc import HdlcStreamDecoder
+from wirespaces.packet import WireSpacesPacket
 
 
 STACK_REPORT_ENDPOINT = 0xFFFC

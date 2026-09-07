@@ -24,6 +24,7 @@ Read in this order if you are new to the project:
 | [core_architecture.md](core_architecture.md) | **The main document.** The protocol model and Host runtime — everything meant to be buildable now |
 | [bit_layout.md](bit_layout.md) | Byte and bit ordering conventions, and canonical descriptor packing |
 | [link_profiles.md](link_profiles.md) | Per-carrier encodings: Classical CAN, UART, Ethernet, I2C/SPI, and others |
+| [bits_transport.md](bits_transport.md) | BITS finite-object Transport: connections, bounded execution, candidate messages, flow control, and open completion/lifetime rules |
 | [deployment.md](deployment.md) | Discovery, commissioning, Wiring, host tooling |
 | [conformance.md](conformance.md) | Reference vectors, boundary tests, exit criteria for provisional status |
 | [implementation.md](implementation.md) | Language choices, scaling profiles, execution shape for the reference code |
@@ -41,11 +42,11 @@ Other material:
 - `sim/` — reference implementation, currently at an early stage
 - [simulator README](../sim/README.md) — simulator requirements
 
-Decision records and superseded specs have no authority: `CORE` and `REG` are normative. They explain how the current documents got there.
+Decision records and superseded specs have no authority: `CORE` owns shared behavior, `BITS-TRANSPORT` owns BITS-specific design, and `REG` owns status and invariants. They explain how the current documents got there.
 
 ## Conventions
 
-Cross-references are document-coded: `CORE §6.2` means section 6.2 of `core_architecture.md`. A bare `§6.2` always means the current document. Document codes are listed in `INTRO §10`. Invariants are cited by stable ID, such as `SPLICE-2` or `PDU-1`, and live in `architecture_register.md`.
+Cross-references are document-coded: `CORE §6.2` means section 6.2 of `core_architecture.md`. A bare `§6.2` always means the current document. Document codes are listed in `INTRO §10`. `BITS` names bit layout; `BITS-TRANSPORT` names the finite-object Transport document. Invariants are cited by stable ID, such as `SPLICE-2` or `PDU-1`, and live in `architecture_register.md`.
 
 Document scope:
 
@@ -62,10 +63,10 @@ Three rules govern edits:
 
 If you are generating code or designs from these documents:
 
-1. `core_architecture.md` is the source of truth for behavior. `link_profiles.md` owns byte-level encodings and is deliberately unfinished.
+1. `core_architecture.md` is the source of truth for shared behavior. `bits_transport.md` owns the BITS prototype design; `link_profiles.md` owns carrier encodings. Neither profile set is interoperability-frozen.
 2. Do not implement anything from `future_work.md` unless explicitly asked. It records intent, not an agreed backlog.
 3. The invariants in `architecture_register.md §4` are the constraints most worth checking work against.
 4. Use `conformance.md` for test vectors and boundary cases; use `implementation.md` for language and scaling choices.
 5. Prefer small concrete implementations and tests over generalized framework hierarchies. Do not introduce an abstraction until two real Links or targets need it.
-6. Nothing in `archive/` is current. `proposed/` files are provenance/design input; consult `proposal_disposition.md` and `REG` for incorporation status.
+6. Nothing in `archive/` is current. The retired `proposed/` directory is available only in Git history; `proposal_disposition.md` links to the source revisions. Consult that record and `REG` for incorporation status.
 7. `LIB §12.1` rejects ambient sibling `Design/Firmware` include paths and recommends a reproducible vendored extraction with recorded provenance for phase 1; the final core-library location remains open.

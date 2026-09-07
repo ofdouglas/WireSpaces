@@ -2,7 +2,9 @@
 
 **Status:** Phase 2 experiment instruction; not a specification and not an adopted change  
 **Audience:** Sketch-generating agents. Read [`README.md`](README.md) first — everything in it still applies unless this brief overrides it explicitly.  
-**Source proposal:** `docs/proposed/WireSpaces Change Proposal — Global Participants, Multi-Origin Wires, and Revised Addressing.md` (revision 2)
+**Source proposal:** [revision 2 in Git history](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/WireSpaces%20Change%20Proposal%20%E2%80%94%20Global%20Participants%2C%20Multi-Origin%20Wires%2C%20and%20Revised%20Addressing.md)
+
+The former `docs/proposed/` directory has been removed. Paths in this historical experiment brief identify its original inputs; they are not current working-tree locations.
 
 > **Do not read either of these files before completing your remap:**
 >

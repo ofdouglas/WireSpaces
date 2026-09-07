@@ -44,6 +44,7 @@ The following areas are settled at the architectural level. Numeric limits, fiel
 - Declared metadata retained safely at acceptance: copied in the baseline or held through explicit owned references/leases. One producer per external Endpoint identity; one Wire binding per transmit Endpoint.
 - One Transport Entity boundary per Endpoint, with one or more declared bounded ingress elements; receive classification is separate from deferred protocol processing.
 - No Service-to-application interface; Endpoint API as portability contract for Service-facing code.
+- BITS finite-object Transport: one configured connection and at most one active object session per instance, separate bounded segment/control ingress, stable source bytes, sink acceptance before ACK, optional unreliable sideband. `BITS-TRANSPORT` owns its prototype design; protocol freeze remains separate.
 
 **QoS, congestion, and bounds**
 
@@ -112,6 +113,7 @@ The following areas are settled at the architectural level. Numeric limits, fiel
 - Schema language and code generation for Service contracts.
 - Whether `WeightedFair` accounting is by frames, bytes, or a profile-defined unit.
 - The credit quantum and lifeline reservation for each flow-controlled profile.
+- BITS Compact ten-byte SETUP and four-byte SEGMENT header, wrapping cumulative/selective ACK/window model and PROBE. Exact control/ACK encoding, TransportType allocation, Extended encoding, session/ACK lifetime, completion/abort, sink-result APIs and conformance remain open (`BITS-TRANSPORT §15`).
 
 ## 2.3 Deferred
 
@@ -127,7 +129,7 @@ All of these live in `FUTURE`, which is where their current thinking is recorded
 | General adaptive congestion-control protocol | — (`CORE §15.6` is the boundary) |
 | Zero-copy ownership APIs | `FUTURE §2` |
 | Sequenced / end-to-end-protected datagram | `FUTURE §3.1` |
-| Reliable and bulk Transports | `FUTURE §3.2` |
+| Other reliable Transports and persistent resume; BITS itself is now a main-set prototype design | `FUTURE §3.2`, `BITS-TRANSPORT §15` |
 | A reusable communication-component catalog | `FUTURE §13` |
 | Domain Control as a group-management layer | `FUTURE §14` |
 | Cross-WireSpace identity translation | `FUTURE §12` |
@@ -154,7 +156,11 @@ All of these live in `FUTURE`, which is where their current thinking is recorded
 | Namespace | 2 bits / 4 spaces |
 | Endpoint Id | 14 bits per Namespace; 0 invalid |
 | FOSS ecosystem Namespace | Namespace 3 |
-| TransportType | 3 bits / up to 8 values |
+| TransportType | 3 bits / up to 8 values; BITS number not allocated |
+| BITS connection | configured Wire/local Host/remote Host/Endpoint; one active finite-object session per instance |
+| BITS Compact | session u8, sequence u8, bitmap u16, absolute segment index u16; provisional SETUP 10 bytes / SEGMENT header 4 bytes |
+| BITS object count | Compact 1..65,536 segments; no empty-object encoding; actual capacity constrained by path, sink and lifetime rules |
+| BITS receipt/integrity | ACK after sink acceptance; no per-message CRC in current direction and no end-to-end integrity claim |
 | QoS | 2 bits / 4 classes: Critical 0, High 1, Normal 2, Background 3 |
 | QoS profiles | QoS-Minimal (Normal only), QoS-Full (all four) |
 | HostId | 8 bits; `0x00..0xFE` ordinary |
@@ -408,7 +414,7 @@ Particularly important when generating code or designs from these documents. Cit
 
 | ID | Invariant |
 |---|---|
-| `ERR-1` | **Malformed, unrepresentable, or unauthorized traffic is counted and dropped, with no response emitted.** Errors are reported upward and locally, never backward and automatically. |
+| `ERR-1` | **Malformed, unrepresentable, or unauthorized traffic is counted and dropped, with no response emitted.** Errors are reported upward and locally, never backward and automatically. A bounded Transport outcome for a valid authorized request (BITS SETUP refusal) is distinct from infrastructure/parser rejection (`BITS-TRANSPORT §10`). |
 | `ERR-2` | **Native Link acknowledgment and controller retransmission are not WS delivery.** They operate below the LLL and say nothing about whether any Endpoint received a PDU. |
 | `ERR-3` | **Diagnostic reporting is contained.** An error report can never generate another error report, local counters remain authoritative, and a malformed or babbling peer cannot force unbounded diagnostic work. |
 | `ERR-4` | **Live and latched status have different lifetimes, and a static live snapshot is not evidence of health.** Latched fault and restart records remain readable from outside a failed runtime. |
@@ -436,6 +442,20 @@ Particularly important when generating code or designs from these documents. Cit
 | `TRN-1` | **TransportType identifies the protocol/entity providing delivery semantics.** One Endpoint exposes one Transport Entity boundary; related protocol message classes may share it without becoming separate public TransportTypes. |
 | `TRN-2` | **Receive acceptance may classify into declared storage but never execute protocol semantics.** ACK/window/duplicate/retry/SETUP/completion handling and Service callbacks run later in a serialized context under a declared work bound. |
 
+## 4.16 BITS finite-object Transport — `BTR`
+
+| ID | Invariant |
+|---|---|
+| `BTR-1` | **One BITS instance represents one configured directed connection and at most one active finite-object session.** Wire/Host/Endpoint identity and TX/reply authority come from configuration; a bounded bank permits multiple peers. |
+| `BTR-2` | **BITS retains segments separately from one shared control/sideband FIFO.** All ingress is bounded and non-overwriting; classification never executes protocol or flash/Service work (`TRN-2`). |
+| `BTR-3` | **Ingress retention is not acknowledged receipt.** Receipt state advances only after the sink accepts responsibility under its commitment contract; pending or failed work is not success. |
+| `BTR-4` | **An accepted segment is not delivered to the sink twice within retained session state.** Duplicate suppression is keyed to absolute object progress and session association; no reset-spanning exactly-once guarantee is implied. |
+| `BTR-5` | **Object size, segment size, profile and initial sequence are fixed for an active session.** Identical SETUP is idempotent; conflicting parameters never restart or mutate that session. |
+| `BTR-6` | **Receiver grants are backed by bounded resources and an unambiguous representable span.** Previously granted positions are not revoked during normal operation. Modular window bounds alone do not resolve old-cycle ACKs. |
+| `BTR-7` | **BITS does not equate hop integrity, object verification and authentication.** No per-message BITS CRC is added by the current design; end-to-end protection and Service verification are separate claims. |
+| `BTR-8` | **BITS REJECT is a bounded protocol outcome for valid authorized SETUP only.** Malformed/unknown envelopes remain silent, and no error response generates another response. |
+| `BTR-9` | **The sender retains or regenerates identical object bytes for retransmission.** Transfer receipt/completion does not imply Service verification, activation, or undeclared durability. |
+
 ---
 
 # 5. Explicitly Superseded / Do-Not-Reintroduce Without Review
@@ -448,7 +468,7 @@ Historical spellings below are retained intentionally. Older documents contain t
 - **Exactly one storage element per Endpoint.** The invariant is now one Transport Entity boundary with declared bounded storage behind it, preserving Queue/Snapshot semantics per element.
 - **Native CAN11 cannot carry a WireAlias or several Wires.** Link-local aliases now select Wire plus VCN map. They remain absent from the canonical descriptor and Router.
 - **Independent per-LLL Guest VCN meanings.** Guest relationships are deployment-wide; native maps are scoped by their alias binding.
-- **BITS publicly composed as ReliableSegmented + SimpleUnreliable TransportTypes.** The proposal uses one BITS TransportType; detailed BITS adoption remains pending in §6.16.
+- **BITS publicly composed as ReliableSegmented + SimpleUnreliable TransportTypes.** The main design uses one BITS TransportType (`BITS-TRANSPORT §1`); internal implementation reuse does not create a public TransportType.
 
 - **Retired invariant IDs `WIRE-1` through `WIRE-5`.** The one-Origin/many-Nodes model, NodeId broadcast rules, and canonical Direction are superseded by `WIRE-6`..`WIRE-10`, `SCOPE-7`, and `PDU-8`; these IDs are never reused.
 - **Retired invariant IDs `ALIAS-1` through `ALIAS-4`.** The earlier canonical/anonymous WireAlias model is superseded by canonical local-only `kLocalBus` (`SCOPE-9`, `SCOPE-10`). New Native aliases are Link-local representation bindings (`LINK-22`), including when alias 0 initially selects LocalBus; the retired IDs are never reused.
@@ -489,7 +509,9 @@ Historical spellings below are retained intentionally. Older documents contain t
 - **The ascending QoS numbering** (`QoS 0` = Background through `QoS 3` = Critical), and the CAN inversion step it required. Reversed deliberately: QoS is now the count of strictly-higher-priority classes, so Critical is 0, and CAN packs the value unchanged (`CORE §14`, `LINK §2.2`). Any older table, constant, or arbitration-mapping helper using the ascending order is wrong, and the error is silent — it produces a system that runs with its priorities exactly inverted.
 - **`WireBand` as a per-deployment reinterpretation of the routing field**, with Band 0 standardized and Bands 1-3 user-defined including opaque or generated routing. Retired along with `RoutingWord`, and not worth recovering: there are no spare bits for it, and one canonical WireNumber interpretation is the point. The *requirements* it imposed on any extension point are worth keeping, though — a named immutable definition, deterministic validation, static compatibility checking, unambiguous canonical reconstruction, and fail-closed rejection of anything unsupported.
 - **`PathTag::Local` and its Direction/PeerId reconstruction rules.** Local scopes are canonical reserved WireNumbers (`kLocalDomain` and local-only `kLocalBus`), not routing-field values.
-- **A "reliable transport" defined by field sketches.** An earlier generation carried draft reliable-transport header layouts that were explicitly not a contract. They are not recovered, and the current position is that reliability is designed from concrete Service requirements or not at all (`FUTURE §3.2`). The intermediate transport in `FUTURE §3.1` is the one worth designing first.
+- **A "reliable transport" defined by field sketches.** An earlier generation carried draft reliable-transport header layouts that were explicitly not a contract. They are not recovered, and the current position is that reliability is designed from concrete Service requirements or not at all (`FUTURE §3.2`). BITS now has a dedicated finite-object prototype design with explicit state/lifetime gaps (`BITS-TRANSPORT`); its layouts alone still do not constitute a complete reliable protocol.
+- **BITS direct-to-flash receive hooks.** Flash/sink work belongs after receive acceptance in the owning processing context; the source proposal's specialized RX exception is not adopted.
+- **BITS hop validation as end-to-end integrity, or random session IDs as stale-packet exclusion.** Neither claim follows from those mechanisms (`BITS-TRANSPORT §8/§11`).
 - **Optional automatic remote infrastructure-error reports.** An earlier generation permitted these under heavy constraints. Superseded by `ERR-1`: nothing is emitted automatically in response to bad traffic. Deliberate remote diagnostic reporting remains available as an ordinary configured Service, subject to `ERR-3`.
 - **`Inline` delivery, and the `Inline`/`Serialized` delivery-policy pair.** Endpoint delivery is now always a bounded storage operation (`DISP-2`). This one will be proposed again, because a direct call is visibly cheaper than a queue and the argument for it is always "we measured it and it is faster." The reason it is refused is not performance: **`Inline` makes a Link's worst-case execution time depend on every Service that might be delivered to,** so the Link cannot be analyzed in isolation and its worst case changes when a deployment adds a Service its author never saw. It also makes message topology into call topology, allows a Service to reenter itself by transmitting during a receive, and has no meaning at all in RTL. The latency it saved was typical-case latency bought with an unbounded worst case.
 - **Delivery policy as a deployment-preserved property.** `DISP-2` used to promise that a declared policy survived a placement change, which implied there was something to preserve. Storage semantics are now fixed by the Service/Transport definition (`DISP-16`), so nothing is configurable and nothing needs preserving. Any tooling check written to verify policy preservation is checking a property that can no longer vary.
@@ -654,9 +676,19 @@ If an implementation task appears to require one of these, first verify that the
 
 ## 6.16 Higher layers
 
-- Detailed BITS integration remains pending. The Endpoint/Transport Entity boundary is adopted, but the proposal's connection/session state, Compact SETUP/SEGMENT/ACK layouts, flow-control behavior, sideband, and TransportType allocation have not been promoted into a main Transport specification.
-- Before BITS freeze: exact control byte and ACK encoding, modular window ambiguity, session reuse/tombstones, sink-acceptance/ACK commitment, completion/abort, retries, and explicit protocol REJECT versus silent infrastructure rejection. Its Link-integrity assumption must be reconciled with `LINK-12`; forwarding does not supply end-to-end integrity.
-- Detailed BITS API/conformance and the sequenced/end-to-end-protected datagram remain follow-on work. Adopting Transport Entity boundaries does not settle their implementation order.
+BITS now has its own main-set prototype design in `BITS-TRANSPORT`. Its boundaries, connection model, receipt/grant semantics and candidate Compact messages are incorporated. This is not protocol freeze. Open BITS work is detailed in `BITS-TRANSPORT §15`:
+
+- TransportType allocation, common control bits and message codes; exact Compact ACK/PROBE/REJECT encoding and Extended fields. The ten-byte SETUP and four-byte SEGMENT header remain candidate layouts.
+- Delayed ACK disambiguation across sequence cycles: a below-half-space window is necessary but does not identify an old-cycle ACK. Define a lifetime/association rule or an additional discriminator before claiming unrestricted long-session safety.
+- Session-ID reuse/quarantine, tombstone state and duration, stale traffic across reset/rebind, completion/close and lost-final-ACK handling, ABORT, bounded cancellation and any persistent resume.
+- Concrete sink success/pending/failure and durability APIs, async completion association, and partial-write recovery. The boundary is settled: no ACK before sink acceptance, no blind duplicate programming after an ambiguous failure.
+- Exact refusal envelope/reason codes and retry policy for valid authorized SETUP; malformed or unsupported envelopes remain silent. Do not reintroduce infrastructure error replies.
+- End-to-end integrity/authentication and stale-association mechanisms if required. The no-BITS-CRC direction does not close the gateway integrity gap; whole-object Service verification does not protect transfer control state.
+- Detailed library APIs, receiver-bank/mux shape, queue depth and TX budgets, retry/deadline guidance, implementation sequence, statistics and full BITS conformance integration. These remain follow-on work.
+
+Other higher layers remain open:
+
+- Sequenced/end-to-end-protected datagram; BITS does not select its implementation order.
 - Multi-Host command-source policy if useful.
 - Formal Manifest, Flow, WireContract, and static analysis models.
 - Security/authentication profiles.
@@ -680,6 +712,8 @@ If an implementation task appears to require one of these, first verify that the
 
 # 7. Pending Source Material
 
+`docs/proposed/` has been removed from the current tree after main-set integration. `INTEGRATION` retains source-by-source disposition and immutable Git-history links. Removal changes source location, not protocol status: unresolved BITS/CAN choices remain open in §6.
+
 The following older documents have **not** yet been mined. Their model is the superseded generation, but they may hold recoverable detail in the same way `WS_old/network/architecture_overview.md` did.
 
 | Source | Approx. lines | Expected destination |
@@ -699,6 +733,6 @@ The mining method that has worked so far: read for concepts that were *dropped* 
 
 # 8. Revision History
 
-Current revision: **0.15** (Host terminology, Endpoint/Transport Entity boundaries, and unified CAN11 VCN integration; detailed BITS protocol integration remains pending, and profile packing/control/transition details remain provisional).
+Current revision: **0.17** (retired proposal directory removed; provenance links pinned to Git history. BITS/CAN protocol choices, detailed APIs, implementation and full conformance retain their existing open status).
 
 Full revision narrative and superseded-source provenance live in [history.md](history.md). `REG` keeps only status; `HIST` is archival and is not part of the control surface.

@@ -1,13 +1,13 @@
 # WireSpaces — Proposal Integration Disposition
 
-**Status:** Integration record for the main document set, revision 0.15
+**Status:** Integration record for the main document set, revision 0.17
 **Purpose:** Record which proposal content is incorporated, superseded, or still pending
 **Authority:** `REG` owns status and invariants; `CORE` owns behavior; `LINK` owns carrier representations. This table does not independently standardize a proposal.
 **Document code:** `INTEGRATION`
 
 ## 1. Scope of this integration
 
-This pass implements the disposition review, Host terminology and Endpoint/Transport Entity boundary changes, and unified CAN11 VCN integration. It does not promote the detailed BITS protocol into the main set, select its TransportType number, or implement code. Source proposal files remain unchanged as provenance.
+This record covers proposal disposition, Host terminology and Endpoint/Transport Entity boundaries, unified CAN11 VCN integration, and the dedicated BITS main document. `bits_transport.md` (`BITS-TRANSPORT`) now owns the BITS prototype design. Exact protocol freeze, TransportType allocation, concrete library APIs, implementation and full conformance integration remain follow-on work. The retired `docs/proposed/` directory is removed from the current tree. Source links below are pinned to commit `02894d3a84e48ffe0ddeb6d27db87abf4af9c99f`, which retains the original proposal content for provenance; removal does not adopt any remaining proposal decisions.
 
 Host terminology is confirmed: `Participant` → `Host`, `ParticipantId` → `HostId`, `SrcParticipantId` → `SrcHostId`, and `DestParticipantId` → `DestHostId`. It preserves one deployment-scoped identity per Endpoint Domain and the provisional six-byte descriptor. A Host is not synonymous with a physical device or a tooling computer.
 
@@ -15,14 +15,14 @@ Host terminology is confirmed: `Participant` → `Host`, `ParticipantId` → `Ho
 
 | Source | Disposition | Main-set destination / remaining work |
 |---|---|---|
-| [Early addressing ideas](proposed/idea.md) | Superseded as a standalone design. Its VCN/default-map ideas feed the unified proposal. | `LINK §2`; no independent authority for its compact/general encoding or numeric examples. |
-| [Global identity and multi-Origin revision 2](<proposed/WireSpaces Change Proposal — Global Participants, Multi-Origin Wires, and Revised Addressing.md>) | Global Endpoint-Domain identity already incorporated. Per-interaction Origin/Direction and earlier encoding candidates superseded. | `CORE §3`, `REG §5`; preserve its evidence limitations and physical-device identity question. |
-| [Global identity change request revision 3](<proposed/change_request_global_participants_multi_origin(1).md>) | Multi-initiator/source-destination semantics already incorporated. Four 10-bit fields, destination next-hop wording, discriminator coexistence, and direct-only compact CAN superseded. | `CORE §2–§5`, `LINK §2`; no reintroduction of its layout or mandatory migration instructions. |
-| [Revision 6](<proposed/WireSpaces Change Request — Revision 6.md>) | Logical-Bus propagation, overlapping Wires, complete canonical ingress, and six-byte preferred descriptor already incorporated. | `CORE`; shared/exclusive CAN layouts and its one-Wire restriction superseded by unified VCN. Widths remain provisional, regardless of stronger wording in the source. |
-| [Revision 6 refinement](proposed/WireSpaces_Revision_6_Refinement_CAN11_and_Feedback.md) | Canonical local-only `kLocalBus`, identity-universe/splice boundaries, allocated Guest coexistence, and topology/headroom gate already incorporated. | `CORE`, `REG`; three-profile baseline, native VCN8, and one-Wire-per-CAN11 restriction now superseded. |
-| [Unified CAN11 VCN](proposed/WireSpaces_CAN11_Unified_VCN_Proposal.md) | Incorporated as the current CAN11 direction, with exact profile details still provisional. | `LINK §2`, `DEPLOY §2.4`, `REG`: Guest/Native VCN, two-Main default map, alias-scoped native maps, deployment-wide Guest meanings, immutable aliases, spare-alias migration. Compact/General is experimental only. |
-| [CAN ID provisioning](proposed/can_id_provisioning.md) | Candidate mechanism only; not an accepted commissioning profile. | `DEPLOY §1.2`, `REG §6.8/§6.10`: review identical-response discovery. Old NodeId/alias layout and 64-bit identity are not imported; UUID versus DeviceId remains unresolved. |
-| [BITS transport design](proposed/BITS_design_updated.md) | Endpoint/Transport Entity boundaries incorporated; detailed BITS protocol remains pending. | `CORE §9/§20`, `REG §6.12/§6.16`: one boundary, multiple declared ingress elements, deferred protocol processing, explicit copy/reference ownership. Separate protocol document, API and full conformance integration remain follow-on work. |
+| [Early addressing ideas](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/idea.md) | Superseded as a standalone design. Its VCN/default-map ideas feed the unified proposal. | `LINK §2`; no independent authority for its compact/general encoding or numeric examples. |
+| [Global identity and multi-Origin revision 2](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/WireSpaces%20Change%20Proposal%20%E2%80%94%20Global%20Participants%2C%20Multi-Origin%20Wires%2C%20and%20Revised%20Addressing.md) | Global Endpoint-Domain identity already incorporated. Per-interaction Origin/Direction and earlier encoding candidates superseded. | `CORE §3`, `REG §5`; preserve its evidence limitations and physical-device identity question. |
+| [Global identity change request revision 3](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/change_request_global_participants_multi_origin%281%29.md) | Multi-initiator/source-destination semantics already incorporated. Four 10-bit fields, destination next-hop wording, discriminator coexistence, and direct-only compact CAN superseded. | `CORE §2–§5`, `LINK §2`; no reintroduction of its layout or mandatory migration instructions. |
+| [Revision 6](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/WireSpaces%20Change%20Request%20%E2%80%94%20Revision%206.md) | Logical-Bus propagation, overlapping Wires, complete canonical ingress, and six-byte preferred descriptor already incorporated. | `CORE`; shared/exclusive CAN layouts and its one-Wire restriction superseded by unified VCN. Widths remain provisional, regardless of stronger wording in the source. |
+| [Revision 6 refinement](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/WireSpaces_Revision_6_Refinement_CAN11_and_Feedback.md) | Canonical local-only `kLocalBus`, identity-universe/splice boundaries, allocated Guest coexistence, and topology/headroom gate already incorporated. | `CORE`, `REG`; three-profile baseline, native VCN8, and one-Wire-per-CAN11 restriction now superseded. |
+| [Unified CAN11 VCN](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/WireSpaces_CAN11_Unified_VCN_Proposal.md) | Incorporated as the current CAN11 direction, with exact profile details still provisional. | `LINK §2`, `DEPLOY §2.4`, `REG`: Guest/Native VCN, two-Main default map, alias-scoped native maps, deployment-wide Guest meanings, immutable aliases, spare-alias migration. Compact/General is experimental only. |
+| [CAN ID provisioning](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/can_id_provisioning.md) | Candidate mechanism only; not an accepted commissioning profile. | `DEPLOY §1.2`, `REG §6.8/§6.10`: review identical-response discovery. Old NodeId/alias layout and 64-bit identity are not imported; UUID versus DeviceId remains unresolved. |
+| [BITS transport design](https://github.com/ofdouglas/WireSpaces/blob/02894d3a84e48ffe0ddeb6d27db87abf4af9c99f/docs/proposed/BITS_design_updated.md) | Incorporated as a main-set prototype design, with exact protocol and API choices still open. | [bits_transport.md](bits_transport.md) (`BITS-TRANSPORT`), `CORE §9/§20`, `REG §6.16`: connection/session model, bounded execution, candidate Compact messages, ACK/grants/retry/PROBE, sideband, sink contracts and placement. See the explicit integration boundaries below. Detailed API, implementation and full conformance remain follow-on work. |
 
 ## 3. Resolutions made in this pass
 
@@ -34,6 +34,15 @@ Host terminology is confirmed: `Participant` → `Host`, `ParticipantId` → `Ho
 - **Migration:** prepare and validate a spare alias before switching TX; pin accepted work to its original binding; retire/reuse only after stale-frame exclusion. No-spare and Guest updates need coordinated offline/cutover mechanisms rather than live in-place mutation.
 - **Profile boundaries:** MainA/MainB/NodeN are mapping positions, WireAlias/VCN/Direction are Link-local fields, and the Router continues to see canonical Wire/Host identity only.
 
+### BITS main-document integration boundaries
+
+- Compact SETUP remains a ten-byte candidate and SEGMENT a four-byte header; the source's “fixed” SETUP wording does not freeze the still-unallocated control byte or TransportType. Extended and ACK encodings remain open.
+- Retention in ingress is distinct from sink acceptance; only committed sink acceptance is ACKable. At-most-once sink delivery is scoped to retained session state, not reset-spanning application effects.
+- Small modular windows do not solve delayed ACKs from an earlier sequence cycle. ACK disambiguation, packet lifetime and session reuse remain explicit protocol gaps.
+- A valid authorized SETUP may receive a bounded protocol refusal; malformed/unsupported envelopes and infrastructure rejection remain silent. The source's broad rejection-reason list is not imported as automatic error replies.
+- No BITS per-message CRC remains the current direction, with an explicit limitation: hop integrity does not cover gateway corruption or authenticate/replay-protect control state. Whole-object Service verification is distinct.
+- Final ACK completion is a candidate, not a settled handshake. Direct flash work in the receive hook remains rejected; concrete APIs and full conformance integration are still deferred.
+
 ## 4. Remaining decisions and follow-on integration
 
 `REG §6` remains authoritative. In particular:
@@ -42,7 +51,7 @@ Host terminology is confirmed: `Participant` → `Host`, `ParticipantId` → `Ho
 - Define fingerprints, distributed readiness, sender-selection publication, alias retirement/reuse, partial-migration recovery, and Guest cutover. The safety requirements do not constitute a complete management protocol.
 - Redesign and validate PDUA control/Endpoint packing, N=1 forms, CRC, DLC/padding, and capacity. Existing capacity examples remain conditional.
 - Resolve commissioning identity and prove anonymous-response behavior on the selected controller/medium before claiming support.
-- Promote BITS into a dedicated document with an unambiguous cross-reference code: `BITS` currently means `bit_layout.md`. Resolve completion, session reuse, sequence/window ambiguity, sink commitment, rejection boundaries, and hop versus end-to-end integrity.
+- Complete BITS protocol freeze under `BITS-TRANSPORT §15`: exact envelope/ACK encoding, delayed-ACK ambiguity, session reuse/tombstones, completion/abort, and sink result/durability mechanics. `BITS` remains the code for `bit_layout.md`; it was not renamed.
 - Update detailed Transport APIs, implementation sequence, and BITS conformance in the follow-on transport pass. Current library examples describe the simple-datagram slice, not a completed BITS architecture.
 
-Historical revision narratives and proposal filenames retain their original terminology. Current semantic prose and API sketches in the main set use Host terminology. This is documentation integration; it does not claim that repository code has implemented the revised design.
+Historical revision narratives and proposal sources in Git history retain their original terminology. Current semantic prose and API sketches in the main set use Host terminology. This is documentation integration; it does not claim that repository code has implemented the revised design.

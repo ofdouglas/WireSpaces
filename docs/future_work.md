@@ -56,11 +56,11 @@ Before it can be baseline, the copyless design still has to solve lifetime, fan-
 
 # 3. Additional Transports
 
-The canonical descriptor reserves a 3-bit `TransportType` and the baseline is an Unreliable Datagram (`CORE §20`). The BITS proposal supplies a candidate finite-object protocol; its Endpoint/Transport Entity boundary is incorporated, while detailed protocol integration and registry allocation remain pending (`REG §6.16`).
+The canonical descriptor reserves a 3-bit `TransportType` and the baseline is an Unreliable Datagram (`CORE §20`). BITS finite-object transfer now has a main-set prototype design in `BITS-TRANSPORT`; exact encodings, session/completion rules and registry allocation remain open (`REG §6.16`). This section holds other Transport directions and residual work.
 
 ## 3.1 Sequenced / end-to-end-protected datagram
 
-This is the transport that should be designed **first**, ahead of anything reliable, and it is much smaller than it sounds. It adds two pieces of metadata to an ordinary unreliable datagram:
+This is a separate Transport candidate, not an implementation-order prerequisite for BITS. It is smaller than a reliable transfer protocol. It adds two pieces of metadata to an ordinary unreliable datagram:
 
 ```text
 a sequence or liveness counter    detect gaps, duplicates, and reordering
@@ -75,20 +75,11 @@ Note what this does *not* provide: an end-to-end check detects accidental corrup
 
 ## 3.2 Reliable and bulk transport
 
-The BITS proposal is the current finite-object candidate. `CORE §9/§20` now permits its separate bounded ingress workstreams and deferred protocol processing. This does not settle its wire format, state machine, sink commitment, end-to-end integrity, or detailed API.
+BITS finite-object transfer is now documented in `BITS-TRANSPORT`: object segmentation, bounded receiver grants, retries, ACK/probe handling and optional unreliable sideband. Its main-set status does not freeze the wire protocol or promise persistent resume.
 
-Firmware images, files, logs, and similar data should eventually use a Transport that can:
+Remaining BITS work is indexed by `BITS-TRANSPORT §15` and `REG §6.16`: exact encodings and APIs, ACK/session lifetime, completion/abort, sink commitment and failure mechanics, conformance evidence, and any end-to-end protection. Ingress storage never silently overwrites reliable segments; retry does not turn latest-value replacement into history-preserving delivery.
 
-- segment across multiple PDUs;
-- retry missing data;
-- bound receiver storage;
-- resume where useful.
-
-Receiver windows and credits belong at this level rather than in a Link LLL, which is why Classical-CAN Hosts are not expected to implement generic Link flow control (`LINK §2.12`).
-
-Other plausible Transports: request/response with retry and correlation, and a command Transport that accepts input from several Hosts and selects a source based on health or timeout (`CORE §20.1`).
-
-Open before any of this can be designed: the TransportType registry allocation, whether ordering guarantees are a separate declared axis from delivery guarantees, and how a reliable Transport interacts with latest-value queue replacement (`CORE §14.3`), which is designed to discard exactly the data a reliable stream wants to keep.
+Receiver windows belong at Transport level rather than in a Link LLL (`LINK §2.12`). Other plausible Transports remain request/response with retry and correlation, and multi-Host command-source selection based on health or timeout (`CORE §20.1`). Their requirements and wire formats remain undesigned. No public `ReliableSegmented` TransportType is implied by reusing BITS internals.
 
 ---
 

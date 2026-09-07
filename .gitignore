@@ -11,3 +11,6 @@ build/
 *.pyc
 
 
+
+# Local verification environment
+.venv/

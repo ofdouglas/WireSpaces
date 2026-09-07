@@ -4,6 +4,9 @@
  */
 
 #include <platform/avr/uart0.h>
+#include <platform/avr/millisecond_clock.h>
+#include <wirespaces/hal/clock.h>
+#include <avr/interrupt.h>
 #include <wirespaces/crc/crc_algorithm.h>
 #include <wirespaces/links/uart_hdlc/decoder.h>
 #include <wirespaces/transports/bits/receiver_engine.h>
@@ -177,7 +180,7 @@ private:
 
 bool matchesConnection(const wirespaces::Header& header) noexcept {
     return header.transportType() == wirespaces::TransportType::kBits &&
-           !header.hasExtensions() &&
+           header.hasSupportedControl() &&
            header.wire == wiring_constants::kTestWire &&
            header.source == wiring_constants::kPcHost &&
            header.destination == wiring_constants::kArduinoHost &&
@@ -201,13 +204,16 @@ void processFrame(wirespaces::ByteSpan frame, bits::BitsReceiverEngine& engine) 
         return;
     }
 
-    engine.process(message);
+    engine.process(message, wirespaces::hal::MillisecondClock::now());
 }
 
 }  // namespace
 
 int main() {
     wirespaces::platform::avr::uart0Init(wiring_constants::kUartBaudRate);
+
+    wirespaces::platform::avr::millisecondClockInit();
+    sei();
 
     UartPduSender sender{};
     RamProfileCallbacks callbacks{};
@@ -216,6 +222,7 @@ int main() {
     wirespaces::links::uart_hdlc::HdlcDecoder<kMaximumCanonicalSize> decoder{};
 
     for (;;) {
+        engine.poll(wirespaces::hal::MillisecondClock::now());
         while (wirespaces::platform::avr::uart0ByteAvailable()) {
             const std::uint8_t byte{
                 wirespaces::platform::avr::uart0ReadByte()};

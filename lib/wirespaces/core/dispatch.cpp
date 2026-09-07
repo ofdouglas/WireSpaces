@@ -43,6 +43,9 @@ DispatchResult Dispatcher::dispatch(const PacketBuffer& packet) const noexcept {
 
 DispatchResult Dispatcher::dispatch(const PacketBuffer& packet, const HostInfo& host) const noexcept {
     const Header& header{packet.header()};
+    if (!header.hasSupportedControl()) {
+        return DispatchResult::kRejected;
+    }
     const bool broadcast{header.destination.isBroadcast()};
     if (broadcast && !host.isMemberOf(header.wire)) {
         return DispatchResult::kNoEndpoint;

@@ -17,7 +17,10 @@ public:
     TransferAdmission beginTransfer(const TransferInfo& info) noexcept override {
         return info.total_size <= object_.size() ? TransferAdmission::kAccepted : TransferAdmission::kTooLarge;
     }
-    void onTransferFailed(FailureReason) noexcept override {}
+    void onTransferFailed(FailureReason reason) noexcept override {
+        ++failures_;
+        failure_ = reason;
+    }
     bool onSegment(uint32_t offset, ByteSpan payload) noexcept override {
         if (offset + payload.size() > object_.size()) {
             return false;
@@ -40,6 +43,8 @@ public:
     uint8_t datagram_size_{0U};
     uint8_t segments_{0U};
     bool complete_{false};
+    uint8_t failures_{0U};
+    FailureReason failure_{FailureReason::kSinkRejected};
 };
 
 class NarrowSender final : public ReceiverPduSender {
@@ -74,6 +79,25 @@ std::array<uint8_t, kSegmentHeaderSize + Size> segment(
 static_assert(WIRESPACES_BITS_RECEIVER_MAX_WINDOW_WIDTH == 1,
               "test must compile the constrained window implementation");
 
+// The compiled width-one profile releases an abandoned sink and admits a replacement session.
+TEST(BitsNarrowReceiverEngineTest, ExpiresAndReadmitsAfterPeerDisappears) {
+    NarrowCallbacks callbacks{};
+    NarrowSender sender{};
+    BitsReceiverEngine engine{{4U, 1U, 16U, 100U}, callbacks, sender};
+    uint8_t setup[kSetupSize]{};
+    ASSERT_TRUE(encodeSetup({0x51U, 0U, 1U, 4U, 4U}, MutableByteSpan{setup}));
+    ASSERT_EQ(engine.process(ByteSpan{setup}, 0U), ProcessResult::kProgress);
+    EXPECT_EQ(engine.poll(99U), ProcessResult::kIdle);
+    EXPECT_EQ(engine.poll(100U), ProcessResult::kError);
+    EXPECT_EQ(engine.poll(101U), ProcessResult::kIdle);
+    EXPECT_EQ(callbacks.failures_, 1U);
+    EXPECT_EQ(callbacks.failure_, FailureReason::kInactivityTimeout);
+    ASSERT_TRUE(encodeSetup({0x52U, 0U, 1U, 4U, 4U}, MutableByteSpan{setup}));
+    EXPECT_EQ(engine.process(ByteSpan{setup}, 102U), ProcessResult::kProgress);
+    EXPECT_EQ(engine.state(), TransferState::kActive);
+}
+
+// The constrained profile retains in-order transfer and sideband behavior.
 TEST(BitsNarrowReceiverEngineTest, TransfersAndExchangesDatagrams) {
     NarrowCallbacks callbacks{};
     NarrowSender sender{};
@@ -85,7 +109,7 @@ TEST(BitsNarrowReceiverEngineTest, TransfersAndExchangesDatagrams) {
     ASSERT_TRUE(encodeUserDatagram(
         ByteSpan{request_payload.data(), request_payload.size()},
         MutableByteSpan{request.data(), request.size()}));
-    ASSERT_EQ(engine.process(ByteSpan{request.data(), request.size()}),
+    ASSERT_EQ(engine.process(ByteSpan{request.data(), request.size()}, 0U),
               ProcessResult::kProgress);
     EXPECT_EQ(callbacks.datagram_size_, 2U);
     EXPECT_EQ(callbacks.datagram_[0], 0xAAU);
@@ -97,7 +121,7 @@ TEST(BitsNarrowReceiverEngineTest, TransfersAndExchangesDatagrams) {
     ASSERT_TRUE(encodeSetup(
         wirespaces::transport::bits::Setup{0x51U, 0x20U, 2U, 4U, 2U},
         MutableByteSpan{setup.data(), setup.size()}));
-    ASSERT_EQ(engine.process(ByteSpan{setup.data(), setup.size()}),
+    ASSERT_EQ(engine.process(ByteSpan{setup.data(), setup.size()}, 0U),
               ProcessResult::kProgress);
     const std::array<uint8_t, kAckSize> initial_ack{
         encodeControl(MessageType::kAck), 0x51U, 0x00U,
@@ -107,18 +131,18 @@ TEST(BitsNarrowReceiverEngineTest, TransfersAndExchangesDatagrams) {
                            initial_ack.begin(), initial_ack.end()));
 
     const auto early{segment(1U, std::array<uint8_t, 4U>{4U, 5U, 6U, 7U})};
-    EXPECT_EQ(engine.process(ByteSpan{early.data(), early.size()}),
+    EXPECT_EQ(engine.process(ByteSpan{early.data(), early.size()}, 0U),
               ProcessResult::kProgress);
     EXPECT_EQ(callbacks.segments_, 0U);
 
     const auto first{segment(0U, std::array<uint8_t, 4U>{0U, 1U, 2U, 3U})};
     const auto second{segment(1U, std::array<uint8_t, 4U>{4U, 5U, 6U, 7U})};
     const auto final{segment(2U, std::array<uint8_t, 2U>{8U, 9U})};
-    EXPECT_EQ(engine.process(ByteSpan{first.data(), first.size()}),
+    EXPECT_EQ(engine.process(ByteSpan{first.data(), first.size()}, 0U),
               ProcessResult::kProgress);
-    EXPECT_EQ(engine.process(ByteSpan{second.data(), second.size()}),
+    EXPECT_EQ(engine.process(ByteSpan{second.data(), second.size()}, 0U),
               ProcessResult::kProgress);
-    EXPECT_EQ(engine.process(ByteSpan{final.data(), final.size()}),
+    EXPECT_EQ(engine.process(ByteSpan{final.data(), final.size()}, 0U),
               ProcessResult::kProgress);
     const std::array<uint8_t, kAckSize> completed_ack{
         encodeControl(MessageType::kAck), 0x51U, 0x00U,

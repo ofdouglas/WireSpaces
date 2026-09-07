@@ -46,9 +46,9 @@ public:
                       void* output_context) noexcept
         : router_{router}, set_brightness_{set_brightness}, output_context_{output_context} {}
 
-    /** @brief Return the receiver registered with the Domain Dispatcher. */
+    /** @brief Return Simple-only admission, filtering controls before queue storage. */
     wirespaces::EndpointReceiver& receiver() noexcept {
-        return receive_queue_;
+        return transport_receiver_;
     }
 
     /** @brief Process every command currently queued for this Service. */
@@ -105,6 +105,8 @@ private:
     SetBrightness set_brightness_{nullptr};
     void* output_context_{nullptr};
     ReceiverQueue receive_queue_{};
+    wirespaces::TransportFilterReceiver transport_receiver_{
+        receive_queue_, wirespaces::TransportType::kSimple};
 };
 
 static_assert(sizeof(LedControlMessage) == 4U);

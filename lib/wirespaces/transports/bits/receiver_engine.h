@@ -56,7 +56,7 @@ struct TransferInfo {
     uint16_t segment_size;
 };
 enum class TransferAdmission : uint8_t { kAccepted, kBusy, kTooLarge, kRejected };
-enum class FailureReason : uint8_t { kSinkRejected, kSendFailed };
+enum class FailureReason : uint8_t { kSinkRejected, kSendFailed, kInactivityTimeout };
 enum class AbortReason : uint8_t { kLocal, kPeer };
 
 /** @brief Service callbacks invoked synchronously by BitsReceiverEngine. */
@@ -97,11 +97,15 @@ protected:
     ~ReceiverPduSender() = default;
 };
 
-/** @brief Static resource limits for one synchronous Compact BITS receiver. */
+constexpr uint32_t kDefaultReceiverInactivityTimeoutMs{5000U};
+
+/** @brief Static resource limits and inactivity policy for one synchronous BITS receiver. */
 struct ReceiverEngineConfig {
     uint16_t maximum_segment_size{0U};
     uint8_t receive_window_width{WIRESPACES_BITS_RECEIVER_MAX_WINDOW_WIDTH};
     uint32_t maximum_object_size{UINT32_MAX};
+    // Must exceed the peer's longest expected retry/poll gap. Zero delegates recovery to the caller.
+    uint32_t inactivity_timeout_ms{kDefaultReceiverInactivityTimeoutMs};
 };
 
 /**
@@ -117,15 +121,25 @@ public:
                        ReceiverCallbacks& callbacks,
                        ReceiverPduSender& sender) noexcept;
 
-    ProcessResult process(ByteSpan message) noexcept;
+    /** @brief Consume one PDU at now_ms; check expiry before accepting its activity.
+     * Only valid current-session Setup, in-grant segments and probes renew inactivity.
+     * On expiry this PDU is discarded; a new Setup can be retried on a later call.
+     */
+    ProcessResult process(ByteSpan message, uint32_t now_ms) noexcept;
+    /** @brief Poll even when no PDU arrives, using the same wrapping monotonic clock.
+     * Expiry reports kError/onTransferFailed exactly once without sending any packet.
+     * Call at intervals shorter than the timeout (and less than a full clock wrap).
+     * Completed objects retain their state and duplicate-final-segment ACK behavior.
+     */
+    ProcessResult poll(uint32_t now_ms) noexcept;
     SendResult sendDatagram(ByteSpan payload) noexcept;
     SendResult abort() noexcept;
     TransferState state() const noexcept { return state_; }
 
 private:
-    [[nodiscard]] bool handleSegment(ByteSpan message) noexcept;
-    [[nodiscard]] bool handleControl(ByteSpan message, MessageType type) noexcept;
-    [[nodiscard]] bool handleSetup(ByteSpan payload) noexcept;
+    [[nodiscard]] bool handleSegment(ByteSpan message, uint32_t now_ms) noexcept;
+    [[nodiscard]] bool handleControl(ByteSpan message, MessageType type, uint32_t now_ms) noexcept;
+    [[nodiscard]] bool handleSetup(ByteSpan payload, uint32_t now_ms) noexcept;
     [[nodiscard]] bool handleAbort(ByteSpan payload) noexcept;
     [[nodiscard]] bool sendAck() noexcept;
     [[nodiscard]] bool sendReject(uint8_t session_id, RejectReason reason) noexcept;
@@ -140,6 +154,7 @@ private:
     TransferState state_{TransferState::kIdle};
     Setup setup_{};
     SendResult last_send_{SendResult::kSent};
+    uint32_t last_activity_ms_{0U};
     uint32_t segment_count_{0U};
     uint32_t contiguous_count_{0U};
 #if WIRESPACES_BITS_RECEIVER_MAX_WINDOW_WIDTH == 1

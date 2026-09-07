@@ -22,8 +22,8 @@ remains separate via `initializeResponseTo()`.
 BITS's existing `ConnectionConfig` name aliases the common address type. No
 packet storage fields, generated connection defaults, or WireSplice behavior
 are added. Constants are not guaranteed to be free of AVR SRAM cost: with the
-current toolchain these boot-profile builds use 36 bytes of static data versus
-30 before this adapter (both flash size gates still pass).
+current toolchain these boot-profile builds use 48 bytes of static data,
+including the inactivity clock (both flash size gates still pass).
 
 ## Demo
 
@@ -62,15 +62,22 @@ Build from WSL:
 make
 ```
 
-Flash through PICkit 5 using MPLAB IPE's AVR ISP support:
+Flash through the Uno UART bootloader (the temporary default while PICkit ISP is unreliable):
 
 ```sh
 make flash
 ```
 
-The flash targets select PICkit 5 independently of the serial port. Override
-`IPECMD`, `PICKIT`, or `AVR_ISP_SPEED` when necessary. The Makefile retries
-intermittent ISP failures up to `FLASH_ATTEMPTS` times (default three).
+Install `avrdude` for UART uploads. All four flash targets use `PORT` (default
+`/dev/arduino-uno`) at `UPLOAD_BAUD=115200`, with write verification enabled.
+An installed Uno Optiboot bootloader is required; UART uploads preserve it.
+Override `AVRDUDE`, `PORT`, or `UPLOAD_BAUD` when necessary.
+
+PICkit 5 remains available with `make flash FLASH_METHOD=pickit`. It uses MPLAB
+IPE's AVR ISP support, minimum programming speed and `AVR_ISP_SPEED=0.03125`
+(31.25 kHz). Override `IPECMD`, `PICKIT`, or `AVR_ISP_SPEED` when necessary.
+PICkit attempts retry up to `FLASH_ATTEMPTS` times (default three). ISP flashing
+may erase the UART bootloader; reinstall Optiboot before returning to UART uploads.
 
 Serial verification defaults to `/dev/arduino-uno`:
 
@@ -255,7 +262,12 @@ make test-bits
 The `bits_boot_profile_ram` firmware is the receiver-only precursor to the
 4 KB bootloader. It directly composes the synchronous, one-window Compact BITS
 engine with WireSpaces headers and UART HDLC. It does not link `Dispatcher`,
-`Router`, queued ingress, timers, or a BITS transmitter.
+`Router`, queued ingress, or a BITS transmitter. Timer0 supplies the monotonic
+millisecond clock used to expire abandoned transfers.
+
+Both BITS examples release incomplete transfers after 5 seconds without valid
+current-session activity. A lost ABORT or disconnected sender therefore does not
+leave the sink permanently busy. Completed objects retain their existing lifetime.
 
 Build and check both size gates:
 
@@ -270,7 +282,7 @@ retains a minimal user-datagram service; it must remain at or below 3,350 bytes
 before board-specific flash code is added. Both targets write ELF and map files
 under `build/boot_profile/`.
 
-Flash the hardware-test image through PICkit 5 and run
+Flash the hardware-test image through the default UART bootloader and run
 the PC test:
 
 ```sh

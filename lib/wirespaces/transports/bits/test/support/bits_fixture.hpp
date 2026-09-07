@@ -216,7 +216,7 @@ protected:
             if (transmitter_.process(now_ms_) == ProcessResult::kError) {
                 return false;
             }
-            if (receiver_.process() == ProcessResult::kError) {
+            if (receiver_.process(now_ms_) == ProcessResult::kError) {
                 return false;
             }
             if (transmitter_.state() == TransferState::kCompleted ||

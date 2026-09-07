@@ -22,7 +22,8 @@ SendResult sendResult(RouteResult result) noexcept {
 
 bool matchesConnection(const PacketBuffer& packet, const ConnectionConfig& connection) noexcept {
     const Header& header{packet.header()};
-    return header.transportType() == TransportType::kBits && header.wire == connection.wire &&
+    return header.hasSupportedControl() && header.transportType() == TransportType::kBits &&
+           header.wire == connection.wire &&
            header.source == connection.remote_host && header.destination == connection.local_host &&
            header.endpoint == connection.endpoint;
 }
@@ -71,7 +72,7 @@ bool elapsed(uint32_t now_ms, uint32_t start_ms, uint32_t duration_ms) noexcept 
 namespace {
 
 ReceiverEngineConfig receiverEngineConfig(
-    foundation::Span<PacketBuffer*> segment_ingress) noexcept {
+    foundation::Span<PacketBuffer*> segment_ingress, uint32_t inactivity_timeout_ms) noexcept {
     const size_t slot_count{segment_ingress.size() < kCompactWindowWidth
                                 ? segment_ingress.size()
                                 : kCompactWindowWidth};
@@ -94,17 +95,18 @@ ReceiverEngineConfig receiverEngineConfig(
     if (window_width == 0U) {
         maximum_segment_size = 0U;
     }
-    return ReceiverEngineConfig{maximum_segment_size, window_width};
+    return ReceiverEngineConfig{maximum_segment_size, window_width, UINT32_MAX, inactivity_timeout_ms};
 }
 
 }  // namespace
 
 BitsReceiver::BitsReceiver(ConnectionConfig connection, Router& router,
-                           ReceiverCallbacks& callbacks, ReceiverStorage storage) noexcept
+                           ReceiverCallbacks& callbacks, ReceiverStorage storage,
+                           uint32_t inactivity_timeout_ms) noexcept
     : connection_{connection},
       router_{router},
       storage_{storage},
-      engine_{receiverEngineConfig(storage.segment_ingress), callbacks, *this} {}
+      engine_{receiverEngineConfig(storage.segment_ingress, inactivity_timeout_ms), callbacks, *this} {}
 
 ReceiveResult BitsReceiver::receive(const PacketBuffer& packet) noexcept {
     if (!matchesConnection(packet, connection_) || packet.payload().empty()) {
@@ -146,7 +148,13 @@ ReceiveResult BitsReceiver::receive(const PacketBuffer& packet) noexcept {
     return free_slot_seen ? ReceiveResult::kRejected : ReceiveResult::kFull;
 }
 
-ProcessResult BitsReceiver::process() noexcept {
+ProcessResult BitsReceiver::process(uint32_t now_ms) noexcept {
+    if (engine_.poll(now_ms) == ProcessResult::kError) {
+        // Expired-session backlog must not keep a dead transfer alive or restart it.
+        segment_occupied_mask_ = 0U;
+        datagram_occupied_ = false;
+        return ProcessResult::kError;
+    }
     ProcessResult result{ProcessResult::kIdle};
 
     if (segment_occupied_mask_ != 0U) {
@@ -160,7 +168,7 @@ ProcessResult BitsReceiver::process() noexcept {
                                       static_cast<uint16_t>(~bit));
             const PacketBuffer* const packet{storage_.segment_ingress[index]};
             result = engine_.process(
-                packet == nullptr ? ByteSpan{} : packet->payload());
+                packet == nullptr ? ByteSpan{} : packet->payload(), now_ms);
             break;
         }
     }
@@ -168,7 +176,7 @@ ProcessResult BitsReceiver::process() noexcept {
     if (datagram_occupied_) {
         const ProcessResult datagram_result{
             engine_.process(ByteSpan{storage_.datagram_ingress.payload().data(),
-                                     storage_.datagram_ingress.size()})};
+                                     storage_.datagram_ingress.size()}, now_ms)};
         datagram_occupied_ = false;
         if (datagram_result == ProcessResult::kError ||
             result == ProcessResult::kError) {
@@ -434,7 +442,7 @@ bool BitsTransmitter::handleAck(ByteSpan payload) noexcept {
     }
     if ((session_.state != TransferState::kStarting &&
          session_.state != TransferState::kActive) ||
-        ack.session_id != session_.setup.session_id) {
+        ack.session_id != session_.setup.session_id || !session_.setup_sent) {
         return true;
     }
 
@@ -447,6 +455,13 @@ bool BitsTransmitter::handleAck(ByteSpan payload) noexcept {
         grant_span > kCompactWindowWidth ||
         (session_.acknowledged_count + advance + grant_span) > session_.segment_count ||
         (ack.window_bitmap & static_cast<uint16_t>(~lowBitMask(grant_span))) != 0U) {
+        return true;
+    }
+
+    // A cumulative ACK must cover only segments admitted by the local Link.
+    // In particular, stale ACKs must not complete a newly reused session during SETUP.
+    const uint16_t advanced_mask{lowBitMask(advance)};
+    if ((session_.sent_bitmap & advanced_mask) != advanced_mask) {
         return true;
     }
 

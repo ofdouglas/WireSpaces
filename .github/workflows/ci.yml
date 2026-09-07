@@ -15,7 +15,8 @@ concurrency:
 jobs:
   build-and-test:
     name: Build and test
-    runs-on: ubuntu-latest
+    # Match the validated AVR GCC 7.3 toolchain and size budgets.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,9 +25,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            cmake \
-            ninja-build
+            build-essential cmake ninja-build nodejs python3-venv \
+            gcc-avr avr-libc binutils-avr
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -r tests/requirements.txt
 
       - name: Cache CMake dependencies
         uses: actions/cache@v4
@@ -36,11 +38,5 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cmake-deps-
 
-      - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-
-      - name: Build
-        run: cmake --build build
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
+      - name: Run complete device-independent suite
+        run: ./scripts/test.sh

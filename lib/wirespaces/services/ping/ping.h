@@ -39,9 +39,9 @@ public:
     /** @brief Bind replies to the domain's Router for the lifetime of this service. */
     explicit PingService(wirespaces::DomainContext& domain) noexcept : PingService{&domain.router()} {}
 
-    /** @brief Return the receiver registered with the Domain Dispatcher. */
+    /** @brief Return Simple-only admission, filtering controls before queue storage. */
     wirespaces::EndpointReceiver& receiver() noexcept {
-        return receive_queue_;
+        return transport_receiver_;
     }
 
     /** @brief Process every request currently queued for this Service. */
@@ -86,6 +86,8 @@ private:
 
     wirespaces::Router* router_{nullptr};
     ReceiverQueue receive_queue_{};
+    wirespaces::TransportFilterReceiver transport_receiver_{
+        receive_queue_, wirespaces::TransportType::kSimple};
 };
 
 static_assert(sizeof(PingMessage) == 4U);

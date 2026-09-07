@@ -1,0 +1,4 @@
+# All Python dependencies needed by scripts/test.sh and the hardware harnesses.
+-r ../codegen/requirements.txt
+pyserial==3.5
+python-can==4.3.1

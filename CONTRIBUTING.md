@@ -32,16 +32,30 @@ Do not push directly to `main`.
 
 ### Code
 
-The C core, embedded C++ libraries, and host simulator build as one project
-from the repository root.
+The default workflow checks the C++ runtime/simulator, topology compiler
+(including compiled generated routes and JavaScript viewer tests), Python tools,
+host-only hardware-harness regressions, and all five AVR images and size gates.
+It does not flash or access hardware.
 
-Build and test on Linux or WSL:
+Install dependencies on Ubuntu 24.04 (the CI platform):
 
 ```sh
+sudo apt-get install build-essential cmake ninja-build nodejs python3-venv gcc-avr avr-libc binutils-avr
+python3 -m venv .venv
+.venv/bin/python -m pip install -r tests/requirements.txt
 ./scripts/test.sh
 ```
 
-Or manually:
+The first configure may fetch GoogleTest into the local build tree. Git and
+network access are required for that step. The script selects `.venv/bin/python`
+when present, otherwise `python3`; `PYTHON`, `NODE`, `BUILD_DIR`, and `BUILD_TYPE`
+can override those selections. Node and the AVR toolchain are required: missing
+dependencies fail verification instead of skipping tests. The script explicitly
+enables all CMake test options, even in a previously configured build directory.
+CI runs this same entry point with the pinned Python requirements. AVR size gates
+are validated with GCC 7.3 on Ubuntu 24.04.
+
+For a focused C++ check during development:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
@@ -49,8 +63,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The first configure may fetch GoogleTest into the local build tree. Git and
-network access are required for that step.
+Hardware validation is separate and requires the attached bench. See
+`examples/arduino-uno/README.md` for the UART/PICkit flash and serial/CAN test targets.
+Run flash/test stages sequentially: each image replaces the previous firmware.
 
 ### Documentation
 

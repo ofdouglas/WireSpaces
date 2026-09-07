@@ -1,5 +1,13 @@
 # Admission and receiver lifecycle
 
+## Canonical packet admission
+
+Both BITS endpoint roles require supported canonical controls and BITS transport
+before occupying ingress storage: extensions, nonzero reserved bits, and other
+transport types are rejected. This applies to direct `receive()` calls as well
+as dispatch. The constrained Arduino adapter performs the same check before
+passing a payload to the engine, which accepts already-admitted BITS PDUs.
+
 ## Link admission
 
 BITS send adapters now return `SendResult` rather than a boolean. `kSent` means
@@ -33,12 +41,58 @@ A competing session is rejected without invoking admission. After termination,
 session IDs may be reused for a newly admitted transfer.
 
 Each accepted active transfer ends with completion, local/peer abortion, or failure
-(sink rejection or permanent send failure). Completion means all bytes reached
+(sink rejection, permanent send failure, or inactivity expiry). Completion means all bytes reached
 the sink, even when the final ACK cannot be admitted; duplicate final segments
 can obtain another ACK without a second completion callback. Malformed packets
 return `kError` without terminating an otherwise active transfer. A failed
 admission is not an accepted transfer and gets no terminal callback.
 The boot-profile application no longer decodes Setup ahead of the engine.
+
+## ACK validation
+
+The C++ transmitter accepts ACKs only after SETUP has been admitted locally.
+Cumulative advancement must cover only bits in the current sent-segment bitmap;
+an ACK covering any unsent segment is ignored without moving the window or
+reporting completion. The Python stop-and-wait bench transmitter applies the
+same rule to its outstanding segment. This includes new transfers that reuse a
+previously terminated session's identity.
+
+This validation does not make identical reused session/sequence values a new
+wire-level generation: a delayed ACK that matches data already sent in a new
+transfer is indistinguishable on the wire. Callers must avoid identity reuse
+while packets from the previous generation can still arrive.
+
+## Abandoned-transfer recovery
+
+The receiver owns a configurable inactivity timeout, defaulting to 5,000 ms.
+`BitsReceiver::process(now_ms)` must run even when no traffic arrives. Direct
+engine users call `process(message, now_ms)` for each PDU and `poll(now_ms)` during
+idle periods. Both take caller-supplied wrapping monotonic milliseconds; there is
+no global clock dependency inside BITS. Access to one receiver remains serialized.
+
+A valid accepted SETUP starts the timeout. Matching duplicate SETUP, correctly
+sized current-session segments within the granted range (including duplicates),
+and matching probes renew it, including when their ACK is blocked. Sideband
+messages, competing sessions, malformed PDUs and out-of-grant segments do not.
+Time is sampled when the receiver processes input, not when a driver enqueues it;
+choose a timeout longer than the peer's expected retry interval and normal
+receiver scheduling delay. Poll more frequently than the timeout and within one
+32-bit clock wrap. An explicit zero timeout delegates recovery to the application.
+
+At expiry, the receiver transitions to `kError` and invokes
+`onTransferFailed(kInactivityTimeout)` exactly once so the sink can release its
+reservation. Expiry is local: it sends no packet and does not depend on Link
+admission or peer reachability. A subsequent SETUP can reserve storage again.
+This bounds recovery after a lost ABORT or a disappearing peer; it does not make
+ABORT reliable or let a competing session displace a still-active transfer.
+
+Expiry is checked before input processing. The queued receiver discards pending
+ingress on expiry; a direct engine call that detects expiry discards that PDU.
+A new SETUP arriving at that boundary can be retried. Completed objects do not
+expire and retain final-segment retransmission/ACK behavior.
+
+Both Arduino BITS examples poll expiry. The constrained receiver example now
+starts the Timer0 millisecond clock, including its size-profile build.
 
 ## Packet storage
 

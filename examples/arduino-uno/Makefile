@@ -31,10 +31,14 @@ CC := avr-gcc
 OBJCOPY := avr-objcopy
 SIZE := avr-size
 
+# Use the Uno UART bootloader while the bench PICkit connection is unreliable.
+FLASH_METHOD ?= uart
+AVRDUDE ?= avrdude
+UPLOAD_BAUD ?= 115200
 MPLABX_ROOT ?= /opt/microchip/mplabx/v6.35
 IPECMD ?= $(MPLABX_ROOT)/mplab_platform/mplab_ipe/ipecmd.sh
 PICKIT ?= PK5
-AVR_ISP_SPEED ?= 0.125
+AVR_ISP_SPEED ?= 0.03125
 FLASH_ATTEMPTS ?= 3
 
 PORT ?= /dev/arduino-uno
@@ -77,7 +81,7 @@ BITS_OBJECTS := $(call local_obj,bits_ram_transfer) \
 	$(call objs,$(BUILD_DIR),$(CORE_OBJS))
 CAN_OBJECTS := $(call local_obj,mcp2515_can_test)
 
-BOOT_PROFILE_COMMON_OBJS := receiver_engine codec packet
+BOOT_PROFILE_COMMON_OBJS := receiver_engine codec packet millisecond_clock
 BOOT_PROFILE_RAM_OBJECTS := $(BOOT_PROFILE_BUILD_DIR)/ram_test.o \
 	$(call objs,$(BOOT_PROFILE_BUILD_DIR),$(BOOT_PROFILE_COMMON_OBJS))
 BOOT_PROFILE_SIZE_OBJECTS := $(BOOT_PROFILE_BUILD_DIR)/size_profile.o \
@@ -160,6 +164,9 @@ $(BOOT_PROFILE_BUILD_DIR)/size_profile.o: bits_boot_profile_ram.cpp | $(BOOT_PRO
 $(BOOT_PROFILE_BUILD_DIR)/%.o: $(WS_CORE)/%.cpp | $(BOOT_PROFILE_BUILD_DIR)
 	$(BOOT_COMPILE) $< -o $@
 
+$(BOOT_PROFILE_BUILD_DIR)/millisecond_clock.o: $(AVR_PLATFORM)/millisecond_clock.cpp | $(BOOT_PROFILE_BUILD_DIR)
+	$(BOOT_COMPILE) $< -o $@
+
 $(BOOT_PROFILE_BUILD_DIR)/receiver_engine.o: $(WS_BITS)/receiver_engine.cpp | $(BOOT_PROFILE_BUILD_DIR)
 	$(BOOT_COMPILE) $< -o $@
 
@@ -218,7 +225,13 @@ bits-boot-profile-ram: $(BOOT_PROFILE_RAM_HEX)
 bits-boot-profile-size: $(BOOT_PROFILE_SIZE_ELF)
 	$(call boot_profile_size_check,$(BOOT_PROFILE_SIZE_ELF),$(BOOT_PROFILE_SIZE_FLASH_LIMIT),boot-profile core)
 
-# --- Flash (PICkit 5 via ipecmd) ----------------------------------------------
+# --- Flash (UART bootloader by default; optional PICkit 5 ISP) -----------------
+ifeq ($(FLASH_METHOD),uart)
+define flash_hex
+	$(AVRDUDE) -p $(MCU) -c arduino -P "$(PORT)" -b $(UPLOAD_BAUD) \
+		-D -U "flash:w:$(abspath $(1)):i"
+endef
+else ifeq ($(FLASH_METHOD),pickit)
 # ipecmd.sh cd's to its install dir, so hex paths must be absolute.
 # -TP selects a programmer by tool type; ATmega328P programming uses AVR ISP.
 # PICkit 5 can intermittently fail an ISP write, so retry the complete operation.
@@ -231,6 +244,7 @@ define flash_hex
 			-P$(MCU_PART) \
 			-ORIISP \
 			-ORS$(AVR_ISP_SPEED) \
+			-OAS0 \
 			-M \
 			-F$(abspath $(1)); then \
 			exit 0; \
@@ -245,6 +259,9 @@ define flash_hex
 	done; \
 	exit $$status
 endef
+else
+$(error Unsupported FLASH_METHOD '$(FLASH_METHOD)'; use uart or pickit)
+endif
 
 flash: $(HEX)
 	$(call flash_hex,$(HEX))

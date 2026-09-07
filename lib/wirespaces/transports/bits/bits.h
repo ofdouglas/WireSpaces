@@ -72,10 +72,16 @@ protected:
 class BitsReceiver final : public EndpointReceiver, private ReceiverPduSender {
 public:
     BitsReceiver(ConnectionConfig connection, Router& router, ReceiverCallbacks& callbacks,
-                 ReceiverStorage storage) noexcept;
+                 ReceiverStorage storage,
+                 uint32_t inactivity_timeout_ms = kDefaultReceiverInactivityTimeoutMs) noexcept;
 
     ReceiveResult receive(const PacketBuffer& packet) noexcept override;
-    ProcessResult process() noexcept;
+    /** @brief Poll ingress and expiry with wrapping monotonic milliseconds.
+     * Call even without traffic. Expiry reports kError once and discards queued backlog.
+     * Zero constructor timeout disables expiry only when the application owns recovery.
+     * All receive/process/abort calls require serialized access to this receiver.
+     */
+    ProcessResult process(uint32_t now_ms) noexcept;
     SendResult sendDatagram(ByteSpan payload) noexcept;
     SendResult abort() noexcept;
     TransferState state() const noexcept { return engine_.state(); }

@@ -62,22 +62,39 @@ Build from WSL:
 make
 ```
 
-Flash through the Uno UART bootloader (the temporary default while PICkit ISP is unreliable):
+The top-level `Makefile` holds board/tool settings and keeps `all` as the default
+(the demo image). Rules are organized by purpose:
+
+- `make/build.mk`: firmware objects, compile/link rules, generated wiring and size gates.
+- `make/flash.mk`: PICkit/UART backends and the four flash targets.
+- `make/test.mk`: host checks, serial tools and hardware tests.
+
+Run targets from this directory as before; the included files are not standalone
+entry points. Command-line overrides such as `FLASH_METHOD`, `AVR_ISP_SPEED`,
+`PORT` and `BUILD_DIR` still work.
+
+Flash through PICkit 5 using MPLAB IPE AVR ISP (the default):
 
 ```sh
 make flash
 ```
 
-Install `avrdude` for UART uploads. All four flash targets use `PORT` (default
-`/dev/arduino-uno`) at `UPLOAD_BAUD=115200`, with write verification enabled.
-An installed Uno Optiboot bootloader is required; UART uploads preserve it.
-Override `AVRDUDE`, `PORT`, or `UPLOAD_BAUD` when necessary.
+All four flash targets default to `FLASH_METHOD=pickit`, `AVR_ISP_SPEED=2`
+(2 MHz ISP), and minimum programming speed. The target is released from reset
+after the operation. Override `IPECMD`, `PICKIT`, or `AVR_ISP_SPEED` when necessary.
+Failed operations retry up to `FLASH_ATTEMPTS` times (default three).
 
-PICkit 5 remains available with `make flash FLASH_METHOD=pickit`. It uses MPLAB
-IPE's AVR ISP support, minimum programming speed and `AVR_ISP_SPEED=0.03125`
-(31.25 kHz). Override `IPECMD`, `PICKIT`, or `AVR_ISP_SPEED` when necessary.
-PICkit attempts retry up to `FLASH_ATTEMPTS` times (default three). ISP flashing
-may erase the UART bootloader; reinstall Optiboot before returning to UART uploads.
+The earlier intermittent failures were caused by SPI bus contention with the
+MCP2515. Keep it disconnected during ISP programming; reconnect it afterward for
+CAN tests. With it disconnected, full-flash verification passed at 125 kHz,
+500 kHz, 1 MHz and 2 MHz, and three consecutive program/verify cycles passed at
+2 MHz without retries.
+
+UART remains available with `make flash FLASH_METHOD=uart`. Install `avrdude`
+and select `PORT` (default `/dev/arduino-uno`) and `UPLOAD_BAUD` (default 115200).
+UART uploads verify their writes and preserve an installed Uno Optiboot bootloader.
+Override `AVRDUDE` when necessary. ISP flashing may erase the UART bootloader;
+reinstall Optiboot before returning to UART uploads.
 
 Serial verification defaults to `/dev/arduino-uno`:
 
@@ -282,7 +299,7 @@ retains a minimal user-datagram service; it must remain at or below 3,350 bytes
 before board-specific flash code is added. Both targets write ELF and map files
 under `build/boot_profile/`.
 
-Flash the hardware-test image through the default UART bootloader and run
+Flash the hardware-test image through the default PICkit ISP method and run
 the PC test:
 
 ```sh

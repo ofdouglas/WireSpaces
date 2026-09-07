@@ -85,7 +85,7 @@ class ModelTest(unittest.TestCase):
     def test_outputs_match_pre_refactor_snapshots(self):
         fixtures = {
             "demo": ROOT / "demo.yaml",
-            "bench": ROOT.parent / "hardware/bench/topology.yaml",
+            "bench": ROOT.parent.parent / "ws-hardware/libraries/legacy/bench/topology.yaml",
             "amr": ROOT / "examples/amr.yaml",
             "excavator": ROOT / "examples/excavator.yaml",
         }
@@ -150,7 +150,7 @@ class ModelTest(unittest.TestCase):
 
     def test_inspection_is_independent_of_process_hash_seed(self):
         command = [sys.executable, str(ROOT / "wiring_codegen.py"),
-                   str(ROOT.parent / "hardware/bench/topology.yaml"), "--local-host", "Gateway", "--explain"]
+                   str(ROOT.parent.parent / "ws-hardware/libraries/legacy/bench/topology.yaml"), "--local-host", "Gateway", "--explain"]
         results = [subprocess.run(command, env={**os.environ, "PYTHONHASHSEED": seed},
                                   check=True, capture_output=True).stdout for seed in ("1", "2", "99")]
         self.assertEqual(results[0], results[1])

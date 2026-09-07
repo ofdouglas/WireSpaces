@@ -18,7 +18,7 @@ from wiring_topology import resolve_deployment
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT_SCHEMAS = (
-    ROOT.parent / "hardware/bench/topology.yaml",
+    ROOT.parent.parent / "ws-hardware/libraries/legacy/bench/topology.yaml",
     ROOT / "examples/amr.yaml",
     ROOT / "examples/excavator.yaml",
 )

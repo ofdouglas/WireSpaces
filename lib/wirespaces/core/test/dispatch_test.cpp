@@ -85,5 +85,25 @@ TEST_F(DispatchTest, PropagatesReceiverResult) {
     EXPECT_EQ(dispatch(packet), DispatchResult::kRejected);
 }
 
+// Unsupported controls cannot reach even a generic receiver via local dispatch.
+TEST_F(DispatchTest, RejectsUnsupportedControlBeforeReceiver) {
+    TestPacket packet{PacketBuilder{}.withEndpoint(kReceiverEndpoint).packet()};
+    for (const HostId destination : {kLocalHostId, HostId{kBroadcastHostValue}}) {
+        packet.header().destination = destination;
+        for (const uint8_t control : {2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 16U, 32U, 48U, 255U}) {
+            SCOPED_TRACE(static_cast<unsigned>(control));
+            packet.header().control = control;
+            EXPECT_EQ(dispatch(packet), DispatchResult::kRejected);
+        }
+    }
+    EXPECT_EQ(recorder_.invocationCount(), 0U);
+    packet.header().destination = kLocalHostId;
+    for (const uint8_t control : {0U, 1U, 64U, 65U, 128U, 129U, 192U, 193U}) {
+        packet.header().control = control;
+        EXPECT_EQ(dispatch(packet), DispatchResult::kAccepted);
+    }
+    EXPECT_EQ(recorder_.invocationCount(), 8U);
+}
+
 } // namespace
 } // namespace wirespaces::test

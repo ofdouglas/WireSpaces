@@ -184,7 +184,7 @@ void BitsRamTransferApplication::initialize() noexcept {
 
 void BitsRamTransferApplication::runOnce() noexcept {
     uart_receiver_.process(domain_, dispatcher_, demo_wiring::kUartIngressIndex);
-    receiver_.process();
+    receiver_.process(wirespaces::hal::MillisecondClock::now());
 
     if (receiver_callbacks_.hasCompletedObject() && !transmitterBusy(transmitter_.state())) {
         startEcho(receiver_callbacks_.completedObject());

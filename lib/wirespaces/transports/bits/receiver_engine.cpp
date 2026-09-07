@@ -58,7 +58,20 @@ BitsReceiverEngine::BitsReceiverEngine(const ReceiverEngineConfig& config,
     }
 }
 
-ProcessResult BitsReceiverEngine::process(ByteSpan message) noexcept {
+ProcessResult BitsReceiverEngine::poll(uint32_t now_ms) noexcept {
+    if (state_ != TransferState::kActive || config_.inactivity_timeout_ms == 0U ||
+        static_cast<uint32_t>(now_ms - last_activity_ms_) < config_.inactivity_timeout_ms) {
+        return ProcessResult::kIdle;
+    }
+    // Expiry is local cleanup: it cannot depend on peer reachability or Link admission.
+    fail(FailureReason::kInactivityTimeout);
+    return ProcessResult::kError;
+}
+
+ProcessResult BitsReceiverEngine::process(ByteSpan message, uint32_t now_ms) noexcept {
+    if (poll(now_ms) == ProcessResult::kError) {
+        return ProcessResult::kError;
+    }
     last_send_ = SendResult::kSent;
     if (message.empty()) {
         return ProcessResult::kError;
@@ -70,8 +83,8 @@ ProcessResult BitsReceiverEngine::process(ByteSpan message) noexcept {
     }
 
     const bool handled{control.type == MessageType::kSegment
-                           ? handleSegment(message)
-                           : handleControl(message, control.type)};
+                           ? handleSegment(message, now_ms)
+                           : handleControl(message, control.type, now_ms)};
     if (!handled) {
         return ProcessResult::kError;
     }
@@ -101,7 +114,7 @@ SendResult BitsReceiverEngine::abort() noexcept {
     return last_send_;
 }
 
-bool BitsReceiverEngine::handleSegment(ByteSpan message) noexcept {
+bool BitsReceiverEngine::handleSegment(ByteSpan message, uint32_t now_ms) noexcept {
     SegmentHeader header{};
     if (!detail::decodeSegmentHeaderKnownType(message, header)) {
         return false;
@@ -109,6 +122,17 @@ bool BitsReceiverEngine::handleSegment(ByteSpan message) noexcept {
     if ((state_ != TransferState::kActive && state_ != TransferState::kCompleted) ||
         header.session_id != setup_.session_id || header.segment_index >= segment_count_) {
         return true;
+    }
+    const uint16_t expected_size{
+        header.segment_index == setup_.final_segment_index
+            ? setup_.final_segment_size
+            : setup_.segment_size};
+    const ByteSpan segment_payload{message.subspan(kSegmentHeaderSize)};
+    if (segment_payload.size() != expected_size) {
+        return false;
+    }
+    if (header.segment_index < granted_end_) {
+        last_activity_ms_ = now_ms;
     }
     if (header.segment_index < contiguous_count_) {
         return sendAck();
@@ -138,14 +162,6 @@ bool BitsReceiverEngine::handleSegment(ByteSpan message) noexcept {
     const uint32_t object_offset{static_cast<uint32_t>(header.segment_index) *
                                  setup_.segment_size};
 #endif
-    const uint16_t expected_size{
-        header.segment_index == setup_.final_segment_index
-            ? setup_.final_segment_size
-            : setup_.segment_size};
-    const ByteSpan segment_payload{message.subspan(kSegmentHeaderSize)};
-    if (segment_payload.size() != expected_size) {
-        return false;
-    }
     if (!callbacks_.onSegment(object_offset, segment_payload)) {
         fail(FailureReason::kSinkRejected);
         return false;
@@ -174,10 +190,10 @@ bool BitsReceiverEngine::handleSegment(ByteSpan message) noexcept {
     return true;
 }
 
-bool BitsReceiverEngine::handleControl(ByteSpan message, MessageType type) noexcept {
+bool BitsReceiverEngine::handleControl(ByteSpan message, MessageType type, uint32_t now_ms) noexcept {
     switch (type) {
         case MessageType::kSetup:
-            return handleSetup(message);
+            return handleSetup(message, now_ms);
         case MessageType::kProbe: {
             Probe probe{};
             if (!detail::decodeProbeKnownType(message, probe)) {
@@ -188,6 +204,7 @@ bool BitsReceiverEngine::handleControl(ByteSpan message, MessageType type) noexc
                 probe.session_id != setup_.session_id) {
                 return true;
             }
+            last_activity_ms_ = now_ms;
             return sendAck();
         }
         case MessageType::kUserDatagram: {
@@ -208,7 +225,7 @@ bool BitsReceiverEngine::handleControl(ByteSpan message, MessageType type) noexc
     return false;
 }
 
-bool BitsReceiverEngine::handleSetup(ByteSpan payload) noexcept {
+bool BitsReceiverEngine::handleSetup(ByteSpan payload, uint32_t now_ms) noexcept {
     if (payload.size() < 2U) {
         return false;
     }
@@ -235,6 +252,7 @@ bool BitsReceiverEngine::handleSetup(ByteSpan payload) noexcept {
 
     if (state_ == TransferState::kActive) {
         if (setupMatches(setup_, requested)) {
+            last_activity_ms_ = now_ms;
             return sendAck();
         }
         return sendReject(requested.session_id, RejectReason::kBusy);
@@ -256,6 +274,7 @@ bool BitsReceiverEngine::handleSetup(ByteSpan payload) noexcept {
     receive_bitmap_ = 0U;
 #endif
     state_ = TransferState::kActive;
+    last_activity_ms_ = now_ms;
     updateGrant();
     return sendAck();
 }

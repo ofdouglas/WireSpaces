@@ -284,7 +284,11 @@ class CompactBitsTransmitter:
         ack = decode_ack(payload)
         if ack.session_id != self._session_id:
             return
+        if self._state not in ("starting", "active"):
+            return
         was_starting = self._state == "starting"
+        if was_starting and self._last_payload is None:
+            return  # SETUP has not been emitted yet.
         current_base = _base_sequence(
             self._initial_sequence, self._acknowledged_count
         )
@@ -298,6 +302,9 @@ class CompactBitsTransmitter:
             > self._segment_count
         ):
             return
+
+        if advance and self._outstanding_segment != self._acknowledged_count:
+            return  # A stale cumulative ACK cannot cover an unsent segment.
 
         self._acknowledged_count += advance
         self._granted_end = max(

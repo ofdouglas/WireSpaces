@@ -8,9 +8,18 @@ development, merging soon is reasonable. The core/runtime separation and staged
 topology compiler are reasonable foundations. Address items 1–3 with small fixes
 before merging where practical; carry the remaining items into focused follow-ups.
 
-All items below are open. Recording them does not imply that fixes have been made.
+Items 1, 3 and 4 are resolved on `cleanup-prototype-tech-debt`. Items 2, 5, 6
+and 7 remain open. Original review findings are retained below for context.
 
 ## 1. BITS can report completion for data it never sent
+
+**Status:** Resolved on `cleanup-prototype-tech-debt`.
+
+The C++ transmitter now ignores ACKs before SETUP admission and cumulative ACKs
+covering unsent segments. The Python bench transmitter applies the same checks.
+Regression tests first reproduced the defects, then passed after the fixes; they
+cover setup/active state, reused sessions, and valid full-window sequence wrap.
+The original finding follows.
 
 **Priority:** Before merge.
 
@@ -45,6 +54,19 @@ model rather than masking this dependency.
 
 ## 3. Unsupported packet formats can reach application behavior
 
+**Status:** Resolved on `cleanup-prototype-tech-debt`.
+
+`Header::hasSupportedControl()` centralizes the supported envelope (Simple/BITS,
+no extensions, zero reserved control bits, all QoS values). Dispatcher rejects
+unsupported controls before invoking endpoints. Ping and LED expose a transport
+filter that rejects non-Simple traffic before queue admission, including direct
+receiver calls. Both BITS roles and the constrained Arduino adapter enforce the
+same envelope and require BITS. Routing remains transport-independent.
+Three regressions failed before these changes and pass after them, covering
+service effects, direct/dispatch admission, reserved bits, extensions, unknown
+transports, and supported controls across all QoS values. The original finding
+follows.
+
 **Priority:** Before merge.
 
 Routing and dispatch validate wire, ingress, destination and endpoint, but there
@@ -65,6 +87,18 @@ formats. Add tests that unsupported controls cannot invoke service behavior.
 - `lib/wirespaces/transports/bits/bits.cpp`, `matchesConnection()`.
 
 ## 4. BITS lacks a recovery policy for abandoned transfers
+
+**Status:** Resolved on `cleanup-prototype-tech-debt`.
+
+The receiver now expires inactive transfers using caller-supplied monotonic time
+(default 5 seconds, configurable), reports `kInactivityTimeout` once through the
+failure callback, and allows a subsequent SETUP. Both Arduino BITS examples poll
+expiry; queued ingress is discarded at expiry. Completion state is retained.
+Lost-abort and disappearing-peer regressions failed before the fix and now pass.
+Additional tests cover exact deadlines, clock wrap, activity renewal, ignored
+traffic, queue cleanup, disabled expiry and the constrained width-one build.
+See `lib/wirespaces/transports/bits/api_notes.md` for the recovery contract.
+The original finding follows.
 
 **Priority:** Soon after merge.
 
@@ -163,3 +197,28 @@ regression suite and may not survive cleanup. Each behavioral issue above record
 the reproduction needed to add durable tests.
 
 No hardware tests were run. The review did not modify tracked production files.
+
+## Validation of fixes for items 1 and 4
+
+On `cleanup-prototype-tech-debt`, six new C++ regression tests failed before the
+implementation changes. Two additional Python regressions exposed the same ACK
+validation defect in the bench transmitter before its fix.
+
+After the fixes and additional boundary coverage:
+
+- All 124 host C++ tests passed, including 37 BITS tests.
+- All 18 Python tools tests passed.
+- The full BITS AVR image and both constrained receiver profiles built successfully.
+- The constrained RAM profile used 3,598 bytes of flash (limit 4,096); the size
+  profile used 3,320 bytes (limit 3,350). Both used 48 bytes of static data.
+- Hardware tests were not run.
+
+## Validation of the fix for item 3
+
+- All three new admission regressions failed before the fix.
+- All 127 host C++ tests passed after the fix.
+- The generator suite passed 53 tests; its Node-dependent JavaScript test was skipped.
+- The demo, full BITS AVR image, and both constrained BITS receiver profiles built.
+- Both AVR size gates passed: 3,602 bytes for the constrained RAM profile (limit
+  4,096) and 3,324 bytes for the size profile (limit 3,350).
+- Hardware tests were not run.

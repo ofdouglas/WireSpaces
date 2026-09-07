@@ -9,6 +9,8 @@ partial final segments, and rejected oversized objects.
 import unittest
 
 from wirespaces.bits_ram_transfer import (
+    Ack,
+    encode_ack,
     CompactBitsReceiver,
     CompactBitsTransmitter,
     MESSAGE_ABORT,
@@ -29,6 +31,28 @@ class CompactBitsRamTransferTest(unittest.TestCase):
             encode_setup(0x12, 0x34, 4, 10),
             bytes((0x00, 0x12, 0x34, 0x00, 0x02, 0x00, 0x04, 0x00, 0x02, 0x00)),
         )
+
+    # A grant before SETUP was sent cannot start transmission.
+    def test_ignores_ack_before_setup_was_sent(self) -> None:
+        transmitter = CompactBitsTransmitter(b"abcd", 4, 0x31, 0xFE)
+        transmitter.receive(encode_ack(Ack(0x31, 0, 0xFE, 0xFD)))
+        self.assertEqual(transmitter.state, "starting")
+        self.assertEqual(transmitter.poll(0.0), encode_setup(0x31, 0xFE, 4, 4))
+
+    # A fresh sender with reused session identity ignores an old final ACK until it sends data.
+    def test_ignores_ack_for_unsent_data(self) -> None:
+        transmitter = CompactBitsTransmitter(b"abcd", 4, 0x31, 0xFE)
+        receiver = CompactBitsReceiver(16, 4)
+        setup = transmitter.poll(0.0)
+        transmitter.receive(encode_ack(Ack(0x31, 0, 0xFE, 0xFE)))
+        self.assertFalse(transmitter.complete)
+        self.assertEqual(transmitter.state, "starting")
+        transmitter.receive(receiver.receive(setup))
+        transmitter.receive(encode_ack(Ack(0x31, 0, 0xFE, 0xFE)))
+        self.assertFalse(transmitter.complete)
+        transmitter.receive(receiver.receive(transmitter.poll(0.01)))
+        self.assertTrue(transmitter.complete)
+        self.assertEqual(receiver.data, b"abcd")
 
     # A stop-and-wait sender and 16-position RAM receiver exchange a wrapped,
     # multi-segment object including a partial final segment.

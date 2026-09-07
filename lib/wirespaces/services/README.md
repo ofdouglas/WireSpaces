@@ -18,3 +18,11 @@ Current prototypes:
  - Peak stack utilization report
  - LED on/off control
 
+
+## Request admission
+
+Ping and LED control expose a `TransportFilterReceiver` through `receiver()`.
+It accepts only Simple packets without header extensions or nonzero reserved
+control bits, before consuming queue capacity. Direct receiver calls and
+Dispatcher delivery use the same filter. Accepted work remains deferred until
+`run()`; valid queue-full and downstream rejection results are preserved.

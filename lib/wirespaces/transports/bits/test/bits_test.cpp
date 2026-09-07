@@ -1,6 +1,8 @@
 /**
  * @file bits_test.cpp
  * @brief Compact BITS integration, recovery, flow-control, and terminal-state tests.
+ * Covers unsent/stale ACKs, session reuse, dropped cancellation, peer disappearance,
+ * retransmission, bounded windows, and exactly-once terminal notifications.
  */
 
 #include "support/bits_fixture.hpp"
@@ -100,32 +102,32 @@ TEST(BitsReceiverEngineTest, AdmissionAndDuplicateSetupSurviveBackpressure) {
     uint8_t setup[kSetupSize]{};
     ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
     callbacks.admission = TransferAdmission::kBusy;
-    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kProgress);
+    EXPECT_EQ(engine.process(ByteSpan{setup}, 0U), ProcessResult::kProgress);
     EXPECT_EQ(engine.state(), TransferState::kIdle);
     callbacks.admission = TransferAdmission::kAccepted;
     sender.result = SendResult::kFull;
-    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kBlocked);
+    EXPECT_EQ(engine.process(ByteSpan{setup}, 0U), ProcessResult::kBlocked);
     EXPECT_EQ(engine.state(), TransferState::kActive);
     EXPECT_EQ(callbacks.admission_count, 2U);
     EXPECT_EQ(callbacks.last_info.total_size, 4U);
-    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kBlocked);
+    EXPECT_EQ(engine.process(ByteSpan{setup}, 0U), ProcessResult::kBlocked);
     EXPECT_EQ(callbacks.admission_count, 2U);
     sender.result = SendResult::kSent;
-    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kProgress);
+    EXPECT_EQ(engine.process(ByteSpan{setup}, 0U), ProcessResult::kProgress);
     const uint8_t malformed[]{0xFFU};
-    EXPECT_EQ(engine.process(ByteSpan{malformed}), ProcessResult::kError);
+    EXPECT_EQ(engine.process(ByteSpan{malformed}, 0U), ProcessResult::kError);
     EXPECT_EQ(engine.state(), TransferState::kActive);
     EXPECT_EQ(callbacks.failure_count, 0U);
     ASSERT_TRUE(encodeSetup({10U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
     sender.result = SendResult::kRejected;
-    engine.process(ByteSpan{setup});
+    engine.process(ByteSpan{setup}, 0U);
     EXPECT_EQ(callbacks.admission_count, 2U); // busy active session is untouched
     EXPECT_EQ(engine.state(), TransferState::kActive); // failure to send Reject is unrelated
     sender.result = SendResult::kSent;
     EXPECT_EQ(engine.abort(), SendResult::kSent);
     EXPECT_EQ(callbacks.abortCount(), 1U);
     ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
-    engine.process(ByteSpan{setup});
+    engine.process(ByteSpan{setup}, 0U);
     EXPECT_EQ(callbacks.admission_count, 3U); // ID reuse after termination is a new transfer
 }
 
@@ -137,13 +139,13 @@ TEST(BitsReceiverEngineTest, TerminalNotificationsDoNotDependOnAckAcceptance) {
         BitsReceiverEngine engine{{4U, 1U, 16U}, callbacks, sender};
         uint8_t setup[kSetupSize]{};
         ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
-        engine.process(ByteSpan{setup});
+        engine.process(ByteSpan{setup}, 0U);
         uint8_t segment[kSegmentHeaderSize + 4U]{};
         ASSERT_TRUE(encodeSegmentHeader({9U, 0U}, MutableByteSpan{segment}));
         callbacks.accept_segments = accept;
         sender.result = SendResult::kFull;
-        engine.process(ByteSpan{segment});
-        engine.process(ByteSpan{segment});
+        engine.process(ByteSpan{segment}, 0U);
+        engine.process(ByteSpan{segment}, 0U);
         EXPECT_EQ(callbacks.failure_count, accept ? 0U : 1U);
         EXPECT_EQ(callbacks.completionCount(), accept ? 1U : 0U);
         EXPECT_EQ(engine.state(), accept ? TransferState::kCompleted : TransferState::kError);
@@ -158,14 +160,47 @@ TEST(BitsReceiverEngineTest, ValidationPrecedesAdmissionAndSendFailureIsReported
     BitsReceiverEngine engine{{4U, 1U, 16U}, callbacks, sender};
     uint8_t setup[kSetupSize]{};
     ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 8U, 4U}, MutableByteSpan{setup}));
-    engine.process(ByteSpan{setup});
+    engine.process(ByteSpan{setup}, 0U);
     EXPECT_EQ(callbacks.admission_count, 0U);
     ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
     sender.result = SendResult::kNoRoute;
-    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kError);
+    EXPECT_EQ(engine.process(ByteSpan{setup}, 0U), ProcessResult::kError);
     EXPECT_EQ(callbacks.failure_count, 1U);
     EXPECT_EQ(callbacks.failure, FailureReason::kSendFailed);
     EXPECT_EQ(engine.state(), TransferState::kError);
+}
+
+// Direct endpoint admission rejects extensions/reserved controls without occupying a BITS slot.
+TEST_F(BitsConnectionFixture, RejectsUnsupportedCanonicalControl) {
+    TestPacket upload{}, feedback{};
+    ASSERT_TRUE(upload.initialize(kSetupSize, {kTestWire, kTransmitterHost, kReceiverHost, kTestEndpoint},
+                                  ControlFields::bits()));
+    ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, upload.payload()));
+    ASSERT_TRUE(feedback.initialize(kAckSize, {kTestWire, kReceiverHost, kTransmitterHost, kTestEndpoint},
+                                    ControlFields::bits()));
+    ASSERT_TRUE(encodeAck({9U, 0U, 0U, 255U}, feedback.payload()));
+    for (const uint8_t control : {0x80U, 0x82U, 0x83U, 0x84U, 0x85U, 0x86U, 0x87U,
+                                 0x89U, 0x91U, 0xA1U, 0xB1U, 0xFFU}) {
+        SCOPED_TRACE(static_cast<unsigned>(control));
+        upload.header().control = control;
+        feedback.header().control = control;
+        EXPECT_EQ(receiver_.receive(upload), ReceiveResult::kRejected);
+        EXPECT_EQ(transmitter_.receive(feedback), ReceiveResult::kRejected);
+    }
+    EXPECT_EQ(receiver_.process(now_ms_), ProcessResult::kIdle);
+    EXPECT_EQ(transmitter_.process(now_ms_), ProcessResult::kIdle);
+    EXPECT_EQ(receiver_callbacks_.admission_count, 0U);
+    for (const uint8_t control : {0x01U, 0x41U, 0x81U, 0xC1U}) {
+        upload.header().control = control;
+        feedback.header().control = control;
+        EXPECT_EQ(receiver_.receive(upload), ReceiveResult::kAccepted);
+        // The receiver's ACK would occupy the feedback slot; drop it for this admission check.
+        receiver_forwarder_.dropNext(MessageType::kAck);
+        receiver_.process(now_ms_);
+        EXPECT_EQ(transmitter_.receive(feedback), ReceiveResult::kAccepted);
+        transmitter_.process(now_ms_);
+    }
+    EXPECT_EQ(receiver_callbacks_.admission_count, 1U);
 }
 
 // Backpressure is not a transmission or protocol retry; BITS retries admission on a later poll.
@@ -183,7 +218,7 @@ TEST_F(BitsConnectionFixture, FullLinksDoNotConsumeTransferRetries) {
     transmitter_forwarder_.admission = LinkAdmission::kAccepted;
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
     receiver_forwarder_.admission = LinkAdmission::kFull;
-    EXPECT_EQ(receiver_.process(), ProcessResult::kBlocked);
+    EXPECT_EQ(receiver_.process(now_ms_), ProcessResult::kBlocked);
     EXPECT_EQ(receiver_.state(), TransferState::kActive);
     receiver_forwarder_.admission = LinkAdmission::kAccepted;
     EXPECT_TRUE(pumpUntilTerminal());
@@ -201,7 +236,7 @@ TEST(BitsReceiverEngineTest, DeliversAndSendsUserDatagramsSynchronously) {
     std::array<uint8_t, kUserDatagramHeaderSize + request.size()> message{};
     ASSERT_TRUE(encodeUserDatagram(ByteSpan{request.data(), request.size()},
                                    MutableByteSpan{message.data(), message.size()}));
-    EXPECT_EQ(engine.process(ByteSpan{message.data(), message.size()}),
+    EXPECT_EQ(engine.process(ByteSpan{message.data(), message.size()}, 0U),
               ProcessResult::kProgress);
     EXPECT_TRUE(std::equal(callbacks.datagram().begin(),
                            callbacks.datagram().end(), request.begin(),
@@ -226,7 +261,7 @@ TEST(BitsReceiverEngineTest, OneWindowProfileTransfersInOrder) {
     ASSERT_TRUE(encodeSetup(wirespaces::transport::bits::Setup{0x42U, 0x20U, 2U, 4U, 2U},
                             MutableByteSpan{setup_message.data(),
                                             setup_message.size()}));
-    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}),
+    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}, 0U),
               ProcessResult::kProgress);
     Ack ack{};
     ASSERT_TRUE(decodeAck(sender.sent(), ack));
@@ -235,7 +270,7 @@ TEST(BitsReceiverEngineTest, OneWindowProfileTransfersInOrder) {
 
     const auto early_segment{
         makeSegment(0x42U, 1U, std::array<uint8_t, 4U>{4U, 5U, 6U, 7U})};
-    EXPECT_EQ(engine.process(ByteSpan{early_segment.data(), early_segment.size()}),
+    EXPECT_EQ(engine.process(ByteSpan{early_segment.data(), early_segment.size()}, 0U),
               ProcessResult::kProgress);
     EXPECT_EQ(callbacks.segmentCount(), 0U);
 
@@ -245,11 +280,11 @@ TEST(BitsReceiverEngineTest, OneWindowProfileTransfersInOrder) {
         makeSegment(0x42U, 1U, std::array<uint8_t, 4U>{4U, 5U, 6U, 7U})};
     const auto segment_2{
         makeSegment(0x42U, 2U, std::array<uint8_t, 2U>{8U, 9U})};
-    EXPECT_EQ(engine.process(ByteSpan{segment_0.data(), segment_0.size()}),
+    EXPECT_EQ(engine.process(ByteSpan{segment_0.data(), segment_0.size()}, 0U),
               ProcessResult::kProgress);
-    EXPECT_EQ(engine.process(ByteSpan{segment_1.data(), segment_1.size()}),
+    EXPECT_EQ(engine.process(ByteSpan{segment_1.data(), segment_1.size()}, 0U),
               ProcessResult::kProgress);
-    EXPECT_EQ(engine.process(ByteSpan{segment_2.data(), segment_2.size()}),
+    EXPECT_EQ(engine.process(ByteSpan{segment_2.data(), segment_2.size()}, 0U),
               ProcessResult::kProgress);
 
     EXPECT_EQ(engine.state(), TransferState::kCompleted);
@@ -271,7 +306,7 @@ TEST(BitsReceiverEngineTest, RejectsUnsupportedSegmentSize) {
     ASSERT_TRUE(encodeSetup(wirespaces::transport::bits::Setup{0x43U, 0x10U, 1U, 8U, 8U},
                             MutableByteSpan{setup_message.data(),
                                             setup_message.size()}));
-    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}),
+    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}, 0U),
               ProcessResult::kProgress);
 
     Reject reject{};
@@ -291,7 +326,7 @@ TEST(BitsReceiverEngineTest, RejectsInvalidFinalSegmentGeometry) {
     ASSERT_TRUE(encodeSetup(
         wirespaces::transport::bits::Setup{0x45U, 0x10U, 1U, 4U, 5U},
         MutableByteSpan{setup_message.data(), setup_message.size()}));
-    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}),
+    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}, 0U),
               ProcessResult::kProgress);
 
     Reject reject{};
@@ -311,7 +346,7 @@ TEST(BitsReceiverEngineTest, RejectsObjectLargerThanSinkCapacity) {
     ASSERT_TRUE(encodeSetup(
         wirespaces::transport::bits::Setup{0x44U, 0x10U, 3U, 4U, 1U},
         MutableByteSpan{setup_message.data(), setup_message.size()}));
-    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}),
+    ASSERT_EQ(engine.process(ByteSpan{setup_message.data(), setup_message.size()}, 0U),
               ProcessResult::kProgress);
 
     Reject reject{};
@@ -328,7 +363,7 @@ TEST_F(BitsConnectionFixture, DeliversUserDatagramsInBothDirections) {
     const uint8_t response_bytes[]{0xA0U, 0xB0U};
 
     ASSERT_EQ(transmitter_.sendDatagram(ByteSpan{request_bytes}), SendResult::kSent);
-    EXPECT_EQ(receiver_.process(), ProcessResult::kProgress);
+    EXPECT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
     EXPECT_TRUE(std::equal(receiver_callbacks_.datagram().begin(),
                            receiver_callbacks_.datagram().end(), std::begin(request_bytes),
                            std::end(request_bytes)));
@@ -355,6 +390,259 @@ TEST_F(BitsConnectionFixture, TransfersMultiSegmentObject) {
     EXPECT_EQ(transmitter_callbacks_.completionCount(), 1U);
     ASSERT_EQ(receiver_callbacks_.receivedSize(), source.size());
     EXPECT_TRUE(std::equal(source.begin(), source.end(), receiver_callbacks_.object().begin()));
+}
+
+
+// A peer cannot acknowledge SETUP or grant data while local SETUP admission is blocked.
+TEST_F(BitsConnectionFixture, IgnoresAckBeforeSetupWasSent) {
+    const auto source{makeObject<8U>()};
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x24U, 0x50U),
+              StartResult::kStarted);
+    transmitter_forwarder_.admission = LinkAdmission::kFull;
+    ASSERT_EQ(injectAck({0x24U, 0U, 0x51U, 0x4FU}), DispatchResult::kAccepted);
+    EXPECT_EQ(transmitter_.process(++now_ms_), ProcessResult::kBlocked);
+    EXPECT_EQ(transmitter_.state(), TransferState::kStarting);
+    EXPECT_EQ(transmitter_callbacks_.completionCount(), 0U);
+    transmitter_forwarder_.admission = LinkAdmission::kAccepted;
+    ASSERT_TRUE(pumpUntilTerminal());
+    EXPECT_EQ(receiver_callbacks_.receivedSize(), source.size());
+}
+
+// Cumulative ACKs cannot complete a transfer when only SETUP has been sent.
+TEST_F(BitsConnectionFixture, IgnoresAckForUnsentSegmentsDuringSetup) {
+    const auto source{makeObject<8U>()};
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x24U, 0x50U),
+              StartResult::kStarted);
+    ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
+    ASSERT_EQ(injectAck({0x24U, 0U, 0x51U, 0x51U}), DispatchResult::kAccepted);
+    transmitter_.process(++now_ms_);
+    EXPECT_EQ(transmitter_.state(), TransferState::kStarting);
+    EXPECT_EQ(transmitter_callbacks_.completionCount(), 0U);
+    EXPECT_EQ(transmitter_forwarder_.messageCount(MessageType::kSegment), 0U);
+    ASSERT_TRUE(pumpUntilTerminal());
+    EXPECT_EQ(receiver_callbacks_.receivedSize(), source.size());
+}
+
+// An active ACK claiming an unsent tail is ignored without discarding earlier sent state.
+TEST_F(BitsConnectionFixture, IgnoresCumulativeAckBeyondSentSegments) {
+    const auto source{makeObject<8U>()};
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x24U, 0x50U),
+              StartResult::kStarted);
+    transmitter_.process(++now_ms_);
+    receiver_.process(now_ms_);
+    transmitter_.process(++now_ms_); // Only segment zero has been sent.
+    transmitter_forwarder_.admission = LinkAdmission::kFull;
+    ASSERT_EQ(injectAck({0x24U, 0U, 0x51U, 0x51U}), DispatchResult::kAccepted);
+    transmitter_.process(++now_ms_);
+    EXPECT_EQ(transmitter_.state(), TransferState::kActive);
+    EXPECT_EQ(transmitter_callbacks_.completionCount(), 0U);
+    transmitter_forwarder_.admission = LinkAdmission::kAccepted;
+    ASSERT_TRUE(pumpUntilTerminal());
+    EXPECT_EQ(receiver_callbacks_.segmentCount(), 2U);
+    EXPECT_TRUE(std::equal(source.begin(), source.end(), receiver_callbacks_.object().begin()));
+}
+
+// Reusing a terminated session does not let its delayed final ACK complete a fresh object.
+TEST_F(BitsConnectionFixture, IgnoresFinalAckFromReusedSessionBeforeNewData) {
+    const auto source{makeObject<8U>()};
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x24U, 0x50U),
+              StartResult::kStarted);
+    ASSERT_TRUE(pumpUntilTerminal());
+    Ack old_ack{};
+    ASSERT_TRUE(decodeAck(receiver_forwarder_.lastPacket().payload(), old_ack));
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x24U, 0x50U),
+              StartResult::kStarted);
+    transmitter_.process(++now_ms_);
+    ASSERT_EQ(injectAck(old_ack), DispatchResult::kAccepted);
+    transmitter_.process(++now_ms_);
+    EXPECT_EQ(transmitter_.state(), TransferState::kStarting);
+    EXPECT_EQ(transmitter_callbacks_.completionCount(), 1U);
+    ASSERT_TRUE(pumpUntilTerminal());
+    EXPECT_EQ(transmitter_callbacks_.completionCount(), 2U);
+    EXPECT_EQ(receiver_callbacks_.segmentCount(), 4U);
+}
+
+// Lost cancellation must eventually release the receiver and allow another session.
+TEST_F(BitsConnectionFixture, RecoversAfterLostAbort) {
+    const auto source{makeObject<8U>()};
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x24U, 0x50U),
+              StartResult::kStarted);
+    transmitter_.process(++now_ms_);
+    receiver_.process(now_ms_);
+    transmitter_.process(++now_ms_); // Consume SETUP ACK before cancelling.
+    receiver_.process(now_ms_);
+    transmitter_forwarder_.dropNext(MessageType::kAbort);
+    ASSERT_EQ(transmitter_.abort(), SendResult::kSent);
+    ASSERT_EQ(receiver_.state(), TransferState::kActive);
+    now_ms_ += kDefaultReceiverInactivityTimeoutMs;
+    receiver_.process(now_ms_);
+    EXPECT_EQ(receiver_.state(), TransferState::kError);
+    EXPECT_EQ(receiver_callbacks_.failure_count, 1U);
+    EXPECT_EQ(receiver_callbacks_.failure, FailureReason::kInactivityTimeout);
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x25U, 0x60U),
+              StartResult::kStarted);
+    ASSERT_TRUE(pumpUntilTerminal());
+    EXPECT_EQ(transmitter_.state(), TransferState::kCompleted);
+    EXPECT_EQ(receiver_callbacks_.admission_count, 2U);
+    EXPECT_TRUE(std::equal(source.begin(), source.end(), receiver_callbacks_.object().begin()));
+}
+
+// A disappearing sender requires no final packet to release the receiver's reservation.
+TEST_F(BitsConnectionFixture, ReleasesReceiverWhenPeerDisappears) {
+    const auto source{makeObject<8U>()};
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x24U, 0x50U),
+              StartResult::kStarted);
+    transmitter_.process(++now_ms_);
+    receiver_.process(now_ms_);
+    ASSERT_EQ(receiver_.state(), TransferState::kActive);
+    now_ms_ += kDefaultReceiverInactivityTimeoutMs;
+    receiver_.process(now_ms_);
+    EXPECT_EQ(receiver_.state(), TransferState::kError);
+    EXPECT_EQ(receiver_callbacks_.failure_count, 1U);
+    EXPECT_EQ(receiver_callbacks_.failure, FailureReason::kInactivityTimeout);
+    receiver_.process(now_ms_);
+    EXPECT_EQ(receiver_callbacks_.failure_count + receiver_callbacks_.abortCount(), 1U);
+}
+
+
+// The complete sixteen-bit sent mask permits a cumulative ACK across sequence wrap.
+TEST_F(BitsConnectionFixture, AcceptsFullSentWindowAcrossSequenceWrap) {
+    const auto source{makeObject<64U>()};
+    transmitter_forwarder_.dropNext(MessageType::kSegment, UINT8_MAX);
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x24U, 0xF8U),
+              StartResult::kStarted);
+    transmitter_.process(++now_ms_);
+    ASSERT_EQ(injectAck({0x24U, 0U, 0x07U, 0xF7U}), DispatchResult::kAccepted);
+    for (uint8_t offset{0U}; offset < 16U; ++offset) {
+        ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
+    }
+    EXPECT_EQ(transmitter_forwarder_.messageCount(MessageType::kSegment), 16U);
+    ASSERT_EQ(injectAck({0x24U, 0U, 0x07U, 0x07U}), DispatchResult::kAccepted);
+    transmitter_.process(++now_ms_);
+    EXPECT_EQ(transmitter_.state(), TransferState::kCompleted);
+    EXPECT_EQ(transmitter_callbacks_.completionCount(), 1U);
+}
+
+// Active reservations expire exactly at the configured deadline, including clock wrap.
+TEST(BitsReceiverEngineTest, ExpiresOnceAtDeadlineAcrossClockWrap) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{{4U, 1U, 16U, 100U}, callbacks, sender};
+    uint8_t setup[kSetupSize]{};
+    ASSERT_TRUE(encodeSetup({9U, 0U, 1U, 4U, 4U}, MutableByteSpan{setup}));
+    constexpr uint32_t start{UINT32_MAX - 49U};
+    ASSERT_EQ(engine.process(ByteSpan{setup}, start), ProcessResult::kProgress);
+    EXPECT_EQ(engine.poll(49U), ProcessResult::kIdle);
+    EXPECT_EQ(engine.state(), TransferState::kActive);
+    sender.result = SendResult::kFull;
+    EXPECT_EQ(engine.poll(50U), ProcessResult::kError);
+    EXPECT_EQ(engine.state(), TransferState::kError);
+    EXPECT_EQ(callbacks.failure_count, 1U);
+    EXPECT_EQ(callbacks.failure, FailureReason::kInactivityTimeout);
+    EXPECT_EQ(callbacks.abortCount(), 0U);
+    EXPECT_EQ(sender.calls, 1U); // Cleanup requires no outbound admission.
+    EXPECT_EQ(engine.poll(150U), ProcessResult::kIdle);
+    EXPECT_EQ(callbacks.failure_count, 1U);
+    sender.result = SendResult::kSent;
+    ASSERT_EQ(engine.process(ByteSpan{setup}, 151U), ProcessResult::kProgress);
+    EXPECT_EQ(callbacks.admission_count, 2U);
+}
+
+// Duplicate SETUP, valid segments/duplicates and matching probes renew the active lease.
+TEST(BitsReceiverEngineTest, CurrentSessionActivityRenewsTimeout) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{{4U, 1U, 16U, 100U}, callbacks, sender};
+    uint8_t setup[kSetupSize]{};
+    ASSERT_TRUE(encodeSetup({9U, 0U, 2U, 4U, 4U}, MutableByteSpan{setup}));
+    engine.process(ByteSpan{setup}, 0U);
+    sender.result = SendResult::kFull;
+    EXPECT_EQ(engine.process(ByteSpan{setup}, 90U), ProcessResult::kBlocked);
+    const auto segment{makeSegment(9U, 0U, std::array<uint8_t, 4U>{1, 2, 3, 4})};
+    EXPECT_EQ(engine.process({segment.data(), segment.size()}, 180U), ProcessResult::kBlocked);
+    EXPECT_EQ(engine.process({segment.data(), segment.size()}, 270U), ProcessResult::kBlocked);
+    const uint8_t probe[]{encodeControl(MessageType::kProbe), 9U};
+    EXPECT_EQ(engine.process(ByteSpan{probe}, 360U), ProcessResult::kBlocked);
+    EXPECT_EQ(engine.poll(459U), ProcessResult::kIdle);
+    EXPECT_EQ(callbacks.admission_count, 1U);
+    EXPECT_EQ(callbacks.segmentCount(), 1U);
+    EXPECT_EQ(engine.poll(460U), ProcessResult::kError);
+    EXPECT_EQ(callbacks.failure_count, 1U);
+}
+
+// Unrelated sessions, sideband datagrams, malformed duplicates and out-of-grant data do not renew.
+TEST(BitsReceiverEngineTest, IgnoredTrafficDoesNotPreventExpiry) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{{4U, 1U, 16U, 100U}, callbacks, sender};
+    uint8_t setup[kSetupSize]{};
+    ASSERT_TRUE(encodeSetup({9U, 0U, 2U, 4U, 4U}, MutableByteSpan{setup}));
+    engine.process(ByteSpan{setup}, 0U);
+    const auto segment{makeSegment(9U, 0U, std::array<uint8_t, 4U>{1, 2, 3, 4})};
+    engine.process({segment.data(), segment.size()}, 0U);
+    ASSERT_TRUE(encodeSetup({10U, 0U, 2U, 4U, 4U}, MutableByteSpan{setup}));
+    engine.process(ByteSpan{setup}, 90U);
+    const uint8_t probe[]{encodeControl(MessageType::kProbe), 10U};
+    engine.process(ByteSpan{probe}, 91U);
+    const uint8_t datagram[]{encodeControl(MessageType::kUserDatagram), 42U};
+    engine.process(ByteSpan{datagram}, 92U);
+    EXPECT_EQ(engine.process({segment.data(), segment.size() - 1U}, 93U), ProcessResult::kError);
+    const auto future{makeSegment(9U, 2U, std::array<uint8_t, 4U>{1, 2, 3, 4})};
+    engine.process({future.data(), future.size()}, 94U);
+    EXPECT_EQ(engine.poll(100U), ProcessResult::kError);
+    EXPECT_EQ(callbacks.failure_count, 1U);
+    EXPECT_EQ(callbacks.admission_count, 1U);
+    EXPECT_EQ(callbacks.segmentCount(), 1U);
+}
+
+// Completed objects remain available and acknowledge final duplicates beyond the inactivity deadline.
+TEST(BitsReceiverEngineTest, CompletedTransfersDoNotExpire) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{{4U, 1U, 16U, 100U}, callbacks, sender};
+    uint8_t setup[kSetupSize]{};
+    ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
+    engine.process(ByteSpan{setup}, 0U);
+    const auto segment{makeSegment(9U, 0U, std::array<uint8_t, 4U>{1, 2, 3, 4})};
+    engine.process({segment.data(), segment.size()}, 1U);
+    EXPECT_EQ(engine.poll(1000U), ProcessResult::kIdle);
+    EXPECT_EQ(engine.process({segment.data(), segment.size()}, 1001U), ProcessResult::kProgress);
+    EXPECT_EQ(engine.state(), TransferState::kCompleted);
+    EXPECT_EQ(callbacks.failure_count, 0U);
+    EXPECT_EQ(callbacks.completionCount(), 1U);
+    EXPECT_EQ(callbacks.segmentCount(), 1U);
+}
+
+// An explicitly disabled timer delegates cleanup to the caller's existing abort path.
+TEST(BitsReceiverEngineTest, DisabledExpiryRequiresExplicitRecovery) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{{4U, 1U, 16U, 0U}, callbacks, sender};
+    uint8_t setup[kSetupSize]{};
+    ASSERT_TRUE(encodeSetup({9U, 0U, 1U, 4U, 4U}, MutableByteSpan{setup}));
+    engine.process(ByteSpan{setup}, 0U);
+    EXPECT_EQ(engine.poll(UINT32_MAX), ProcessResult::kIdle);
+    EXPECT_EQ(engine.state(), TransferState::kActive);
+    EXPECT_EQ(engine.abort(), SendResult::kSent);
+    EXPECT_EQ(callbacks.abortCount(), 1U);
+    EXPECT_EQ(callbacks.failure_count, 0U);
+}
+
+// Expiry is checked before queued traffic; old SETUP/segments cannot silently reactivate the sink.
+TEST_F(BitsConnectionFixture, ExpiryDiscardsQueuedSessionBacklog) {
+    const auto source{makeObject<8U>()};
+    ASSERT_EQ(transmitter_.startTransfer({source.data(), source.size()}, 4U, 0x24U, 0x50U),
+              StartResult::kStarted);
+    transmitter_.process(++now_ms_);
+    receiver_.process(now_ms_);
+    transmitter_.process(++now_ms_); // Leave a segment queued.
+    ASSERT_EQ(injectSetup({0x24U, 0x50U, 1U, 4U, 4U}), DispatchResult::kAccepted);
+    now_ms_ += kDefaultReceiverInactivityTimeoutMs;
+    EXPECT_EQ(receiver_.process(now_ms_), ProcessResult::kError);
+    EXPECT_EQ(receiver_.process(++now_ms_), ProcessResult::kIdle);
+    EXPECT_EQ(receiver_callbacks_.segmentCount(), 0U);
+    EXPECT_EQ(receiver_callbacks_.admission_count, 1U);
+    EXPECT_EQ(receiver_callbacks_.failure_count, 1U);
 }
 
 // SETUP is regenerated from stable state when the first transmission disappears.
@@ -394,10 +682,10 @@ TEST_F(BitsConnectionFixture, RecoversWhenFinalAckIsLost) {
               StartResult::kStarted);
 
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
     receiver_forwarder_.dropNext(MessageType::kAck);
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
 
     ASSERT_TRUE(pumpUntilTerminal());
     EXPECT_EQ(transmitter_.state(), TransferState::kCompleted);
@@ -415,7 +703,7 @@ TEST_F(BitsConnectionFixture, ProbesAndRecoversAClosedWindow) {
               StartResult::kStarted);
 
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
 
     const uint8_t empty_base{0x2FU};
     ASSERT_EQ(injectAck(Ack{0x24U, 0U, empty_base, empty_base}),
@@ -425,7 +713,7 @@ TEST_F(BitsConnectionFixture, ProbesAndRecoversAClosedWindow) {
     now_ms_ += timing_.probe_timeout_ms;
     ASSERT_EQ(transmitter_.process(now_ms_), ProcessResult::kProgress);
     EXPECT_EQ(transmitter_forwarder_.messageCount(MessageType::kProbe), 1U);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
 
     ASSERT_TRUE(pumpUntilTerminal());
     EXPECT_EQ(transmitter_.state(), TransferState::kCompleted);
@@ -439,14 +727,14 @@ TEST_F(BitsConnectionFixture, AcceptsAndRecoversOutOfOrderSegments) {
                                          0xFEU),
               StartResult::kStarted);
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
 
     transmitter_forwarder_.holdNextSegment();
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
     ASSERT_TRUE(transmitter_forwarder_.releaseHeld());
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
 
     ASSERT_GE(receiver_callbacks_.offsets().size(), 2U);
     EXPECT_EQ(receiver_callbacks_.offsets()[0], 8U);
@@ -464,11 +752,11 @@ TEST_F(BitsConnectionFixture, RejectsASecondSetupWhileBusy) {
                                          0x50U),
               StartResult::kStarted);
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
     ASSERT_EQ(injectSetup(wirespaces::transport::bits::Setup{
                   0x77U, 0x10U, 1U, 8U, 8U}),
               DispatchResult::kAccepted);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
 
     Reject reject{};
     ASSERT_TRUE(decodeReject(receiver_forwarder_.lastPacket().payload(), reject));
@@ -500,10 +788,10 @@ TEST_F(BitsConnectionFixture, TransmitterAbortStopsBothEndpoints) {
                                          0x70U),
               StartResult::kStarted);
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
 
     ASSERT_EQ(transmitter_.abort(), SendResult::kSent);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
     EXPECT_EQ(transmitter_.state(), TransferState::kAborted);
     EXPECT_EQ(receiver_.state(), TransferState::kAborted);
     EXPECT_EQ(transmitter_callbacks_.abortCount(), 1U);
@@ -517,7 +805,7 @@ TEST_F(BitsConnectionFixture, ReceiverAbortStopsBothEndpoints) {
                                          0x90U),
               StartResult::kStarted);
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
     ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
 
     ASSERT_EQ(receiver_.abort(), SendResult::kSent);
@@ -544,10 +832,10 @@ TEST_F(BitsConnectionFixture, RetryExhaustionAbortsTheTransfer) {
         if (result == ProcessResult::kError) {
             break;
         }
-        ASSERT_NE(receiver_.process(), ProcessResult::kError);
+        ASSERT_NE(receiver_.process(now_ms_), ProcessResult::kError);
     }
     ASSERT_EQ(result, ProcessResult::kError);
-    ASSERT_EQ(receiver_.process(), ProcessResult::kProgress);
+    ASSERT_EQ(receiver_.process(now_ms_), ProcessResult::kProgress);
 
     EXPECT_EQ(transmitter_.state(), TransferState::kAborted);
     EXPECT_EQ(receiver_.state(), TransferState::kAborted);

@@ -22,8 +22,8 @@ remains separate via `initializeResponseTo()`.
 BITS's existing `ConnectionConfig` name aliases the common address type. No
 packet storage fields, generated connection defaults, or WireSplice behavior
 are added. Constants are not guaranteed to be free of AVR SRAM cost: with the
-current toolchain these boot-profile builds use 36 bytes of static data versus
-30 before this adapter (both flash size gates still pass).
+current toolchain these boot-profile builds use 48 bytes of static data,
+including the inactivity clock (both flash size gates still pass).
 
 ## Demo
 
@@ -255,7 +255,12 @@ make test-bits
 The `bits_boot_profile_ram` firmware is the receiver-only precursor to the
 4 KB bootloader. It directly composes the synchronous, one-window Compact BITS
 engine with WireSpaces headers and UART HDLC. It does not link `Dispatcher`,
-`Router`, queued ingress, timers, or a BITS transmitter.
+`Router`, queued ingress, or a BITS transmitter. Timer0 supplies the monotonic
+millisecond clock used to expire abandoned transfers.
+
+Both BITS examples release incomplete transfers after 5 seconds without valid
+current-session activity. A lost ABORT or disconnected sender therefore does not
+leave the sink permanently busy. Completed objects retain their existing lifetime.
 
 Build and check both size gates:
 

@@ -170,5 +170,53 @@ TEST(PollingServiceTest, LedControlProcessesQueuedRequestFromMainLoop) {
     EXPECT_EQ(responses.count(), 1U);
 }
 
+
+// Wrong transports/extensions/reserved bits are rejected before queueing or service effects.
+TEST(PollingServiceTest, RejectsUnsupportedControlBeforeQueueing) {
+    ResponseRecorder responses{};
+    const RouteTableEntry route{kWire, kEgress};
+    DomainContext domain{HostInfo{kLocalHost, 1U, {kWire}},
+                         foundation::Span<const RouteTableEntry>{&route, 1U}, responses};
+    uint8_t brightness{0U};
+    led_control::LedControlService led{domain, recordBrightness, &brightness};
+    ping::PingService ping{domain};
+    const auto led_endpoint{EndpointAddress::from(Namespace::kCommon, WS_SERVICE_LED_CONTROL_ENDPOINT_ID)};
+    const auto ping_endpoint{EndpointAddress::from(Namespace::kCommon, WS_SERVICE_PING_ENDPOINT_ID)};
+    const DispatchTableEntry entries[]{{led_endpoint, &led.receiver()}, {ping_endpoint, &ping.receiver()}};
+    Dispatcher dispatcher{foundation::Span<const DispatchTableEntry>{entries}};
+    for (const uint8_t control : {0x81U, 0x82U, 0x83U, 0x84U, 0x85U, 0x86U, 0x87U,
+                                 0x88U, 0x89U, 0x90U, 0xA0U, 0xB0U, 0xBFU}) {
+        SCOPED_TRACE(static_cast<unsigned>(control));
+        ServicePacket request{};
+        initializeRequest(request, led_endpoint);
+        const led_control::LedControlMessage led_message{0x4CU, 1U, 128U, 7U};
+        std::memcpy(request.payload().data(), &led_message, sizeof(led_message));
+        request.header().control = control;
+        EXPECT_EQ(led.receiver().receive(request), ReceiveResult::kRejected);
+        EXPECT_EQ(domain.receive(request, 1U, dispatcher).delivery, DispatchResult::kRejected);
+        led.run();
+        EXPECT_EQ(brightness, 0U);
+        request.header().endpoint = ping_endpoint;
+        const ping::PingMessage ping_message{0xABU, 1U, 42U};
+        std::memcpy(request.payload().data(), &ping_message, sizeof(ping_message));
+        EXPECT_EQ(ping.receiver().receive(request), ReceiveResult::kRejected);
+        EXPECT_EQ(dispatcher.dispatch(request, domain.hostInfo()), DispatchResult::kRejected);
+        ping.run();
+        EXPECT_EQ(responses.count(), 0U);
+    }
+    // Invalid traffic has consumed no queue capacity; every QoS remains usable.
+    for (const uint8_t control : {0x00U, 0x40U, 0x80U, 0xC0U}) {
+        ServicePacket request{};
+        initializeRequest(request, led_endpoint);
+        const led_control::LedControlMessage message{0x4CU, 1U, 128U, 7U};
+        std::memcpy(request.payload().data(), &message, sizeof(message));
+        request.header().control = control;
+        EXPECT_EQ(dispatcher.dispatch(request, domain.hostInfo()), DispatchResult::kAccepted);
+        led.run();
+        EXPECT_EQ(brightness, 128U);
+    }
+    EXPECT_EQ(responses.count(), 4U);
+}
+
 }  // namespace
 }  // namespace wirespaces::test

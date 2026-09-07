@@ -77,7 +77,7 @@ BITS_OBJECTS := $(call local_obj,bits_ram_transfer) \
 	$(call objs,$(BUILD_DIR),$(CORE_OBJS))
 CAN_OBJECTS := $(call local_obj,mcp2515_can_test)
 
-BOOT_PROFILE_COMMON_OBJS := receiver_engine codec packet
+BOOT_PROFILE_COMMON_OBJS := receiver_engine codec packet millisecond_clock
 BOOT_PROFILE_RAM_OBJECTS := $(BOOT_PROFILE_BUILD_DIR)/ram_test.o \
 	$(call objs,$(BOOT_PROFILE_BUILD_DIR),$(BOOT_PROFILE_COMMON_OBJS))
 BOOT_PROFILE_SIZE_OBJECTS := $(BOOT_PROFILE_BUILD_DIR)/size_profile.o \
@@ -158,6 +158,9 @@ $(BOOT_PROFILE_BUILD_DIR)/size_profile.o: bits_boot_profile_ram.cpp | $(BOOT_PRO
 	$(BOOT_COMPILE) -DWS_BITS_BOOT_PROFILE_SIZE_ONLY=1 $< -o $@
 
 $(BOOT_PROFILE_BUILD_DIR)/%.o: $(WS_CORE)/%.cpp | $(BOOT_PROFILE_BUILD_DIR)
+	$(BOOT_COMPILE) $< -o $@
+
+$(BOOT_PROFILE_BUILD_DIR)/millisecond_clock.o: $(AVR_PLATFORM)/millisecond_clock.cpp | $(BOOT_PROFILE_BUILD_DIR)
 	$(BOOT_COMPILE) $< -o $@
 
 $(BOOT_PROFILE_BUILD_DIR)/receiver_engine.o: $(WS_BITS)/receiver_engine.cpp | $(BOOT_PROFILE_BUILD_DIR)

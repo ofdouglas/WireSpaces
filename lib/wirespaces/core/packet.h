@@ -98,6 +98,13 @@ struct ConnectionAddress {
 class WS_PACKED Header {
 public:
     uint8_t control{};
+    /** @brief The prototype accepts Simple/BITS, no extensions, and zero reserved bits.
+     * QoS bits do not affect support. This is local payload admission policy;
+     * routing may forward opaque packets without interpreting their transport.
+     */
+    constexpr bool hasSupportedControl() const noexcept {
+        return (control & 0x3FU) < static_cast<uint8_t>(TransportType::kNumTransportTypes);
+    }
     QoS qos() const noexcept;
     bool hasExtensions() const noexcept;
     TransportType transportType() const noexcept;

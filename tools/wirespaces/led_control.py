@@ -10,7 +10,8 @@ import time
 
 import serial
 
-from .receiver import HdlcStreamDecoder, WireSpacesPacket, encode_hdlc_frame
+from .hdlc import HdlcStreamDecoder, encode_hdlc_frame
+from .packet import WireSpacesPacket
 
 
 LED_MAGIC = 0x4C

@@ -10,26 +10,25 @@ import time
 
 import serial
 
-from wirespaces.bits_ram_transfer import (
-    ARDUINO_HOST,
+from wirespaces.bits import (
     BITS_TRANSPORT_TYPE,
     CompactBitsTransmitter,
     MESSAGE_ABORT,
     MESSAGE_ACK,
     MESSAGE_REJECT,
     MESSAGE_USER_DATAGRAM,
+    BitsProtocolError,
+)
+from wirespaces.bench.uno import (
+    ARDUINO_HOST,
     NORMAL_BITS_CONTROL,
     PC_HOST,
     TEST_WIRE,
     UNO_SEGMENT_SIZE,
     UPLOAD_ENDPOINT,
-    BitsProtocolError,
 )
-from wirespaces.receiver import (
-    HdlcStreamDecoder,
-    WireSpacesPacket,
-    encode_hdlc_frame,
-)
+from wirespaces.hdlc import HdlcStreamDecoder, encode_hdlc_frame
+from wirespaces.packet import WireSpacesPacket
 
 
 ECHO_REQUEST = 0x01

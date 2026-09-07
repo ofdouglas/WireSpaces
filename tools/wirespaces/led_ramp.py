@@ -17,7 +17,8 @@ from .led_control import (
     LED_RESPONSE,
     NORMAL_SIMPLE_CONTROL,
 )
-from .receiver import HdlcStreamDecoder, WireSpacesPacket, encode_hdlc_frame
+from .hdlc import HdlcStreamDecoder, encode_hdlc_frame
+from .packet import WireSpacesPacket
 
 
 def parse_arguments() -> argparse.Namespace:

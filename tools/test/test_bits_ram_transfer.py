@@ -8,7 +8,7 @@ partial final segments, and rejected oversized objects.
 
 import unittest
 
-from wirespaces.bits_ram_transfer import (
+from wirespaces.bits import (
     Ack,
     encode_ack,
     CompactBitsReceiver,

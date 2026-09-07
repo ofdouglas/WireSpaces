@@ -14,10 +14,11 @@ namespace wirespaces::test::support {
 
 class RouterForwardSpy final : public PacketForwarder {
 public:
-    void forward(const PacketBuffer& packet, EgressSet egress_set) noexcept override {
+    RouteResult forward(const PacketBuffer& packet, InterfaceSet egress_set) noexcept override {
         called_ = true;
         last_packet_ = &packet;
         last_egress_set_ = egress_set;
+        return RouteResult::kAccepted;
     }
 
     void reset() noexcept {
@@ -28,12 +29,12 @@ public:
 
     bool called() const noexcept { return called_; }
     const PacketBuffer* lastPacket() const noexcept { return last_packet_; }
-    EgressSet lastEgressSet() const noexcept { return last_egress_set_; }
+    InterfaceSet lastEgressSet() const noexcept { return last_egress_set_; }
 
 private:
     bool called_{false};
     const PacketBuffer* last_packet_{nullptr};
-    EgressSet last_egress_set_{kNoEgress};
+    InterfaceSet last_egress_set_{kNoEgress};
 };
 
 class RouteTableFixture : public DefaultHostFixture {

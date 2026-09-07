@@ -82,7 +82,7 @@ public:
 
 private:
     [[nodiscard]] MutableByteSpan prepare(uint16_t payload_size) noexcept override;
-    [[nodiscard]] bool sendPrepared() noexcept override;
+    SendResult sendPrepared() noexcept override;
 
     ConnectionConfig connection_{};
     Router& router_;
@@ -156,6 +156,7 @@ private:
     TransmitterStorage storage_;
     bool datagram_occupied_{false};
     TransferSession session_{};
+    SendResult last_send_{SendResult::kSent};
 };
 
 }  // namespace wirespaces::transport::bits

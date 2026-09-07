@@ -48,6 +48,14 @@ class RamReceiverCallbacks final : public bits::ReceiverCallbacks {
 public:
     explicit RamReceiverCallbacks(wirespaces::MutableByteSpan storage) noexcept : storage_{storage} {}
 
+    bits::TransferAdmission beginTransfer(const bits::TransferInfo& info) noexcept override {
+        if (object_complete_) return bits::TransferAdmission::kBusy;
+        if (info.total_size > storage_.size()) return bits::TransferAdmission::kTooLarge;
+        received_size_ = 0U;
+        return bits::TransferAdmission::kAccepted;
+    }
+    void onTransferFailed(bits::FailureReason) noexcept override { releaseCompletedObject(); }
+
     bool onSegment(std::uint32_t object_offset, wirespaces::ByteSpan payload) noexcept override {
         if ((object_offset + payload.size()) > storage_.size()) {
             return false;
@@ -64,7 +72,7 @@ public:
 
     void onTransferComplete() noexcept override { object_complete_ = true; }
 
-    void onTransferAborted() noexcept override {
+    void onTransferAborted(bits::AbortReason) noexcept override {
         received_size_ = 0U;
         object_complete_ = false;
     }

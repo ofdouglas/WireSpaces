@@ -4,6 +4,7 @@
  */
 
 #include <platform/avr/uart0.h>
+#include <wirespaces/crc/crc_algorithm.h>
 #include <wirespaces/links/uart_hdlc/decoder.h>
 #include <wirespaces/transports/bits/receiver_engine.h>
 
@@ -17,17 +18,15 @@
 #define WS_BITS_BOOT_PROFILE_SIZE_ONLY 0
 #endif
 
+namespace bits = wirespaces::transport::bits;
+
 namespace {
 
 constexpr std::uint16_t kMaximumObjectSize{256U};
 constexpr std::uint16_t kSegmentPayloadSize{24U};
-constexpr std::uint16_t kMaximumBitsPayloadSize{
-    wirespaces::transport::bits::kSegmentHeaderSize + kSegmentPayloadSize};
-constexpr std::uint16_t kMaximumUserDatagramSize{
-    kMaximumBitsPayloadSize -
-    wirespaces::transport::bits::kUserDatagramHeaderSize};
-constexpr std::size_t kMaximumCanonicalSize{
-    sizeof(wirespaces::Header) + kMaximumBitsPayloadSize};
+constexpr std::uint16_t kMaximumBitsPayloadSize{bits::kSegmentHeaderSize + kSegmentPayloadSize};
+constexpr std::uint16_t kMaximumUserDatagramSize{kMaximumBitsPayloadSize - bits::kUserDatagramHeaderSize};
+constexpr std::size_t kMaximumCanonicalSize{sizeof(wirespaces::Header) + kMaximumBitsPayloadSize};
 
 constexpr std::uint8_t kEchoRequest{0x01U};
 constexpr std::uint8_t kEchoResponse{0x81U};
@@ -39,8 +38,7 @@ constexpr std::uint16_t kNoBadOffset{0xFFFFU};
 
 WS_PACKET_BUFFER_DEFINE(TransmitPacket, kMaximumBitsPayloadSize);
 
-class UartPduSender final
-    : public wirespaces::transport::bits::ReceiverPduSender {
+class UartPduSender final : public bits::ReceiverPduSender {
 public:
     wirespaces::MutableByteSpan prepare(std::uint16_t payload_size) noexcept override {
         if (!packet_.initialize(payload_size, wiring_constants::kUploadConnection, wirespaces::ControlFields::bits())) {
@@ -49,36 +47,21 @@ public:
         return packet_.payload();
     }
 
-    bool sendPrepared() noexcept override {
-        const auto* canonical_bytes{reinterpret_cast<const std::uint8_t*>(&packet_.header())};
-        const std::size_t canonical_size{sizeof(packet_.header()) + packet_.size()};
-        std::uint16_t crc{0xFFFFU};
+    bits::SendResult sendPrepared() noexcept override {
+        wirespaces::ByteSpan tx_bytes{packet_.headerAndPayload()};
+        auto crc{wirespaces::crc::algorithm::Crc16CcittFalse::compute(tx_bytes)};
 
         wirespaces::platform::avr::uart0WriteByte(kFlag);
-        for (std::size_t index{0U}; index < canonical_size; ++index) {
-            const std::uint8_t byte{canonical_bytes[index]};
-            crc = updateCrc(crc, byte);
-            writeEscaped(byte);
+        for (std::size_t index{0U}; index < tx_bytes.size(); ++index) {
+            writeEscaped(tx_bytes[index]);
         }
         writeEscaped(static_cast<std::uint8_t>(crc));
         writeEscaped(static_cast<std::uint8_t>(crc >> 8U));
         wirespaces::platform::avr::uart0WriteByte(kFlag);
-        return true;
+        return bits::SendResult::kSent;
     }
 
 private:
-    static std::uint16_t updateCrc(std::uint16_t crc,
-                                   std::uint8_t byte) noexcept {
-        crc = static_cast<std::uint16_t>(
-            crc ^ static_cast<std::uint16_t>(byte << 8U));
-        for (std::uint8_t bit{0U}; bit < 8U; ++bit) {
-            crc = (crc & 0x8000U) != 0U
-                      ? static_cast<std::uint16_t>((crc << 1U) ^ 0x1021U)
-                      : static_cast<std::uint16_t>(crc << 1U);
-        }
-        return crc;
-    }
-
     static void writeEscaped(std::uint8_t byte) noexcept {
         if (byte == kFlag || byte == kEscape) {
             wirespaces::platform::avr::uart0WriteByte(kEscape);
@@ -93,19 +76,24 @@ private:
     TransmitPacket packet_{};
 };
 
-class RamProfileCallbacks final
-    : public wirespaces::transport::bits::ReceiverCallbacks {
+class RamProfileCallbacks final : public bits::ReceiverCallbacks {
 public:
-    void attach(wirespaces::transport::bits::BitsReceiverEngine& engine) noexcept {
+    void attach(bits::BitsReceiverEngine& engine) noexcept {
         engine_ = &engine;
     }
 
-    void beginSession(std::uint8_t session_id, std::uint32_t total_size) noexcept {
-        session_id_ = session_id;
-        expected_size_ = total_size <= kMaximumObjectSize
-                             ? static_cast<std::uint16_t>(total_size)
-                             : 0U;
+    bits::TransferAdmission beginTransfer(
+        const bits::TransferInfo& info) noexcept override {
+        if (info.total_size > kMaximumObjectSize) return bits::TransferAdmission::kTooLarge;
+        session_id_ = info.session_id;
+        expected_size_ = static_cast<std::uint16_t>(info.total_size);
         received_size_ = 0U;
+        return bits::TransferAdmission::kAccepted;
+    }
+
+    void onTransferFailed(bits::FailureReason) noexcept override {
+        received_size_ = 0U;
+        expected_size_ = 0U;
     }
 
     bool onSegment(std::uint32_t object_offset, wirespaces::ByteSpan payload) noexcept override {
@@ -137,8 +125,7 @@ public:
         std::uint8_t response[kMaximumUserDatagramSize]{};
         std::memcpy(response, payload.data(), payload.size());
         response[0] = kEchoResponse;
-        engine_->sendDatagram(
-            wirespaces::ByteSpan{response, payload.size()});
+        engine_->sendDatagram(wirespaces::ByteSpan{response, payload.size()});
 #endif
     }
 
@@ -173,13 +160,13 @@ public:
 #endif
     }
 
-    void onTransferAborted() noexcept override {
+    void onTransferAborted(bits::AbortReason) noexcept override {
         received_size_ = 0U;
         expected_size_ = 0U;
     }
 
 private:
-    wirespaces::transport::bits::BitsReceiverEngine* engine_{nullptr};
+    bits::BitsReceiverEngine* engine_{nullptr};
 #if !WS_BITS_BOOT_PROFILE_SIZE_ONLY
     std::uint8_t object_[kMaximumObjectSize]{};
 #endif
@@ -197,10 +184,7 @@ bool matchesConnection(const wirespaces::Header& header) noexcept {
            header.endpoint == wiring_constants::kBitsUploadEndpoint;
 }
 
-void processFrame(
-    wirespaces::ByteSpan frame,
-    wirespaces::transport::bits::BitsReceiverEngine& engine,
-    RamProfileCallbacks& callbacks) noexcept {
+void processFrame(wirespaces::ByteSpan frame, bits::BitsReceiverEngine& engine) noexcept {
     if (frame.size() < sizeof(wirespaces::Header)) {
         return;
     }
@@ -217,17 +201,6 @@ void processFrame(
         return;
     }
 
-    wirespaces::transport::bits::Control control{};
-    if (engine.state() != wirespaces::transport::bits::TransferState::kActive &&
-        wirespaces::transport::bits::decodeControl(message[0], control) &&
-        control.type == wirespaces::transport::bits::MessageType::kSetup) {
-        wirespaces::transport::bits::Setup setup{};
-        if (wirespaces::transport::bits::detail::decodeSetupKnownType(message, setup) &&
-            setupTotalSize(setup) <= kMaximumObjectSize) {
-            callbacks.beginSession(setup.session_id, setupTotalSize(setup));
-        }
-    }
-
     engine.process(message);
 }
 
@@ -238,10 +211,7 @@ int main() {
 
     UartPduSender sender{};
     RamProfileCallbacks callbacks{};
-    wirespaces::transport::bits::BitsReceiverEngine engine{
-        wirespaces::transport::bits::ReceiverEngineConfig{
-            kSegmentPayloadSize, 1U, kMaximumObjectSize},
-        callbacks, sender};
+    bits::BitsReceiverEngine engine{bits::ReceiverEngineConfig{kSegmentPayloadSize, 1U, kMaximumObjectSize},callbacks, sender};
     callbacks.attach(engine);
     wirespaces::links::uart_hdlc::HdlcDecoder<kMaximumCanonicalSize> decoder{};
 
@@ -252,7 +222,7 @@ int main() {
             if (!decoder.push(byte)) {
                 continue;
             }
-            processFrame(decoder.frame(), engine, callbacks);
+            processFrame(decoder.frame(), engine);
             decoder.consume();
         }
     }

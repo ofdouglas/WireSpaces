@@ -48,9 +48,20 @@ TEST(DomainContextTest, BindsIdentityAndIngressWithoutGlobalRegistration) {
 // Local-domain forwarding routes and dispatches a matching packet.
 TEST_F(LocalDomainFixture, RoutesIntoDispatcher) {
     TestPacket packet{PacketBuilder{}.withEndpoint(kReceiverEndpoint).packet()};
-    EXPECT_EQ(forwardDomain(packet), RouteResult::kForwarded);
+    EXPECT_EQ(forwardDomain(packet), RouteResult::kAccepted);
     EXPECT_EQ(local_forwarder_.lastResult(), DispatchResult::kAccepted);
     EXPECT_EQ(recorder_.invocationCount(), 1U);
+}
+
+// A zero-egress local-domain route still reports actual queue admission, not vacuous success.
+TEST_F(LocalDomainFixture, ReportsLocalQueueFullAndRejection) {
+    EndpointReceiverQueue<8U, 1U> queue{};
+    dispatch_entry_.receiver = &queue;
+    TestPacket packet{PacketBuilder{}.withEndpoint(kReceiverEndpoint).packet()};
+    EXPECT_EQ(forwardDomain(packet), RouteResult::kAccepted);
+    EXPECT_EQ(forwardDomain(packet), RouteResult::kFull);
+    packet.header().destination = HostId{99U};
+    EXPECT_EQ(forwardDomain(packet), RouteResult::kRejected);
 }
 
 // A missing route never reaches local dispatch.

@@ -5,6 +5,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -17,6 +19,27 @@ namespace {
 
 using support::TestPacket;
 WS_PACKET_BUFFER_DEFINE(SmallPacket, 8U);
+
+// Base prefix slicing/assignment is inaccessible; owning packets still copy complete storage.
+TEST(PacketTest, OnlyConcretePacketsSupportOrdinaryCopyAndMove) {
+    static_assert(!std::is_copy_constructible_v<PacketBuffer>);
+    static_assert(!std::is_move_constructible_v<PacketBuffer>);
+    static_assert(!std::is_copy_assignable_v<PacketBuffer>);
+    static_assert(!std::is_move_assignable_v<PacketBuffer>);
+    static_assert(std::is_copy_constructible_v<SmallPacket> && std::is_copy_assignable_v<SmallPacket>);
+    SmallPacket source{};
+    ASSERT_TRUE(source.initialize(8U, ControlFields::bits()));
+    source.payload()[7] = 0xAB;
+    source.setIngressIndex(3U);
+    SmallPacket copy{source};
+    SmallPacket assigned{};
+    assigned = copy;
+    SmallPacket moved{std::move(assigned)};
+    copy = std::move(moved);
+    EXPECT_EQ(copy.payload()[7], 0xAB);
+    EXPECT_EQ(copy.capacity(), 8U);
+    EXPECT_EQ(copy.ingressIndex(), 3U);
+}
 
 // Complete initialization replaces stale addresses/controls and ingress, not payload storage.
 TEST(PacketTest, InitializesCompleteConnectionAtSizeBoundaries) {

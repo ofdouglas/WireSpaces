@@ -10,7 +10,7 @@ namespace demo_wiring {
 constexpr wirespaces::HostId kArduinoHost{1U};
 constexpr wirespaces::HostId kPcHost{2U};
 constexpr wirespaces::WireNumber kTestWire{1U};
-constexpr wirespaces::EgressSet kUartEgress{0x01U};
+constexpr wirespaces::InterfaceSet kUartEgress{0x01U};
 constexpr std::uint8_t kUartIngressIndex{1U};
 constexpr std::uint32_t kUartBaudRate{115200UL};
 constexpr wirespaces::HostInfo kArduinoHostInfo{kArduinoHost, 1U, {kTestWire}};
@@ -26,18 +26,20 @@ inline wirespaces::foundation::Span<const wirespaces::RouteTableEntry> routes() 
 /** @brief Fan out selected egress bits to application-owned Link forwarders. */
 class Forwarder final : public wirespaces::PacketForwarder {
 public:
-    explicit Forwarder(wirespaces::PacketForwarder& link0) noexcept : link0_{link0} {}
+    explicit Forwarder(wirespaces::PacketLink& link0) noexcept : link0_{link0} {}
 
-    void forward(const wirespaces::PacketBuffer& packet, wirespaces::EgressSet selected) noexcept override {
+    wirespaces::RouteResult forward(const wirespaces::PacketBuffer& packet, wirespaces::InterfaceSet selected) noexcept override {
         (void)packet;
         (void)selected;
+        wirespaces::RouteResult result{wirespaces::RouteResult::kNoEgress};
         if ((selected & kUartEgress) != 0U) {
-            link0_.forward(packet, kUartEgress);
+            result = wirespaces::combineAdmission(result, link0_.trySend(packet));
         }
+        return result == wirespaces::RouteResult::kNoEgress ? wirespaces::RouteResult::kAccepted : result;
     }
 
 private:
-    wirespaces::PacketForwarder& link0_;  // Uart -> VcpUart
+    wirespaces::PacketLink& link0_;  // Uart -> VcpUart
 };
 
 }  // namespace demo_wiring

@@ -9,6 +9,16 @@
 
 namespace wirespaces::transport::bits {
 namespace {
+SendResult sendResult(RouteResult result) noexcept {
+    switch (result) {
+        case RouteResult::kAccepted: return SendResult::kSent;
+        case RouteResult::kPartial: return SendResult::kPartial;
+        case RouteResult::kFull: return SendResult::kFull;
+        case RouteResult::kTooLarge: return SendResult::kTooLarge;
+        case RouteResult::kRejected: return SendResult::kRejected;
+        default: return SendResult::kNoRoute;
+    }
+}
 
 bool matchesConnection(const PacketBuffer& packet, const ConnectionConfig& connection) noexcept {
     const Header& header{packet.header()};
@@ -164,7 +174,8 @@ ProcessResult BitsReceiver::process() noexcept {
             result == ProcessResult::kError) {
             return ProcessResult::kError;
         }
-        result = ProcessResult::kProgress;
+        result = (result == ProcessResult::kBlocked || datagram_result == ProcessResult::kBlocked)
+                     ? ProcessResult::kBlocked : ProcessResult::kProgress;
     }
 
     return result;
@@ -185,8 +196,8 @@ MutableByteSpan BitsReceiver::prepare(uint16_t payload_size) noexcept {
     return storage_.transmit_packet.payload();
 }
 
-bool BitsReceiver::sendPrepared() noexcept {
-    return router_.forward(storage_.transmit_packet) == RouteResult::kForwarded;
+SendResult BitsReceiver::sendPrepared() noexcept {
+    return sendResult(router_.forward(storage_.transmit_packet));
 }
 
 BitsTransmitter::BitsTransmitter(ConnectionConfig connection, TimingConfig timing, Router& router,
@@ -236,6 +247,7 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
     if (session_.state == TransferState::kStarting) {
         if (!session_.setup_sent) {
             if (!sendSetup(now_ms, false)) {
+                if (last_send_ == SendResult::kFull) return ProcessResult::kBlocked;
                 session_.state = TransferState::kError;
                 return ProcessResult::kError;
             }
@@ -248,6 +260,7 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
                 return ProcessResult::kError;
             }
             if (!sendSetup(now_ms, true)) {
+                if (last_send_ == SendResult::kFull) return ProcessResult::kBlocked;
                 session_.state = TransferState::kError;
                 return ProcessResult::kError;
             }
@@ -267,6 +280,7 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
         const uint16_t bit{static_cast<uint16_t>(1U << offset)};
         if ((session_.sent_bitmap & bit) == 0U) {
             if (!sendSegment(offset, now_ms, false)) {
+                if (last_send_ == SendResult::kFull) return ProcessResult::kBlocked;
                 session_.state = TransferState::kError;
                 return ProcessResult::kError;
             }
@@ -289,6 +303,7 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
             return ProcessResult::kError;
         }
         if (!sendSegment(offset, now_ms, true)) {
+            if (last_send_ == SendResult::kFull) return ProcessResult::kBlocked;
             session_.state = TransferState::kError;
             return ProcessResult::kError;
         }
@@ -306,6 +321,7 @@ ProcessResult BitsTransmitter::process(uint32_t now_ms) noexcept {
                 return ProcessResult::kError;
             }
             if (!sendProbe(now_ms)) {
+                if (last_send_ == SendResult::kFull) return ProcessResult::kBlocked;
                 session_.state = TransferState::kError;
                 return ProcessResult::kError;
             }
@@ -330,7 +346,9 @@ SendResult BitsTransmitter::sendDatagram(ByteSpan payload) noexcept {
         !encodeUserDatagram(payload, storage_.transmit_packet.payload())) {
         return SendResult::kTooLarge;
     }
-    return forwardPacket() ? SendResult::kSent : SendResult::kNoRoute;
+    const bool sent{forwardPacket()};
+    (void)sent;
+    return last_send_;
 }
 
 SendResult BitsTransmitter::abort() noexcept {
@@ -339,7 +357,8 @@ SendResult BitsTransmitter::abort() noexcept {
     }
     const bool sent{sendAbort()};
     transitionToAborted();
-    return sent ? SendResult::kSent : SendResult::kNoRoute;
+    (void)sent;
+    return last_send_;
 }
 
 StartResult BitsTransmitter::startTransfer(ByteSpan object, uint16_t segment_size,
@@ -552,11 +571,13 @@ bool BitsTransmitter::sendAbort() noexcept {
 }
 
 bool BitsTransmitter::preparePacket(uint16_t payload_size, QoS qos) noexcept {
+    last_send_ = SendResult::kTooLarge;
     return storage_.transmit_packet.initialize(payload_size, connection_, ControlFields::bits(qos));
 }
 
 bool BitsTransmitter::forwardPacket() noexcept {
-    return router_.forward(storage_.transmit_packet) == RouteResult::kForwarded;
+    last_send_ = sendResult(router_.forward(storage_.transmit_packet));
+    return last_send_ == SendResult::kSent;
 }
 
 bool BitsTransmitter::retryLimitReached(uint8_t retry_count) const noexcept {

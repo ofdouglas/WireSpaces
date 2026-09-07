@@ -59,14 +59,13 @@ BitsReceiverEngine::BitsReceiverEngine(const ReceiverEngineConfig& config,
 }
 
 ProcessResult BitsReceiverEngine::process(ByteSpan message) noexcept {
+    last_send_ = SendResult::kSent;
     if (message.empty()) {
-        state_ = TransferState::kError;
         return ProcessResult::kError;
     }
 
     Control control{};
     if (!decodeControl(message[0], control)) {
-        state_ = TransferState::kError;
         return ProcessResult::kError;
     }
 
@@ -74,10 +73,9 @@ ProcessResult BitsReceiverEngine::process(ByteSpan message) noexcept {
                            ? handleSegment(message)
                            : handleControl(message, control.type)};
     if (!handled) {
-        state_ = TransferState::kError;
         return ProcessResult::kError;
     }
-    return ProcessResult::kProgress;
+    return last_send_ == SendResult::kFull ? ProcessResult::kBlocked : ProcessResult::kProgress;
 }
 
 SendResult BitsReceiverEngine::sendDatagram(ByteSpan payload) noexcept {
@@ -90,17 +88,17 @@ SendResult BitsReceiverEngine::sendDatagram(ByteSpan payload) noexcept {
     if (storage.size() != message_size || !encodeUserDatagram(payload, storage)) {
         return SendResult::kTooLarge;
     }
-    return sender_.sendPrepared() ? SendResult::kSent : SendResult::kNoRoute;
+    return sender_.sendPrepared();
 }
 
 SendResult BitsReceiverEngine::abort() noexcept {
     if (state_ != TransferState::kActive) {
         return SendResult::kInvalidState;
     }
-    const bool sent{sendAbort()};
+    sendAbort();
     state_ = TransferState::kAborted;
-    callbacks_.onTransferAborted();
-    return sent ? SendResult::kSent : SendResult::kNoRoute;
+    callbacks_.onTransferAborted(AbortReason::kLocal);
+    return last_send_;
 }
 
 bool BitsReceiverEngine::handleSegment(ByteSpan message) noexcept {
@@ -145,8 +143,11 @@ bool BitsReceiverEngine::handleSegment(ByteSpan message) noexcept {
             ? setup_.final_segment_size
             : setup_.segment_size};
     const ByteSpan segment_payload{message.subspan(kSegmentHeaderSize)};
-    if (segment_payload.size() != expected_size ||
-        !callbacks_.onSegment(object_offset, segment_payload)) {
+    if (segment_payload.size() != expected_size) {
+        return false;
+    }
+    if (!callbacks_.onSegment(object_offset, segment_payload)) {
+        fail(FailureReason::kSinkRejected);
         return false;
     }
 
@@ -165,12 +166,10 @@ bool BitsReceiverEngine::handleSegment(ByteSpan message) noexcept {
     const bool completed{contiguous_count_ == segment_count_};
     if (completed) {
         state_ = TransferState::kCompleted;
+        callbacks_.onTransferComplete();
     }
     if (!sendAck()) {
         return false;
-    }
-    if (completed) {
-        callbacks_.onTransferComplete();
     }
     return true;
 }
@@ -241,6 +240,11 @@ bool BitsReceiverEngine::handleSetup(ByteSpan payload) noexcept {
         return sendReject(requested.session_id, RejectReason::kBusy);
     }
 
+    const auto admission{callbacks_.beginTransfer({requested.session_id, requested_total_size, requested.segment_size})};
+    if (admission != TransferAdmission::kAccepted) {
+        return sendReject(requested.session_id, admission == TransferAdmission::kBusy ? RejectReason::kBusy :
+            admission == TransferAdmission::kTooLarge ? RejectReason::kObjectTooLarge : RejectReason::kInvalidArgument);
+    }
     setup_ = requested;
     segment_count_ = requested_segment_count;
     contiguous_count_ = 0U;
@@ -266,7 +270,7 @@ bool BitsReceiverEngine::handleAbort(ByteSpan payload) noexcept {
         return true;
     }
     state_ = TransferState::kAborted;
-    callbacks_.onTransferAborted();
+    callbacks_.onTransferAborted(AbortReason::kPeer);
     return true;
 }
 
@@ -288,6 +292,8 @@ bool BitsReceiverEngine::sendAck() noexcept {
 #endif
     const MutableByteSpan storage{sender_.prepare(kAckSize)};
     if (storage.size() != kAckSize) {
+        last_send_ = SendResult::kTooLarge;
+        fail(FailureReason::kSendFailed);
         return false;
     }
 #if WIRESPACES_BITS_RECEIVER_MAX_WINDOW_WIDTH == 1
@@ -305,25 +311,44 @@ bool BitsReceiverEngine::sendAck() noexcept {
                                         lowBitMask(window_span)),
                   max_receive_sequence, window_base};
     if (!encodeAck(ack, storage)) {
+        last_send_ = SendResult::kTooLarge;
+        fail(FailureReason::kSendFailed);
         return false;
     }
 #endif
-    return sender_.sendPrepared();
+    const bool sent{sendPrepared()};
+    if (!sent) fail(FailureReason::kSendFailed);
+    return sent;
 }
 
 bool BitsReceiverEngine::sendReject(uint8_t session_id,
                                     RejectReason reason) noexcept {
     const Reject reject{session_id, reason};
     const MutableByteSpan storage{sender_.prepare(kRejectSize)};
+    last_send_ = SendResult::kTooLarge;
     return storage.size() == kRejectSize && encodeReject(reject, storage) &&
-           sender_.sendPrepared();
+           sendPrepared();
 }
 
 bool BitsReceiverEngine::sendAbort() noexcept {
     const Abort abort_message{setup_.session_id};
     const MutableByteSpan storage{sender_.prepare(kAbortSize)};
+    last_send_ = SendResult::kTooLarge;
     return storage.size() == kAbortSize && encodeAbort(abort_message, storage) &&
-           sender_.sendPrepared();
+           sendPrepared();
+}
+
+bool BitsReceiverEngine::sendPrepared() noexcept {
+    last_send_ = sender_.sendPrepared();
+    // The peer's existing Setup/segment/probe retry supplies the next ACK opportunity.
+    return last_send_ == SendResult::kSent || last_send_ == SendResult::kFull;
+}
+
+void BitsReceiverEngine::fail(FailureReason reason) noexcept {
+    if (state_ == TransferState::kActive) {
+        state_ = TransferState::kError;
+        callbacks_.onTransferFailed(reason);
+    }
 }
 
 void BitsReceiverEngine::updateGrant() noexcept {

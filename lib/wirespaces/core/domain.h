@@ -58,7 +58,7 @@ public:
     explicit constexpr LocalDispatchForwarder(Dispatcher& dispatcher) noexcept
         : dispatcher_{dispatcher} {}
 
-    void forward(const PacketBuffer& packet, EgressSet egress_set) noexcept override;
+    RouteResult forward(const PacketBuffer& packet, InterfaceSet egress_set) noexcept override;
 
     DispatchResult lastResult() const noexcept { return last_result_; }
 

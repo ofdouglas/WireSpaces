@@ -25,6 +25,7 @@ enum class ProcessResult : uint8_t {
     kIdle = 0U,
     kProgress,
     kError,
+    kBlocked,
 };
 
 /** @brief Observable state of a BITS segmented transfer. */
@@ -44,11 +45,29 @@ enum class SendResult : uint8_t {
     kTooLarge,
     kNoRoute,
     kInvalidState,
+    kFull,
+    kRejected,
+    kPartial,
 };
+
+struct TransferInfo {
+    uint8_t session_id;
+    uint32_t total_size;
+    uint16_t segment_size;
+};
+enum class TransferAdmission : uint8_t { kAccepted, kBusy, kTooLarge, kRejected };
+enum class FailureReason : uint8_t { kSinkRejected, kSendFailed };
+enum class AbortReason : uint8_t { kLocal, kPeer };
 
 /** @brief Service callbacks invoked synchronously by BitsReceiverEngine. */
 class ReceiverCallbacks {
 public:
+    /** @brief Validate/reserve sink storage once per accepted transfer, after protocol validation.
+     * Duplicate active Setup does not call this again. No reentrant engine calls here.
+     */
+    virtual TransferAdmission beginTransfer(const TransferInfo& info) noexcept = 0;
+    /** @brief Exactly one failure notification for an active transfer that cannot continue. */
+    virtual void onTransferFailed(FailureReason reason) noexcept = 0;
     /** @return True only when the sink accepted the segment bytes. */
     virtual bool onSegment(uint32_t object_offset, ByteSpan payload) noexcept = 0;
     /** @brief Deliver one connection-scoped unreliable sideband datagram. */
@@ -56,7 +75,7 @@ public:
     /** @brief Notify that every object segment has been accepted by the sink. */
     virtual void onTransferComplete() noexcept = 0;
     /** @brief Notify that the active transfer was aborted locally or by its peer. */
-    virtual void onTransferAborted() noexcept = 0;
+    virtual void onTransferAborted(AbortReason reason) noexcept = 0;
 
 protected:
     ~ReceiverCallbacks() = default;
@@ -72,7 +91,7 @@ public:
     /** @return Exactly payload_size writable bytes, or an empty span when unavailable. */
     virtual MutableByteSpan prepare(uint16_t payload_size) noexcept = 0;
     /** @brief Transmit the PDU most recently prepared by prepare(). */
-    virtual bool sendPrepared() noexcept = 0;
+    virtual SendResult sendPrepared() noexcept = 0;
 
 protected:
     ~ReceiverPduSender() = default;
@@ -112,12 +131,15 @@ private:
     [[nodiscard]] bool sendReject(uint8_t session_id, RejectReason reason) noexcept;
     bool sendAbort() noexcept;
     void updateGrant() noexcept;
+    bool sendPrepared() noexcept;
+    void fail(FailureReason reason) noexcept;
 
     ReceiverEngineConfig config_{};
     ReceiverCallbacks& callbacks_;
     ReceiverPduSender& sender_;
     TransferState state_{TransferState::kIdle};
     Setup setup_{};
+    SendResult last_send_{SendResult::kSent};
     uint32_t segment_count_{0U};
     uint32_t contiguous_count_{0U};
 #if WIRESPACES_BITS_RECEIVER_MAX_WINDOW_WIDTH == 1

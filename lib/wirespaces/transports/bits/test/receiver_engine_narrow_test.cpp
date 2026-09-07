@@ -14,6 +14,10 @@ namespace {
 
 class NarrowCallbacks final : public ReceiverCallbacks {
 public:
+    TransferAdmission beginTransfer(const TransferInfo& info) noexcept override {
+        return info.total_size <= object_.size() ? TransferAdmission::kAccepted : TransferAdmission::kTooLarge;
+    }
+    void onTransferFailed(FailureReason) noexcept override {}
     bool onSegment(uint32_t offset, ByteSpan payload) noexcept override {
         if (offset + payload.size() > object_.size()) {
             return false;
@@ -29,7 +33,7 @@ public:
     }
 
     void onTransferComplete() noexcept override { complete_ = true; }
-    void onTransferAborted() noexcept override {}
+    void onTransferAborted(AbortReason) noexcept override {}
 
     std::array<uint8_t, 16U> object_{};
     std::array<uint8_t, 8U> datagram_{};
@@ -44,7 +48,7 @@ public:
         size_ = size <= storage_.size() ? size : 0U;
         return MutableByteSpan{storage_.data(), size_};
     }
-    bool sendPrepared() noexcept override { return true; }
+    SendResult sendPrepared() noexcept override { return SendResult::kSent; }
 
     ByteSpan sent() const noexcept { return ByteSpan{storage_.data(), size_}; }
 
@@ -131,4 +135,3 @@ TEST(BitsNarrowReceiverEngineTest, TransfersAndExchangesDatagrams) {
 }
 
 }  // namespace wirespaces::transport::bits::test
-

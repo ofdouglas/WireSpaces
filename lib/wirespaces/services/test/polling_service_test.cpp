@@ -25,20 +25,21 @@ namespace {
 constexpr WireNumber kWire{9U};
 constexpr HostId kLocalHost{1U};
 constexpr HostId kRemoteHost{2U};
-constexpr EgressSet kEgress{1U};
+constexpr InterfaceSet kEgress{1U};
 
 WS_PACKET_BUFFER_DEFINE(ServicePacket, sizeof(ping::PingMessage));
 
 /** @brief Capture response metadata and payload before its stack buffer expires. */
 class ResponseRecorder final : public PacketForwarder {
 public:
-    void forward(const PacketBuffer& packet, EgressSet) noexcept override {
+    RouteResult forward(const PacketBuffer& packet, InterfaceSet) noexcept override {
         ++count_;
         header_ = packet.header();
         size_ = packet.size();
         if (size_ > 0U) {
             std::memcpy(payload_, packet.payload().data(), size_);
         }
+        return RouteResult::kAccepted;
     }
 
     uint32_t count() const noexcept { return count_; }

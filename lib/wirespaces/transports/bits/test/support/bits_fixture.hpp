@@ -22,7 +22,7 @@ constexpr WireNumber kTestWire{7U};
 constexpr HostId kTransmitterHost{1U};
 constexpr HostId kReceiverHost{2U};
 constexpr EndpointAddress kTestEndpoint{EndpointAddress::from(Namespace::kCommon, 42U)};
-constexpr EgressSet kTestEgress{1U};
+constexpr InterfaceSet kTestEgress{1U};
 constexpr uint16_t kTestPacketCapacity{64U};
 
 WS_PACKET_BUFFER_DEFINE(TestPacket, kTestPacketCapacity);
@@ -35,6 +35,8 @@ inline void selectLocalHost(HostId host) noexcept {
 /** @brief Forwards, drops, or holds packets synchronously before a peer Dispatcher. */
 class DispatchForwarder final : public PacketForwarder {
 public:
+    LinkAdmission admission{LinkAdmission::kAccepted};
+    uint32_t attempts{0U};
     void setTarget(Dispatcher& target, HostId target_host) noexcept {
         target_ = &target;
         target_host_ = target_host;
@@ -57,10 +59,14 @@ public:
         return true;
     }
 
-    void forward(const PacketBuffer& packet, EgressSet) noexcept override {
+    RouteResult forward(const PacketBuffer& packet, InterfaceSet) noexcept override {
+        ++attempts;
+        if (admission != LinkAdmission::kAccepted) {
+            return combineAdmission(RouteResult::kNoEgress, admission);
+        }
         Control control{};
         if (packet.payload().empty() || !decodeControl(packet.payload()[0], control)) {
-            return;
+            return RouteResult::kAccepted;
         }
 
         const size_t type_index{static_cast<size_t>(control.type)};
@@ -70,16 +76,17 @@ public:
         if (hold_next_segment_ && control.type == MessageType::kSegment) {
             hold_next_segment_ = false;
             held_ = capture(packet, held_packet_);
-            return;
+            return RouteResult::kAccepted;
         }
         if (drop_remaining_ > 0U && control.type == drop_type_) {
             --drop_remaining_;
-            return;
+            return RouteResult::kAccepted;
         }
         if (target_ != nullptr) {
             selectLocalHost(target_host_);
             last_result_ = target_->dispatch(packet);
         }
+        return RouteResult::kAccepted;
     }
 
     uint32_t messageCount(MessageType type) const noexcept {
@@ -115,10 +122,23 @@ private:
 /** @brief Records received object bytes, offsets, sideband datagrams, and terminal events. */
 class ReceiverRecorder final : public ReceiverCallbacks {
 public:
+    TransferAdmission beginTransfer(const TransferInfo& info) noexcept override {
+        ++admission_count;
+        last_info = info;
+        return admission;
+    }
+    void onTransferFailed(FailureReason reason) noexcept override { ++failure_count; failure = reason; }
+    TransferAdmission admission{TransferAdmission::kAccepted};
+    uint32_t admission_count{0U};
+    uint32_t failure_count{0U};
+    FailureReason failure{FailureReason::kSinkRejected};
+    TransferInfo last_info{};
+    bool accept_segments{true};
     bool onSegment(uint32_t object_offset, ByteSpan payload) noexcept override {
         if ((object_offset + payload.size()) > object_.size()) {
             return false;
         }
+        if (!accept_segments) return false;
         std::memcpy(object_.data() + object_offset, payload.data(), payload.size());
         received_size_ = std::max(received_size_,
                                   static_cast<uint32_t>(object_offset + payload.size()));
@@ -132,7 +152,7 @@ public:
     }
 
     void onTransferComplete() noexcept override { ++completion_count_; }
-    void onTransferAborted() noexcept override { ++abort_count_; }
+    void onTransferAborted(AbortReason) noexcept override { ++abort_count_; }
 
     const std::array<uint8_t, 128U>& object() const noexcept { return object_; }
     uint32_t receivedSize() const noexcept { return received_size_; }

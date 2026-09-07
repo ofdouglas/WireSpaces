@@ -22,9 +22,9 @@ namespace wirespaces::examples::arduino_uno {
  * @tparam kMaximumPayloadSize Largest payload accepted by this Link.
  */
 template <std::size_t kMaximumPayloadSize>
-class UartHdlcForwarder final : public PacketForwarder {
+class UartHdlcForwarder final : public PacketLink {
 public:
-    void forward(const PacketBuffer& packet, EgressSet egress_set) noexcept override;
+    LinkAdmission trySend(const PacketBuffer& packet) noexcept override;
 
 private:
     static constexpr std::size_t kMaximumCanonicalSize{sizeof(Header) + kMaximumPayloadSize};
@@ -52,18 +52,18 @@ private:
 // --- UartHdlcForwarder implementations ---
 
 template <std::size_t kMaximumPayloadSize>
-void UartHdlcForwarder<kMaximumPayloadSize>::forward(const PacketBuffer& packet, EgressSet egress_set) noexcept {
-    static_cast<void>(egress_set);
+LinkAdmission UartHdlcForwarder<kMaximumPayloadSize>::trySend(const PacketBuffer& packet) noexcept {
     if (packet.size() > kMaximumPayloadSize) {
-        return;
+        return LinkAdmission::kTooLarge;
     }
 
     std::uint8_t frame_storage[kMaximumFrameCapacity]{};
     const std::size_t frame_size{links::uart_hdlc::HdlcEncoder::encode(packet.headerAndPayload(), frame_storage)};
     if (frame_size == 0U) {
-        return;
+        return LinkAdmission::kTooLarge;
     }
     platform::avr::uart0WriteSpan(foundation::Span<const std::uint8_t>{frame_storage, frame_size});
+    return LinkAdmission::kAccepted;
 }
 
 // --- UartHdlcReceiver implementations ---

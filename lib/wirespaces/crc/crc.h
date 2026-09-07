@@ -49,6 +49,7 @@ constexpr typename CrcAlgorithm::value_type crcBitwise(
     constexpr size_t kDataShift{8U * (sizeof(T) - 1U)};
 
     T result = (flags.value & ComputeFlags::kInitialize) ? CrcAlgorithm::initial : initial;
+    
     for (const uint8_t byte : input) {
         result ^= static_cast<T>(byte) << kDataShift;
         for (uint8_t bit_index{0U}; bit_index < 8U; ++bit_index) {

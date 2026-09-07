@@ -1,5 +1,19 @@
 # Wiring generation
 
+Generated `Forwarder` constructors bind `PacketLink&` objects in egress-bit order.
+Each Link implements `trySend(packet) -> LinkAdmission` without an egress mask.
+`Accepted` means it has consumed/copied the bytes or acquired their lifetime;
+it does not mean the remote endpoint received them.
+Generated fan-out and `Router::forward()` return a byte-sized `RouteResult`:
+accepted, partial, full, too large, or rejected; Router can also report no route,
+invalid ingress, or no egress. A receiving leaf normally has no egress.
+Partial acceptance is not rolled back or retried. When no Link accepts,
+rejection takes precedence over size failure, then queue-full.
+There are no per-egress reports, diagnostics, or logging in the router.
+Only individual Links use `trySend()`. Local delivery is independent of outbound
+admission; `receive()` returns the routing and delivery outcomes separately.
+Driver-context use requires context-safe bounded Link and receiver implementations.
+
 Run from examples/arduino-uno:
 
     make generate-wiring

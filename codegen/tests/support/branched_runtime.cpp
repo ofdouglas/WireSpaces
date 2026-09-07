@@ -65,12 +65,12 @@ struct Bus {
 };
 
 /** @brief Application-owned Link binding used by the generated forwarding classes. */
-class Link final : public PacketForwarder {
+class Link final : public PacketLink {
 public:
     Link(Bus& bus, HostId source) : bus_{bus}, source_{source} {}
-    void forward(const PacketBuffer& packet, EgressSet mask) noexcept override {
-        assert(mask != 0U && (mask & (mask - 1U)) == 0U);
+    LinkAdmission trySend(const PacketBuffer& packet) noexcept override {
         bus_.transmit(source_, packet);
+        return LinkAdmission::kAccepted;
     }
 private:
     Bus& bus_;
@@ -120,7 +120,7 @@ struct Network {
                 assert(result.routing == RouteResult::kNoRoute);
                 assert(result.delivery == DispatchResult::kNoEndpoint);
             } else {
-                assert(result.routing == RouteResult::kForwarded || result.routing == RouteResult::kNoEgress);
+                assert(result.routing == RouteResult::kAccepted || result.routing == RouteResult::kNoEgress);
                 const bool member{event.destination->info.isMemberOf(Root::kTest)};
                 const bool addressed{event.packet.header().destination.isBroadcast() ||
                                      event.packet.header().destination == event.destination->info.id};
@@ -139,7 +139,7 @@ struct Network {
         packet.header().endpoint = kEndpoint;
         std::memcpy(packet.payload().data(), "abc", 3U);
         setLocalHostInfo(origin.info);
-        assert(origin.router.forward(packet) == RouteResult::kForwarded);
+        assert(origin.router.forward(packet) == RouteResult::kAccepted);
         drain();
         assert(uplink.transmissions == 1U && bus.transmissions == 1U && tail.transmissions == 1U);
         assert(bypass.transmissions == 0U);

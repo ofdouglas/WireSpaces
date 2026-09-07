@@ -70,7 +70,7 @@ def emit_header(projection: TargetProjection, *, namespace: str, local_host_name
         emit(name, f"constexpr wirespaces::WireNumber {name}{{{w.wire_id}U}};")
     for i in interfaces:
         name = f"k{i.declaration.name}Egress"
-        emit(name, f"constexpr wirespaces::EgressSet {name}{{0x{1 << i.egress_bit:02X}U}};")
+        emit(name, f"constexpr wirespaces::InterfaceSet {name}{{0x{1 << i.egress_bit:02X}U}};")
         name = f"k{i.declaration.name}IngressIndex"
         emit(name, f"constexpr std::uint8_t {name}{{{i.ingress_index}U}};")
         if i.baud_rate is not None:
@@ -104,17 +104,17 @@ def emit_header(projection: TargetProjection, *, namespace: str, local_host_name
               "    return {kRoutes};" if routes else "    return {};",
               "}", "", "/** @brief Fan out selected egress bits to application-owned Link forwarders. */",
               "class Forwarder final : public wirespaces::PacketForwarder {", "public:"]
-    args = ", ".join(f"wirespaces::PacketForwarder& link{i.egress_bit}" for i in interfaces)
+    args = ", ".join(f"wirespaces::PacketLink& link{i.egress_bit}" for i in interfaces)
     init = ", ".join(f"link{i.egress_bit}_{{link{i.egress_bit}}}" for i in interfaces)
     lines += [f"    explicit Forwarder({args}) noexcept" + (f" : {init} {{}}" if init else " = default;"),
-              "", "    void forward(const wirespaces::PacketBuffer& packet, wirespaces::EgressSet selected) noexcept override {",
-              "        (void)packet;", "        (void)selected;"]
+              "", "    wirespaces::RouteResult forward(const wirespaces::PacketBuffer& packet, wirespaces::InterfaceSet selected) noexcept override {",
+              "        (void)packet;", "        (void)selected;", "        wirespaces::RouteResult result{wirespaces::RouteResult::kNoEgress};"]
     for i in interfaces:
         mask = f"k{i.declaration.name}Egress"
         lines += [f"        if ((selected & {mask}) != 0U) {{",
-                  f"            link{i.egress_bit}_.forward(packet, {mask});", "        }"]
-    lines += ["    }", "", "private:"]
-    lines += [f"    wirespaces::PacketForwarder& link{i.egress_bit}_;  // {i.declaration.name} -> {i.declaration.link}"
+                  f"            result = wirespaces::combineAdmission(result, link{i.egress_bit}_.trySend(packet));", "        }"]
+    lines += ["        return result == wirespaces::RouteResult::kNoEgress ? wirespaces::RouteResult::kAccepted : result;", "    }", "", "private:"]
+    lines += [f"    wirespaces::PacketLink& link{i.egress_bit}_;  // {i.declaration.name} -> {i.declaration.link}"
               for i in interfaces]
     lines += ["};", "", f"}}  // namespace {namespace}", ""]
     return "\n".join(lines)

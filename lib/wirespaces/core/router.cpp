@@ -13,20 +13,19 @@ RouteResult Router::forward(const PacketBuffer& packet) const noexcept {
     if (ingress > 8U) {
         return RouteResult::kInvalidIngress;
     }
-    const EgressSet ingress_mask{ingress == 0U ? EgressSet{0U} : static_cast<EgressSet>(1U << (ingress - 1U))};
+    const InterfaceSet ingress_mask{ingress == 0U ? InterfaceSet{0U} : static_cast<InterfaceSet>(1U << (ingress - 1U))};
     for (const RouteTableEntry& entry : entries_) {
         if (entry.wire != packet.header().wire) {
             continue;
         }
-        if ((ingress_mask != 0U) && ((entry.egress_set & ingress_mask) == 0U)) {
+        if ((ingress_mask != 0U) && ((entry.wire_interfaces & ingress_mask) == 0U)) {
             return RouteResult::kInvalidIngress;
         }
-        const EgressSet egress{static_cast<EgressSet>(entry.egress_set & ~ingress_mask)};
+        const InterfaceSet egress{static_cast<InterfaceSet>(entry.wire_interfaces & ~ingress_mask)};
         if ((egress == kNoEgress) && (ingress != 0U)) {
             return RouteResult::kNoEgress;
         }
-        forwarder_.forward(packet, egress);
-        return RouteResult::kForwarded;
+        return forwarder_.forward(packet, egress);
     }
     return RouteResult::kNoRoute;
 }
@@ -43,7 +42,7 @@ IngressResult Router::receive(PacketBuffer& packet, uint8_t ingress_index,
         return {RouteResult::kInvalidIngress, DispatchResult::kNoEndpoint};
     }
     const RouteResult routing{forward(packet)};
-    if (((routing != RouteResult::kForwarded) && (routing != RouteResult::kNoEgress)) ||
+    if ((routing == RouteResult::kNoRoute || routing == RouteResult::kInvalidIngress) ||
         !host.isMemberOf(packet.header().wire)) {
         return {routing, DispatchResult::kNoEndpoint};
     }

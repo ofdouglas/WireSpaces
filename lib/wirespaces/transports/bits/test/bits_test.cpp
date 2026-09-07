@@ -33,10 +33,13 @@ public:
         return MutableByteSpan{storage_.data(), prepared_size_};
     }
 
-    bool sendPrepared() noexcept override {
+    SendResult sendPrepared() noexcept override {
         sent_.assign(storage_.begin(), storage_.begin() + prepared_size_);
-        return true;
+        ++calls;
+        return result;
     }
+    SendResult result{SendResult::kSent};
+    uint32_t calls{0U};
 
     ByteSpan sent() const noexcept {
         return ByteSpan{sent_.data(), sent_.size()};
@@ -87,6 +90,105 @@ TEST(BitsCodecTest, SetupUsesAlignedLittleEndianLayout) {
     encoded[3] = 0U;
     encoded[0] = encodeControl(MessageType::kAck);
     EXPECT_FALSE(decodeSetup(ByteSpan{encoded.data(), encoded.size()}, decoded));
+}
+
+// Admission runs once after validation; temporary ACK congestion does not reset an accepted sink.
+TEST(BitsReceiverEngineTest, AdmissionAndDuplicateSetupSurviveBackpressure) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{{4U, 1U, 16U}, callbacks, sender};
+    uint8_t setup[kSetupSize]{};
+    ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
+    callbacks.admission = TransferAdmission::kBusy;
+    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kProgress);
+    EXPECT_EQ(engine.state(), TransferState::kIdle);
+    callbacks.admission = TransferAdmission::kAccepted;
+    sender.result = SendResult::kFull;
+    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kBlocked);
+    EXPECT_EQ(engine.state(), TransferState::kActive);
+    EXPECT_EQ(callbacks.admission_count, 2U);
+    EXPECT_EQ(callbacks.last_info.total_size, 4U);
+    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kBlocked);
+    EXPECT_EQ(callbacks.admission_count, 2U);
+    sender.result = SendResult::kSent;
+    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kProgress);
+    const uint8_t malformed[]{0xFFU};
+    EXPECT_EQ(engine.process(ByteSpan{malformed}), ProcessResult::kError);
+    EXPECT_EQ(engine.state(), TransferState::kActive);
+    EXPECT_EQ(callbacks.failure_count, 0U);
+    ASSERT_TRUE(encodeSetup({10U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
+    sender.result = SendResult::kRejected;
+    engine.process(ByteSpan{setup});
+    EXPECT_EQ(callbacks.admission_count, 2U); // busy active session is untouched
+    EXPECT_EQ(engine.state(), TransferState::kActive); // failure to send Reject is unrelated
+    sender.result = SendResult::kSent;
+    EXPECT_EQ(engine.abort(), SendResult::kSent);
+    EXPECT_EQ(callbacks.abortCount(), 1U);
+    ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
+    engine.process(ByteSpan{setup});
+    EXPECT_EQ(callbacks.admission_count, 3U); // ID reuse after termination is a new transfer
+}
+
+// Sink errors notify once; completed storage stays completed even if the final ACK is blocked.
+TEST(BitsReceiverEngineTest, TerminalNotificationsDoNotDependOnAckAcceptance) {
+    for (const bool accept : {false, true}) {
+        ReceiverRecorder callbacks{};
+        CapturingReceiverPduSender sender{};
+        BitsReceiverEngine engine{{4U, 1U, 16U}, callbacks, sender};
+        uint8_t setup[kSetupSize]{};
+        ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
+        engine.process(ByteSpan{setup});
+        uint8_t segment[kSegmentHeaderSize + 4U]{};
+        ASSERT_TRUE(encodeSegmentHeader({9U, 0U}, MutableByteSpan{segment}));
+        callbacks.accept_segments = accept;
+        sender.result = SendResult::kFull;
+        engine.process(ByteSpan{segment});
+        engine.process(ByteSpan{segment});
+        EXPECT_EQ(callbacks.failure_count, accept ? 0U : 1U);
+        EXPECT_EQ(callbacks.completionCount(), accept ? 1U : 0U);
+        EXPECT_EQ(engine.state(), accept ? TransferState::kCompleted : TransferState::kError);
+        if (!accept) { EXPECT_EQ(callbacks.failure, FailureReason::kSinkRejected); }
+    }
+}
+
+// Invalid geometry never reaches admission, while a permanent send failure terminates an accepted transfer.
+TEST(BitsReceiverEngineTest, ValidationPrecedesAdmissionAndSendFailureIsReported) {
+    ReceiverRecorder callbacks{};
+    CapturingReceiverPduSender sender{};
+    BitsReceiverEngine engine{{4U, 1U, 16U}, callbacks, sender};
+    uint8_t setup[kSetupSize]{};
+    ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 8U, 4U}, MutableByteSpan{setup}));
+    engine.process(ByteSpan{setup});
+    EXPECT_EQ(callbacks.admission_count, 0U);
+    ASSERT_TRUE(encodeSetup({9U, 0U, 0U, 4U, 4U}, MutableByteSpan{setup}));
+    sender.result = SendResult::kNoRoute;
+    EXPECT_EQ(engine.process(ByteSpan{setup}), ProcessResult::kError);
+    EXPECT_EQ(callbacks.failure_count, 1U);
+    EXPECT_EQ(callbacks.failure, FailureReason::kSendFailed);
+    EXPECT_EQ(engine.state(), TransferState::kError);
+}
+
+// Backpressure is not a transmission or protocol retry; BITS retries admission on a later poll.
+TEST_F(BitsConnectionFixture, FullLinksDoNotConsumeTransferRetries) {
+    const uint8_t object[]{1U, 2U, 3U, 4U};
+    ASSERT_EQ(transmitter_.startTransfer(ByteSpan{object}, 4U, 9U, 0U), StartResult::kStarted);
+    transmitter_forwarder_.admission = LinkAdmission::kFull;
+    for (unsigned i = 0; i < 10; ++i) {
+        now_ms_ += 100U;
+        EXPECT_EQ(transmitter_.process(now_ms_), ProcessResult::kBlocked);
+        EXPECT_EQ(transmitter_.state(), TransferState::kStarting);
+    }
+    EXPECT_EQ(transmitter_forwarder_.attempts, 10U);
+    EXPECT_EQ(transmitter_.sendDatagram(ByteSpan{object}), SendResult::kFull);
+    transmitter_forwarder_.admission = LinkAdmission::kAccepted;
+    ASSERT_EQ(transmitter_.process(++now_ms_), ProcessResult::kProgress);
+    receiver_forwarder_.admission = LinkAdmission::kFull;
+    EXPECT_EQ(receiver_.process(), ProcessResult::kBlocked);
+    EXPECT_EQ(receiver_.state(), TransferState::kActive);
+    receiver_forwarder_.admission = LinkAdmission::kAccepted;
+    EXPECT_TRUE(pumpUntilTerminal());
+    EXPECT_EQ(receiver_callbacks_.admission_count, 1U);
+    EXPECT_EQ(transmitter_.state(), TransferState::kCompleted);
 }
 
 // The constrained engine exchanges user datagrams without endpoint, router, or queue objects.

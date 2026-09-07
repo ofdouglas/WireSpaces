@@ -66,7 +66,7 @@ private:
             wirespaces::Namespace::kCommon, WS_SERVICE_HEARTBEAT_ENDPOINT_ID);
         std::memcpy(packet.payload().data(), &now_ms, sizeof(now_ms));
 
-        if (router_->forward(packet) != wirespaces::RouteResult::kForwarded) {
+        if (router_->forward(packet) != wirespaces::RouteResult::kAccepted) {
             // TODO: handle error
         }
     }

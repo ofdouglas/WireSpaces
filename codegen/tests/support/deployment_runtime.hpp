@@ -87,7 +87,7 @@ struct Network {
             packet.header().endpoint = kEndpoint;
             std::memcpy(packet.payload().data(), "abc", 3U);
             setLocalHostInfo(origin.info);
-            assert(origin.router.forward(packet) == RouteResult::kForwarded);
+            assert(origin.router.forward(packet) == RouteResult::kAccepted);
             unsigned processed{0U};
             while (!events.empty()) {
                 assert(++processed <= connections.size());
@@ -122,12 +122,12 @@ struct Network {
 };
 
 /** @brief Adapter whose lifetime and binding order are supplied by generated forwarding classes. */
-class Link : public PacketForwarder {
+class Link : public PacketLink {
 public:
     Link(Network& network, uint8_t source, const char* link) : network_{network}, source_{source}, link_{link} {}
-    void forward(const PacketBuffer& packet, EgressSet mask) noexcept override {
-        assert(mask != 0U && (mask & (mask - 1U)) == 0U);
+    LinkAdmission trySend(const PacketBuffer& packet) noexcept override {
         network_.transmit(source_, link_, packet);
+        return LinkAdmission::kAccepted;
     }
 private:
     Network& network_;

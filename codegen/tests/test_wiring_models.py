@@ -99,6 +99,18 @@ class ModelTest(unittest.TestCase):
             target = compile_deployment(data)
             for host in target.hosts:
                 header = emit_header(target, namespace="compat", local_host_name=host)
+                # Preserve historical hashes across the interface-mask type rename.
+                header = header.replace("wirespaces::InterfaceSet", "wirespaces::EgressSet")
+                # Normalize only the intentional Link-admission API change for these
+                # historical hashes; compiled forwarder tests exercise the new contract.
+                header = header.replace("wirespaces::PacketLink&", "wirespaces::PacketForwarder&")
+                header = header.replace("wirespaces::RouteResult forward(", "void forward(")
+                header = header.replace("        wirespaces::RouteResult result{wirespaces::RouteResult::kNoEgress};\n", "")
+                header = header.replace("        return result == wirespaces::RouteResult::kNoEgress ? wirespaces::RouteResult::kAccepted : result;\n", "")
+                header = re.sub(r"result = wirespaces::combineAdmission\(result, (link\d+_)\.trySend\(packet\)\);",
+                                lambda m: f"{m[1]}.forward(packet, " + next(
+                                    f"k{i.declaration.name}Egress" for i in target.hosts[host].interfaces
+                                    if f"link{i.egress_bit}_" == m[1]) + ");", header)
                 # CAN timing/format output is new; retain the old snapshots as a
                 # regression check of every unchanged topology and C++ declaration.
                 header = re.sub(

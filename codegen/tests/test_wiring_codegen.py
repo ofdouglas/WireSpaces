@@ -109,12 +109,13 @@ class WiringTest(unittest.TestCase):
         source = r"""
 #include "generated.h"
 #include <cassert>
-struct Recorder : wirespaces::PacketForwarder {
+#include <initializer_list>
+struct Recorder : wirespaces::PacketLink {
     int calls{};
-    wirespaces::EgressSet mask{};
-    void forward(const wirespaces::PacketBuffer&, wirespaces::EgressSet selected) noexcept override {
+    wirespaces::LinkAdmission result{wirespaces::LinkAdmission::kAccepted};
+    wirespaces::LinkAdmission trySend(const wirespaces::PacketBuffer&) noexcept override {
         ++calls;
-        mask = selected;
+        return result;
     }
 };
 WS_PACKET_BUFFER_DEFINE(Packet, 4);
@@ -123,15 +124,44 @@ int main() {
     demo_wiring::Forwarder forwarder{uart, can};
     Packet packet;
     assert(demo_wiring::routes().size() == 1);
-    auto mask = demo_wiring::routes()[0].egress_set;
+    auto mask = demo_wiring::routes()[0].wire_interfaces;
     assert(mask == 9);
     forwarder.forward(packet, 0);
     forwarder.forward(packet, 128);
     assert(uart.calls == 0 && can.calls == 0);
     forwarder.forward(packet, 8);
-    assert(uart.calls == 0 && can.calls == 1 && can.mask == 8);
+    assert(uart.calls == 0 && can.calls == 1);
     forwarder.forward(packet, mask);
-    assert(uart.calls == 1 && can.calls == 2 && uart.mask == 1);
+    assert(uart.calls == 1 && can.calls == 2);
+    can.result = wirespaces::LinkAdmission::kFull;
+    auto report = forwarder.forward(packet, mask);
+    assert(report == (mask == 9 ? wirespaces::RouteResult::kPartial : wirespaces::RouteResult::kAccepted));
+    uart.result = wirespaces::LinkAdmission::kTooLarge;
+    can.result = wirespaces::LinkAdmission::kRejected;
+    report = forwarder.forward(packet, mask);
+    assert(report == (mask == 9 ? wirespaces::RouteResult::kRejected : wirespaces::RouteResult::kTooLarge));
+    assert(uart.calls == 3 && can.calls == (mask == 9 ? 4 : 1)); // no retries
+    // Every outcome pair and selection, including empty/sparse fan-out and mixed failures.
+    for (unsigned a = 0; a < 4; ++a) for (unsigned b = 0; b < 4; ++b) {
+        uart.result = static_cast<wirespaces::LinkAdmission>(a);
+        can.result = static_cast<wirespaces::LinkAdmission>(b);
+        for (unsigned selected : {0U, 1U, 8U, 9U}) {
+            const auto r = forwarder.forward(packet, selected);
+            using R = wirespaces::RouteResult;
+            const R single[] = {R::kAccepted, R::kFull, R::kTooLarge, R::kRejected};
+            R expected = R::kAccepted;
+            if (selected == 1) expected = single[a];
+            if (selected == 8) expected = single[b];
+            if (selected == 9) {
+                if (a == 0 && b == 0) expected = R::kAccepted;
+                else if (a == 0 || b == 0) expected = R::kPartial;
+                else if (a == 3 || b == 3) expected = R::kRejected;
+                else if (a == 2 || b == 2) expected = R::kTooLarge;
+                else expected = R::kFull;
+            }
+            assert(r == expected);
+        }
+    }
 }
 """
         with tempfile.TemporaryDirectory() as directory:

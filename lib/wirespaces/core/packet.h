@@ -181,6 +181,12 @@ public:
     ByteSpan headerAndPayload() const noexcept;
 
 protected:
+    // Concrete storage owners may copy their complete object; public base slicing
+    // and prefix-only assignment must use the capacity-checked copyFrom() instead.
+    PacketBuffer(const PacketBuffer&) = default;
+    PacketBuffer(PacketBuffer&&) = default;
+    PacketBuffer& operator=(const PacketBuffer&) = default;
+    PacketBuffer& operator=(PacketBuffer&&) = default;
     explicit constexpr PacketBuffer(uint16_t capacity) noexcept : capacity_{capacity} {}
 
 private:
